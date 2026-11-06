@@ -1,0 +1,35 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Windows packaging/build output
+windows/build/
+windows/dist/
+windows/dist-release/
+windows/*.spec
+windows/Waifu Gallery/
+
+# Linux packaging/build output
+linux/build/
+linux/dist/
+linux/dist-release/
+linux/*.spec
+
+# Android/Gradle output and machine-local settings
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/local.properties
+android/**/build/
+android/**/*.apk
+android/**/*.aab
+android/**/*.jks
+android/**/*.keystore
+
+# IDE and OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
