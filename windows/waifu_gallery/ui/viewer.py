@@ -124,14 +124,18 @@ class ZoomImage(QLabel):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._drag_position is not None and self.scroll_area is not None:
+        if (
+            self._drag_position is not None
+            and self.scroll_area is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
             current = event.globalPosition().toPoint()
             delta = current - self._drag_position
             self._drag_position = current
-            self.scroll_area.horizontalScrollBar().setValue(
-                self.scroll_area.horizontalScrollBar().value() - delta.x())
-            self.scroll_area.verticalScrollBar().setValue(
-                self.scroll_area.verticalScrollBar().value() - delta.y())
+            horizontal = self.scroll_area.horizontalScrollBar()
+            vertical = self.scroll_area.verticalScrollBar()
+            horizontal.setValue(horizontal.value() - delta.x())
+            vertical.setValue(vertical.value() - delta.y())
             event.accept()
             return
         super().mouseMoveEvent(event)

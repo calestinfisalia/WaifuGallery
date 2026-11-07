@@ -13,6 +13,7 @@ class ImagePost:
     source: str = ""
     checksum: str = ""
     title: str = ""
+    media_type: str = "image"
 
 
 @dataclass(frozen=True, slots=True)

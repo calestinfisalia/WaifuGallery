@@ -1,5 +1,7 @@
 from PySide6.QtCore import QSettings
 
+from .doh import DOH_ENDPOINTS
+
 
 class AppSettings:
     """Small settings facade; values are stored per-user through QSettings."""
@@ -19,5 +21,16 @@ class AppSettings:
         return str(self.get("gelbooru/user_id", "")).strip(), str(self.get("gelbooru/api_key", "")).strip()
 
     @property
+    def rule34_credentials(self) -> tuple[str, str]:
+        return str(self.get("rule34/user_id", "")).strip(), str(self.get("rule34/api_key", "")).strip()
+
+    @property
     def use_doh(self) -> bool:
         return bool(self.get("network/use_doh", False))
+
+    @property
+    def doh_endpoint(self) -> str:
+        provider = str(self.get("network/doh_provider", "Cloudflare"))
+        if provider == "Custom":
+            return str(self.get("network/doh_custom_endpoint", "")).strip()
+        return DOH_ENDPOINTS.get(provider, DOH_ENDPOINTS["Cloudflare"])

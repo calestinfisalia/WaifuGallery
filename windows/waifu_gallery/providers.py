@@ -2,8 +2,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import deque
 from pathlib import Path
 import random
+import hashlib
 import threading
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 import requests
@@ -18,7 +21,7 @@ class ProviderError(RuntimeError):
     pass
 
 
-PROVIDERS = ("Danbooru", "yande.re", "Gelbooru")
+PROVIDERS = ("Danbooru", "yande.re", "Gelbooru", "Rule34.xxx")
 MALE_TAGS = frozenset({"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "male_focus", "male_only"})
 SFW_BLOCK_TAGS = frozenset({
     "anal", "blowjob", "cum", "cum_in_pussy", "cum_on_body", "cum_on_face",
@@ -27,6 +30,14 @@ SFW_BLOCK_TAGS = frozenset({
     "nude", "oral", "penis", "pussy", "sex", "sex_toy", "uncensored",
     "vagina", "vaginal", "vaginal_penetration",
 })
+GORE_BLOCK_TAGS = frozenset({
+    "amputation", "blood", "blood_from_mouth", "blood_on_clothes", "blood_on_face",
+    "blood_splatter", "bleeding", "body_horror", "decapitation", "dismembered",
+    "dismemberment", "disembowelment", "evisceration", "exposed_organs", "gore",
+    "guro", "intestines", "mutilation", "open_wound", "organs", "severed_arm",
+    "severed_foot", "severed_hand", "severed_head", "severed_leg", "wound",
+})
+VIDEO_EXTENSIONS = frozenset({".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi"})
 _RANDOM_HISTORY: dict[tuple[str, str, str], deque[str]] = {}
 _RANDOM_HISTORY_LOCK = threading.Lock()
 
@@ -39,12 +50,28 @@ class BooruCatalog:
         credentials: tuple[str, str] = ("", ""),
         exclude_male: bool = True,
         use_doh: bool = False,
+        rule34_credentials: tuple[str, str] = ("", ""),
+        filter_gore: bool = True,
+        custom_block_tags: tuple[str, ...] = (),
+        media_filter: str = "image",
+        doh_endpoint: str | None = None,
     ) -> None:
         self.user_id, self.api_key = credentials
+        self.rule34_user_id, self.rule34_api_key = rule34_credentials
         self.exclude_male = exclude_male
         self.use_doh = use_doh
+        self.filter_gore = filter_gore
+        block_tag_values = (custom_block_tags,) if isinstance(custom_block_tags, str) else custom_block_tags
+        self.custom_block_tags = frozenset(
+            tag.strip().casefold().replace(" ", "_")
+            for value in block_tag_values
+            for tag in str(value).replace(",", " ").split()
+            if tag.strip()
+        )
+        self.media_filter = media_filter if media_filter in {"image", "video", "all"} else "image"
         self._sessions = threading.local()
-        set_doh_enabled(use_doh)
+        self.doh_endpoint = doh_endpoint
+        set_doh_enabled(self.use_doh, self.doh_endpoint)
 
     def search(self, query: str, rating: str, provider: str, page: int, page_size: int = 50) -> SearchPage:
         if provider not in (*PROVIDERS, "All"):
@@ -52,9 +79,13 @@ class BooruCatalog:
         available = ["yande.re"]
         if self.user_id and self.api_key:
             available.append("Gelbooru")
+        if self.rule34_user_id and self.rule34_api_key:
+            available.append("Rule34.xxx")
         available.append("Danbooru")
         if provider == "Gelbooru" and "Gelbooru" not in available:
             raise ProviderError("Gelbooru needs your user ID and API key. Add them in Settings.")
+        if provider == "Rule34.xxx" and "Rule34.xxx" not in available:
+            raise ProviderError("Rule34.xxx needs your user ID and API key. Add them in Settings.")
         if provider == "All":
             return self._search_all(query, rating, available, page, page_size)
 
@@ -103,17 +134,21 @@ class BooruCatalog:
     def random_image(self, rating: str, provider: str, query: str = "", report_progress=None) -> tuple[ImagePost, bytes]:
         if provider == "Gelbooru" and not (self.user_id and self.api_key):
             raise ProviderError("Gelbooru needs your user ID and API key. Add them in Settings.")
+        if provider == "Rule34.xxx" and not (self.rule34_user_id and self.rule34_api_key):
+            raise ProviderError("Rule34.xxx needs your user ID and API key. Add them in Settings.")
 
         available = ["yande.re"]
         if self.user_id and self.api_key:
             available.append("Gelbooru")
+        if self.rule34_user_id and self.rule34_api_key:
+            available.append("Rule34.xxx")
         available.append("Danbooru")
         sources = available if provider == "All" else [provider]
         failures: list[str] = []
 
         for source in sources:
             try:
-                sample_page = random.randint(1, 120) if source in {"yande.re", "Gelbooru"} else 1
+                sample_page = random.randint(1, 120) if source in {"yande.re", "Gelbooru", "Rule34.xxx"} else 1
                 posts, _ = self._search_provider(source, query, rating, sample_page, 100, random_order=True)
                 # Sparse tag searches may not have posts on a sampled page.
                 if not posts and sample_page != 1:
@@ -130,6 +165,10 @@ class BooruCatalog:
                         candidates = list(posts)
                     post = random.choice(candidates)
                 try:
+                    if post.media_type == "video":
+                        with _RANDOM_HISTORY_LOCK:
+                            _RANDOM_HISTORY[history_key].append(post.post_id)
+                        return post, b""
                     content = self.fetch_image(post.image_url, report_progress)
                     with _RANDOM_HISTORY_LOCK:
                         _RANDOM_HISTORY[history_key].append(post.post_id)
@@ -191,6 +230,49 @@ class BooruCatalog:
         report_progress(100)
         return destination
 
+    def cache_video(self, post: ImagePost, report_progress=None) -> str:
+        """Download a video to a local cache so playback uses the app's DoH route."""
+        if post.media_type != "video":
+            raise ProviderError("The selected post is not a video.")
+        suffix = Path(urlparse(post.image_url).path).suffix or ".mp4"
+        cache_dir = Path(tempfile.gettempdir()) / "WaifuGallery" / "video-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        name = hashlib.sha256(post.image_url.encode("utf-8")).hexdigest() + suffix
+        destination = cache_dir / name
+        if destination.is_file() and destination.stat().st_size:
+            if report_progress:
+                report_progress(100)
+            return str(destination)
+
+        temporary = destination.with_suffix(destination.suffix + ".part")
+        try:
+            with self._session().get(
+                post.image_url, headers=self._image_headers(post.image_url),
+                timeout=(8, 90), stream=True,
+            ) as response:
+                if not response.ok:
+                    raise ProviderError(f"Video server returned HTTP {response.status_code}.")
+                content_type = response.headers.get("Content-Type", "").casefold()
+                if content_type and not (content_type.startswith("video/") or "octet-stream" in content_type):
+                    raise ProviderError("The provider returned a response that is not a video.")
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                received = 0
+                with temporary.open("wb") as output:
+                    for block in response.iter_content(chunk_size=256 * 1024):
+                        if not block:
+                            continue
+                        output.write(block)
+                        received += len(block)
+                        if report_progress:
+                            report_progress(min(99, int(received * 100 / total)) if total else -1)
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        if report_progress:
+            report_progress(100)
+        return str(destination)
+
     def _search_provider(self, provider: str, query: str, rating: str, page: int, limit: int, random_order: bool = False):
         # Keep Only NSFW strict: questionable (Q) posts can appear fully
         # safe-looking, so this mode requests Explicit (E) only.
@@ -212,9 +294,15 @@ class BooruCatalog:
             for rating_tag in rating_tags:
                 request_tags = list(tags)
                 if rating_tag:
-                    provider_rating = {
-                        "Gelbooru": {"s": "general", "q": "questionable", "e": "explicit"}.get(rating_tag, rating_tag)
-                    }.get(provider, rating_tag)
+                    rating_names = {
+                        "Gelbooru": {"s": "general", "q": "questionable", "e": "explicit"},
+                        # Rule34 documents the full rating tags (rating:safe,
+                        # rating:questionable, rating:explicit); shorthand such
+                        # as rating:e can be treated as an ordinary tag and yield
+                        # an empty result set.
+                        "Rule34.xxx": {"s": "safe", "q": "questionable", "e": "explicit"},
+                    }
+                    provider_rating = rating_names.get(provider, {}).get(rating_tag, rating_tag)
                     request_tags.append(f"rating:{provider_rating}")
 
                 params = {"tags": " ".join(request_tags), "limit": min(limit + 1, 100), "page": page}
@@ -227,11 +315,16 @@ class BooruCatalog:
                 elif provider == "yande.re":
                     endpoint = "https://yande.re/post.json"
                     params["api_version"] = 2
-                else:
+                elif provider == "Gelbooru":
                     endpoint = "https://gelbooru.com/index.php"
                     params.pop("page", None)
                     params.update({"page": "dapi", "s": "post", "q": "index", "pid": max(0, page - 1), "json": 1})
                     params.update({"user_id": self.user_id, "api_key": self.api_key})
+                else:
+                    endpoint = "https://api.rule34.xxx/index.php"
+                    params.pop("page", None)
+                    params.update({"page": "dapi", "s": "post", "q": "index", "pid": max(0, page - 1), "json": 1})
+                    params.update({"user_id": self.rule34_user_id, "api_key": self.rule34_api_key})
 
                 try:
                     payload = self._request_provider_json(provider, endpoint, params, headers)
@@ -246,7 +339,7 @@ class BooruCatalog:
                     break
                 except requests.ConnectionError as error:
                     if self.use_doh:
-                        failures.append("Could not connect using Cloudflare DoH. Check Cloudflare access or turn DoH off in Settings.")
+                        failures.append("Could not connect using the selected DoH resolver. Check its endpoint or turn DoH off in Settings.")
                     else:
                         failures.append("Could not connect to the provider. Check DNS, firewall, or network access.")
                     break
@@ -263,7 +356,13 @@ class BooruCatalog:
                     post = self._normalize(raw, provider)
                     if not post or not self._rating_matches(post.rating, rating):
                         continue
+                    if self.media_filter != "all" and post.media_type != self.media_filter:
+                        continue
                     if rating == "sfw" and post.tags.intersection(SFW_BLOCK_TAGS):
+                        continue
+                    if self.custom_block_tags.intersection(post.tags):
+                        continue
+                    if self.filter_gore and post.tags.intersection(GORE_BLOCK_TAGS):
                         continue
                     # Some sources, especially yande.re, do not tag posts with
                     # 1girl/female_focus. Exclude explicit male tags, but don't
@@ -279,32 +378,69 @@ class BooruCatalog:
         return [], False
 
     def _request_provider_json(self, provider: str, endpoint: str, params: dict, headers: dict):
-        is_gelbooru = provider == "Gelbooru"
-        timeout = (5, 22) if is_gelbooru else (4, 12)
-        attempts = 2 if is_gelbooru else 1
+        uses_api_credentials = provider in {"Gelbooru", "Rule34.xxx"}
+        timeout = (5, 22) if uses_api_credentials else (4, 12)
+        attempts = 2 if uses_api_credentials else 1
         for attempt in range(attempts):
             try:
                 response = self._session().get(
                     endpoint, params=params, headers=headers, timeout=timeout
                 )
                 if not response.ok:
-                    message = {
-                        403: "HTTP 403: access was denied by the provider or its network protection.",
-                        429: "HTTP 429: the provider is rate limiting requests. Wait a moment and retry.",
-                        500: "HTTP 500: the provider is having a server error.",
-                        502: "HTTP 502: the provider gateway is temporarily unavailable.",
-                        503: "HTTP 503: the provider is temporarily unavailable or under maintenance.",
-                        504: "HTTP 504: the provider gateway timed out.",
-                    }.get(response.status_code, f"HTTP {response.status_code}: the provider rejected the request.")
+                    if uses_api_credentials and response.status_code in {401, 403}:
+                        message = f"{provider} rejected API access. Check its user ID and API key in Settings."
+                    else:
+                        messages = {
+                            403: "HTTP 403: access was denied by the provider or its network protection.",
+                            429: "HTTP 429: the provider is rate limiting requests. Wait a moment and retry.",
+                            500: "HTTP 500: the provider is having a server error.",
+                            502: "HTTP 502: the provider gateway is temporarily unavailable.",
+                            503: "HTTP 503: the provider is temporarily unavailable or under maintenance.",
+                            504: "HTTP 504: the provider gateway timed out.",
+                        }
+                        message = messages.get(response.status_code, f"HTTP {response.status_code}: the provider rejected the request.")
                     raise ProviderError(message)
-                return response.json()
+                try:
+                    payload = response.json()
+                except ValueError as error:
+                    body_text = response.text.strip()
+                    body = body_text.casefold()
+                    if provider == "Rule34.xxx":
+                        if any(message in body for message in ("missing authentication", "invalid api key", "invalid user_id")):
+                            raise ProviderError("Rule34.xxx rejected API authentication. Check your user ID and API key in Settings.") from error
+                        # Rule34's DAPI can return the legacy XML document even
+                        # when json=1 is requested. Normalize its <post ... />
+                        # elements to the same list shape as the JSON endpoint.
+                        try:
+                            root = ET.fromstring(body_text)
+                            if root.tag.casefold() == "posts":
+                                xml_status = " ".join(root.attrib.values()).casefold()
+                                if root.attrib.get("success", "").casefold() in {"false", "0"} or "search down" in xml_status:
+                                    raise ProviderError("Rule34.xxx search is temporarily unavailable. Retry in a little while.")
+                                payload = [dict(post.attrib) for post in root.findall("post")]
+                            else:
+                                raise ValueError("Unexpected XML root")
+                        except ET.ParseError:
+                            raise ProviderError(
+                                "Rule34.xxx returned neither JSON nor DAPI XML. Check the API credentials, "
+                                "or retry later if the provider is having an issue."
+                            ) from error
+                    else:
+                        raise
+                if provider == "Rule34.xxx" and isinstance(payload, dict):
+                    detail = " ".join(str(payload.get(key, "")) for key in ("success", "message", "error", "reason")).casefold()
+                    if "missing authentication" in detail or "invalid api key" in detail:
+                        raise ProviderError("Rule34.xxx rejected API authentication. Check your user ID and API key in Settings.")
+                    if str(payload.get("success", "")).casefold() in {"false", "0"} or "search down" in detail:
+                        raise ProviderError("Rule34.xxx search is temporarily unavailable. Retry in a little while.")
+                return payload
             except requests.Timeout as error:
                 if attempt + 1 < attempts:
                     time.sleep(0.8)
                     continue
-                if is_gelbooru:
+                if uses_api_credentials:
                     raise ProviderError(
-                        "Gelbooru did not respond after two attempts. Its API may be overloaded; retry later."
+                        f"{provider} did not respond after two attempts. Its API may be overloaded; retry later."
                     ) from error
                 raise
 
@@ -326,7 +462,7 @@ class BooruCatalog:
             prefix = "Could not establish a network connection"
         else:
             prefix = f"Provider request failed ({type(error).__name__})"
-        # Avoid showing a full request URL, since Gelbooru API URLs can contain
+        # Avoid showing request URLs because authenticated provider queries contain
         # account credentials. Keep the underlying exception class for diagnosis.
         reason_type = type(cause).__name__ if cause is not None else type(error).__name__
         return f"{prefix} ({reason_type}). Check the provider/network and retry."
@@ -394,9 +530,13 @@ class BooruCatalog:
         image_url = cls._first(raw, "jpeg_url", "large_file_url", "sample_url", "file_url")
         if not image_url and provider == "Gelbooru" and raw.get("directory") and raw.get("image"):
             image_url = f"https://img3.gelbooru.com/images/{raw['directory']}/{raw['image']}"
+        if not image_url and provider == "Rule34.xxx" and raw.get("directory") and raw.get("image"):
+            image_url = f"https://img.rule34.xxx/images/{raw['directory']}/{raw['image']}"
         image_url = cls._absolute(image_url)
         if not image_url.startswith(("https://", "http://")):
             return None
+        suffix = Path(urlparse(image_url).path).suffix.casefold()
+        media_type = "video" if suffix in VIDEO_EXTENSIONS else "image"
         previews = tuple(dict.fromkeys(filter(None, (
             cls._absolute(cls._first(raw, "preview_file_url", "preview_url")),
             cls._absolute(cls._first(raw, "sample_url", "jpeg_url")),
@@ -419,7 +559,7 @@ class BooruCatalog:
         post_id = f"{provider.casefold()}-{remote_id}"
         return ImagePost(post_id, provider, image_url, previews,
                          rating, tags, artists, str(raw.get("source") or ""), str(raw.get("md5") or ""),
-                         title)
+                         title, media_type)
 
     @staticmethod
     def _first(data: dict, *fields: str) -> str:
@@ -453,4 +593,6 @@ class BooruCatalog:
         headers = {"Accept": "image/avif,image/webp,image/*,*/*;q=0.8"}
         if host == "gelbooru.com" or host.endswith(".gelbooru.com"):
             headers["Referer"] = "https://gelbooru.com/"
+        elif host == "rule34.xxx" or host.endswith(".rule34.xxx"):
+            headers["Referer"] = "https://rule34.xxx/"
         return headers
