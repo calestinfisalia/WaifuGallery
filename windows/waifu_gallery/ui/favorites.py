@@ -4,6 +4,7 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSizePolicy,
+    QSizeGrip,
     QVBoxLayout,
     QWidget,
 )
@@ -22,21 +24,85 @@ def favorite_key(post: ImagePost) -> str:
     return f"{post.provider}:{post.post_id}"
 
 
+class FavoritesTitleBar(QWidget):
+    def __init__(self, dialog: QDialog) -> None:
+        super().__init__(dialog)
+        self._drag_offset = None
+        self.setObjectName("favoritesTitleBar")
+        self.setFixedHeight(38)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 4, 0)
+        layout.setSpacing(8)
+        title = QLabel("Favorites")
+        title.setObjectName("favoritesWindowTitle")
+        layout.addWidget(title)
+        layout.addStretch(1)
+        close = QPushButton()
+        icon_factory = getattr(dialog.parent(), "_icon", None)
+        icon = icon_factory("close") if callable(icon_factory) else QIcon(
+            str(Path(__file__).resolve().parent.parent / "assets" / "close.svg")
+        )
+        close.setIcon(icon)
+        close.setIconSize(QSize(16, 16))
+        close.setObjectName("favoritesCloseButton")
+        close.setFixedSize(30, 30)
+        close.setToolTip("Close favorites")
+        close.setAccessibleName("Close favorites")
+        close.clicked.connect(dialog.reject)
+        layout.addWidget(close)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            handle = self.window().windowHandle()
+            if handle and handle.startSystemMove():
+                event.accept()
+                return
+            self._drag_offset = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.window().move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+
 class FavoritesDialog(QDialog):
     def __init__(self, posts: list[ImagePost], open_post, remove_post, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("favoritesDialog")
         self.setWindowTitle("Favorites")
+        self.setWindowIcon(parent.windowIcon() if parent else QIcon())
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(820, 620)
         self.posts = list(posts)
         self._open_post = open_post
         self._remove_post = remove_post
         self.thumbnail_buttons: dict[str, QPushButton] = {}
         self.remove_buttons: dict[str, QPushButton] = {}
+        self.play_badges: dict[str, QLabel] = {}
         self.tiles: list[tuple[str, QWidget]] = []
         self.thumbnail_cache: dict[str, QPixmap] = {}
         self.thumbnail_errors: set[str] = set()
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(55)
+        self._layout_timer.timeout.connect(self._layout_tiles)
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QWidget(self)
+        surface.setObjectName("favoritesSurface")
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(4)
+        layout.addWidget(FavoritesTitleBar(self))
         header = QHBoxLayout()
         self.count_label = QLabel()
         header.addWidget(self.count_label)
@@ -49,6 +115,7 @@ class FavoritesDialog(QDialog):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.content = QWidget()
         self.grid = QGridLayout(self.content)
         self.grid.setContentsMargins(4, 4, 4, 4)
@@ -56,11 +123,16 @@ class FavoritesDialog(QDialog):
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.scroll.setWidget(self.content)
         layout.addWidget(self.scroll, 1)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(QSizeGrip(surface))
+        layout.addLayout(footer)
+        outer.addWidget(surface)
         self._rebuild()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._layout_tiles)
+        self._layout_timer.start()
 
     def _rebuild(self) -> None:
         while self.grid.count():
@@ -70,8 +142,13 @@ class FavoritesDialog(QDialog):
                 widget.deleteLater()
         self.thumbnail_buttons.clear()
         self.remove_buttons.clear()
+        self.play_badges.clear()
         self.tiles.clear()
-        self.count_label.setText(f"Favorites · {len(self.posts)} images")
+        videos = sum(post.media_type == "video" for post in self.posts)
+        images = len(self.posts) - videos
+        self.count_label.setText(
+            f"Favorites · {len(self.posts)} media · {images} images · {videos} videos"
+        )
         self.empty_label.setVisible(not self.posts)
         self.scroll.setVisible(bool(self.posts))
 
@@ -84,11 +161,28 @@ class FavoritesDialog(QDialog):
             preview.clicked.connect(lambda _checked=False, item=post: self._open_post(item))
             key = favorite_key(post)
             self.thumbnail_buttons[key] = preview
+            if post.media_type == "video":
+                play_badge = QLabel(preview_area)
+                icon_factory = getattr(self.parent(), "_icon", None)
+                play_icon = (
+                    icon_factory("play")
+                    if callable(icon_factory)
+                    else QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "play.svg"))
+                )
+                play_badge.setPixmap(play_icon.pixmap(QSize(22, 22)))
+                play_badge.setFixedSize(46, 46)
+                play_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                play_badge.setStyleSheet(
+                    "background: rgba(16, 17, 24, 190); border-radius: 23px; padding: 12px;"
+                )
+                play_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                self.play_badges[key] = play_badge
             remove = QPushButton(preview_area)
             remove.setObjectName("favoriteRemoveButton")
             remove.setIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "heart-filled.svg")))
             remove.setIconSize(QSize(18, 18))
             remove.resize(32, 32)
+            remove.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             remove.setToolTip("Remove from favorites")
             remove.clicked.connect(lambda _checked=False, post_key=key: self._confirm_remove(post_key))
             remove.raise_()
@@ -117,6 +211,10 @@ class FavoritesDialog(QDialog):
             preview = self.thumbnail_buttons[key]
             preview.setGeometry(0, 0, tile_width, tile_height)
             preview.setIconSize(QSize(tile_width - 10, tile_height - 10))
+            play_badge = self.play_badges.get(key)
+            if play_badge:
+                play_badge.move((tile_width - play_badge.width()) // 2, (tile_height - play_badge.height()) // 2)
+                play_badge.raise_()
             self.remove_buttons[key].setGeometry(tile_width - 40, 8, 32, 32)
             self.remove_buttons[key].raise_()
             self.grid.addWidget(tile, index // columns, index % columns)

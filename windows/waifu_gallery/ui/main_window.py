@@ -4,7 +4,18 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt, QThreadPool, QSize, QTimer, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPropertyAnimation,
+    Qt,
+    QThreadPool,
+    QSize,
+    QTimer,
+    Slot,
+)
 from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtMultimedia import QMediaPlayer
@@ -29,6 +40,7 @@ from PySide6.QtWidgets import (
     QSizeGrip,
     QGraphicsDropShadowEffect,
     QGraphicsBlurEffect,
+    QGraphicsOpacityEffect,
     QApplication,
 )
 
@@ -210,6 +222,7 @@ class MainWindow(QMainWindow):
         self._full_image_loaded = False
         self.favorites_dialog: FavoritesDialog | None = None
         self.favorites_dialog_token = ""
+        self.preferences_dialog: PreferencesDialog | None = None
         self._opening_favorite = False
         self._fullscreen_active = False
         self._was_maximized_before_fullscreen = False
@@ -234,6 +247,18 @@ class MainWindow(QMainWindow):
         self._ambient_restore_timer.setSingleShot(True)
         self._ambient_restore_timer.setInterval(120)
         self._ambient_restore_timer.timeout.connect(self._refresh_ambient_layers)
+        # Avoid rebuilding image scaling, blurred backgrounds, and the search
+        # grid for every intermediate WM_SIZE event while the user drags a
+        # window edge. Those expensive layout updates run once after resizing.
+        self._resize_settle_timer = QTimer(self)
+        self._resize_settle_timer.setSingleShot(True)
+        self._resize_settle_timer.setInterval(55)
+        self._resize_settle_timer.timeout.connect(self._finish_resize_settle)
+        self._resize_cursor_active = False
+        self._gallery_notice_timer = QTimer(self)
+        self._gallery_notice_timer.setSingleShot(True)
+        self._gallery_notice_timer.setInterval(5000)
+        self._gallery_notice_timer.timeout.connect(self._fade_out_gallery_notice)
         self.setWindowTitle("Waifu Gallery")
         self.setWindowIcon(self._app_icon())
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -241,6 +266,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(860, 600)
         self.resize(1180, 820)
         self._build_ui()
+        self.setMouseTracking(True)
+        for widget in self.findChildren(QWidget):
+            widget.setMouseTracking(True)
         app = QApplication.instance()
         if app:
             # Catch mouse presses on child widgets too, so every window edge
@@ -248,6 +276,20 @@ class MainWindow(QMainWindow):
             app.installEventFilter(self)
         self._apply_theme(self.current_theme)
         QTimer.singleShot(0, self.show_random)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            QTimer.singleShot(0, self._raise_main_over_open_dialogs)
+
+    def _raise_main_over_open_dialogs(self) -> None:
+        if not self.isActiveWindow():
+            return
+        dialog_names = {"favoritesDialog", "mediaInfoDialog", "settingsDialog"}
+        for dialog in self.findChildren(QDialog):
+            if dialog.isVisible() and dialog.objectName() in dialog_names:
+                dialog.lower()
+        self.raise_()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -400,10 +442,26 @@ class MainWindow(QMainWindow):
         self.gallery_page = QWidget()
         gallery_layout = QVBoxLayout(self.gallery_page)
         gallery_layout.setContentsMargins(0, 0, 0, 0)
-        self.gallery_status = QLabel("")
-        self.gallery_status.setFixedHeight(26)
-        self.gallery_status.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        gallery_layout.addWidget(self.gallery_status)
+        # Provider notices are short-lived overlays, so they do not reserve a
+        # permanent row or push the search results down.
+        self.gallery_status = QLabel(self.gallery_page)
+        self.gallery_status.setObjectName("galleryNotice")
+        self.gallery_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.gallery_status.setWordWrap(True)
+        self.gallery_status.setStyleSheet(
+            "QLabel#galleryNotice { background: rgba(35, 36, 46, 245); "
+            "color: #d8c9ff; border: 1px solid #7656c9; border-radius: 24px; "
+            "padding: 8px 14px; }"
+        )
+        self._gallery_notice_opacity = QGraphicsOpacityEffect(self.gallery_status)
+        self.gallery_status.setGraphicsEffect(self._gallery_notice_opacity)
+        self._gallery_notice_animation = QPropertyAnimation(
+            self._gallery_notice_opacity, b"opacity", self
+        )
+        self._gallery_notice_animation.setDuration(240)
+        self._gallery_notice_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._gallery_notice_animation.finished.connect(self._finish_gallery_notice_fade)
+        self.gallery_status.hide()
         self.gallery_body = QStackedWidget()
         self.gallery_scroll = QScrollArea()
         self.gallery_scroll.setWidgetResizable(True)
@@ -803,7 +861,10 @@ class MainWindow(QMainWindow):
             else:
                 candidates = post.preview_urls or (post.image_url,)
                 self._submit(f"favorite-thumbnail:{token}/{key}", self._fetch_decoded_candidates, candidates)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _clear_favorites_dialog(self, token: str) -> None:
         if self.favorites_dialog_token == token:
@@ -906,18 +967,47 @@ class MainWindow(QMainWindow):
             }
         else:
             palette = {
-                "BG": "#000000", "SIDEBAR": "#101116", "PANEL": "#000000",
+                "BG": "#171923", "SIDEBAR": "#1B1D2A", "PANEL": "#222638",
                 "TEXT": "#A9B1D6", "STRONG": "#C0CAF5", "MUTED": "#7982A9",
                 "BORDER": "#343A55", "HOVER": "#2D334B", "ACCENT": "#BB9AF7",
                 "BLUE": "#7AA2F7", "ACTIVE": "#292E46", "PRESSED": "#202438",
                 "DISABLED": "#202230", "MENU_SELECTED": "#343B58",
-                "SEARCH_BG": "#050508", "SEARCH_BORDER": "#D7D9E2",
+                "SEARCH_BG": "#11131B", "SEARCH_BORDER": "#545B78",
             }
 
         stylesheet = """
             * { font-family: "Inter", "Segoe UI", sans-serif; font-size: 10pt; }
             QMainWindow { background: transparent; border: 1px solid __BORDER__; border-radius: 12px; }
             QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
+            QDialog#settingsDialog { background: transparent; border: 0; }
+            QWidget#settingsSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
+            QDialog#favoritesDialog { background: transparent; border: 0; }
+            QWidget#favoritesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QWidget#favoritesTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+            QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QPushButton#favoritesCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
+            QPushButton#favoritesCloseButton:hover { background: #F7768E; }
+            QDialog#mediaInfoDialog { background: transparent; border: 0; }
+            QWidget#mediaInfoSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
+            QWidget#mediaInfoTitleBar { background: transparent; }
+            QLabel#mediaInfoWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QPushButton#mediaInfoCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
+            QPushButton#mediaInfoCloseButton:hover { background: #F7768E; }
+            QWidget#settingsTitleBar { background: transparent; }
+            QLabel#settingsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QPushButton#settingsCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
+            QPushButton#settingsCloseButton:hover { background: #F7768E; }
+            QWidget#settingsSidebar { background: __SIDEBAR__; border-radius: 16px; }
+            QStackedWidget#settingsPages { background: transparent; border: 0; }
+            QWidget#settingsPage { background: __PANEL__; color: __TEXT__; border-radius: 18px; }
+            QWidget#settingsPage QLabel { background: transparent; }
+            QWidget#settingsPage QFrame { background: transparent; border-color: __BORDER__; }
+            QWidget#customTermRow { background: transparent; border: 0; }
+            QPushButton#removeCustomTermButton { background: transparent; border: 0; border-radius: 14px; padding: 0; }
+            QPushButton#removeCustomTermButton:hover { background: #4A3042; }
+            QPushButton#settingsNavButton { text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 9px 11px; }
+            QPushButton#settingsNavButton:hover { background: __HOVER__; }
+            QPushButton#settingsNavButton:checked { background: __MENU_SELECTED__; color: __STRONG__; }
             QWidget#appRoot { border-radius: 12px; }
             QWidget#titleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
             QLabel#windowTitle { color: __STRONG__; font-size: 10pt; font-weight: 650; }
@@ -929,10 +1019,11 @@ class MainWindow(QMainWindow):
             QLineEdit#mainSearchInput:focus { border: 1px solid __ACCENT__; }
             QLineEdit, QComboBox, QListWidget {
                 background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__;
-                border-radius: 10px; padding: 9px 12px; selection-background-color: __BLUE__;
+                border-radius: 16px; padding: 9px 12px; selection-background-color: __BLUE__;
             }
             QLineEdit:hover, QComboBox:hover, QListWidget:hover { border-color: __MUTED__; }
             QLineEdit:focus, QComboBox:focus { border: 1px solid __ACCENT__; }
+            QLineEdit#customTermInput:focus, QLineEdit#customFilterInput:focus { border: 1px solid __BORDER__; }
             QCheckBox { spacing: 8px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid __MUTED__; border-radius: 4px; background: __PANEL__; }
             QCheckBox::indicator:hover { border-color: __ACCENT__; }
@@ -940,7 +1031,7 @@ class MainWindow(QMainWindow):
             QComboBox { padding-right: 28px; }
             QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; width: 26px; border: 0; }
             QComboBox QAbstractItemView { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; selection-background-color: __ACTIVE__; outline: 0; padding: 4px; }
-            QPushButton { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 9px; padding: 8px 12px; }
+            QPushButton { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
             QPushButton:hover { background: __HOVER__; border-color: __MUTED__; color: __STRONG__; }
             QPushButton:pressed { background: __PRESSED__; }
             QPushButton:disabled { background: __DISABLED__; color: __MUTED__; border-color: __BORDER__; }
@@ -953,6 +1044,16 @@ class MainWindow(QMainWindow):
             QMenu::item { padding: 7px 24px 7px 10px; border-radius: 5px; }
             QMenu::item:selected { background: __MENU_SELECTED__; }
             QMenu::separator { height: 1px; background: __BORDER__; margin: 5px 4px; }
+            QToolTip { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; border-radius: 8px; padding: 5px 8px; }
+            QMessageBox { background: __BG__; color: __TEXT__; }
+            QMessageBox QLabel { color: __TEXT__; }
+            QGroupBox { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 14px; margin-top: 12px; padding: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: __STRONG__; }
+            QListWidget::item { padding: 7px 8px; border-radius: 7px; }
+            QListWidget::item:selected { background: __ACTIVE__; color: __STRONG__; }
+            QListWidget::item:focus { outline: 0; border: 0; }
+            QSlider::groove:horizontal { height: 5px; background: __BORDER__; border-radius: 2px; }
+            QSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: __ACCENT__; }
             QStatusBar#statusBar { background: __SIDEBAR__; color: __MUTED__; border: 0; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
             QStatusBar#statusBar::item { border: 0; }
             QLabel#footerMeta { color: __MUTED__; padding-left: 8px; }
@@ -1312,14 +1413,14 @@ class MainWindow(QMainWindow):
             pending_detail = self._open_detail_after_page is not None
             self._open_detail_after_page = None
             self._finish_loading()
-            self.gallery_status.setText(f"Search failed: {error}")
+            self._show_gallery_notice(f"Search failed: {error}")
             self.page_label.setText(f"Page {self.current_page} | Failed")
             if pending_detail:
                 if self._fullscreen_active:
                     self._exit_fullscreen()
                 self.pages.setCurrentWidget(self.gallery_page)
                 self.back_button.hide()
-            self.statusBar().showMessage(f"Search failed: {error}")
+            self.statusBar().clearMessage()
         elif category in {"random", "random-image"} and int(identifier) == self.request_id:
             self._finish_loading()
             self.random_media_stack.setCurrentWidget(self.random_scroll)
@@ -1603,6 +1704,7 @@ class MainWindow(QMainWindow):
         self.gallery_generation += 1
         self.posts = ()
         self._clear_gallery()
+        self._hide_gallery_notice()
         self.gallery_status.setText("")
         self.page_label.setText(f"Page {self.current_page} | Loading")
         self.previous_button.setEnabled(False)
@@ -1644,19 +1746,22 @@ class MainWindow(QMainWindow):
         self.page_label.setText(f"Page {self.current_page} | {len(self.posts)} results")
         self.previous_button.setEnabled(self.current_page > 1)
         self.next_button.setEnabled(page.has_more)
-        if page.fallback_from and page.posts:
-            message = f"No results from {page.fallback_from}; automatically showing {page.posts[0].provider} results."
-            if page.provider_errors:
-                message += " Some providers were unavailable: " + " | ".join(page.provider_errors)
-            self.gallery_status.setText(message)
-        elif page.provider_errors and page.posts:
-            self.gallery_status.setText("Some providers could not be reached: " + " | ".join(page.provider_errors))
-        elif page.posts:
-            self.gallery_status.setText(f'Results for "{self.current_query}"')
-        else:
+        if page.provider_errors:
+            if page.fallback_from and page.posts:
+                message = (
+                    f"No results from {page.fallback_from}; showing "
+                    f"{page.posts[0].provider}. "
+                )
+            else:
+                message = "Some providers could not be reached. "
+            message += " | ".join(page.provider_errors)
+            self._show_gallery_notice(message)
+        elif not page.posts:
             media_filter = str(self.settings.get("search/media_filter", "image"))
             media_name = {"image": "images", "video": "videos", "all": "media"}.get(media_filter, "images")
-            self.gallery_status.setText(f'No {media_name} found for "{self.current_query}".')
+            self._show_gallery_notice(f'No {media_name} found for "{self.current_query}".')
+        else:
+            self._hide_gallery_notice()
         self._finish_loading()
         pending_index = self._open_detail_after_page
         self._open_detail_after_page = None
@@ -1677,6 +1782,46 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.deleteLater()
 
+    def _show_gallery_notice(self, message: str, duration_ms: int = 5000) -> None:
+        self._gallery_notice_timer.stop()
+        self._gallery_notice_animation.stop()
+        self.gallery_status.setText(message)
+        width = min(820, max(280, self.gallery_page.width() - 40))
+        self.gallery_status.setFixedWidth(width)
+        self.gallery_status.adjustSize()
+        height = min(110, max(42, self.gallery_status.sizeHint().height()))
+        self.gallery_status.setGeometry(
+            (self.gallery_page.width() - width) // 2,
+            12,
+            width,
+            height,
+        )
+        self._gallery_notice_opacity.setOpacity(0.0)
+        self.gallery_status.show()
+        self.gallery_status.raise_()
+        self._gallery_notice_animation.setStartValue(0.0)
+        self._gallery_notice_animation.setEndValue(1.0)
+        self._gallery_notice_animation.start()
+        self._gallery_notice_timer.start(max(1000, duration_ms))
+
+    def _fade_out_gallery_notice(self) -> None:
+        if not self.gallery_status.isVisible():
+            return
+        self._gallery_notice_animation.stop()
+        self._gallery_notice_animation.setStartValue(self._gallery_notice_opacity.opacity())
+        self._gallery_notice_animation.setEndValue(0.0)
+        self._gallery_notice_animation.start()
+
+    def _finish_gallery_notice_fade(self) -> None:
+        if self._gallery_notice_opacity.opacity() <= 0.0:
+            self.gallery_status.hide()
+
+    def _hide_gallery_notice(self) -> None:
+        self._gallery_notice_timer.stop()
+        self._gallery_notice_animation.stop()
+        self._gallery_notice_opacity.setOpacity(1.0)
+        self.gallery_status.hide()
+
     def _set_gallery_rows_top_aligned(self) -> None:
         """Rebuild compact, centered rows and leave spare height below them."""
         while self.gallery_rows.count():
@@ -1691,6 +1836,7 @@ class MainWindow(QMainWindow):
                 old_row.deleteLater()
 
         columns = self._gallery_column_count()
+        self._gallery_columns = columns
         for start in range(0, len(self.posts), columns):
             row = QWidget(self.gallery_content)
             row_layout = QHBoxLayout(row)
@@ -2014,7 +2160,14 @@ class MainWindow(QMainWindow):
         if post is None:
             return
         dialog = ImageCreditsDialog(post, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_tag:
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.accepted.connect(lambda current=dialog: self._search_credits_tag(current))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _search_credits_tag(self, dialog: ImageCreditsDialog) -> None:
+        if dialog.selected_tag:
             self.search_input.setText(dialog.selected_tag)
             self.start_search()
 
@@ -2240,6 +2393,10 @@ class MainWindow(QMainWindow):
             self.show_random()
 
     def open_preferences(self) -> None:
+        if self.preferences_dialog and self.preferences_dialog.isVisible():
+            self.preferences_dialog.raise_()
+            self.preferences_dialog.activateWindow()
+            return
         previous_provider = self.selected_provider
         previous_rating = self.selected_rating
         previous_media = str(self.settings.get("search/media_filter", "image"))
@@ -2249,34 +2406,66 @@ class MainWindow(QMainWindow):
             tuple(self.settings.get("search/custom_block_tags", []) or []),
         )
         dialog = PreferencesDialog(self.settings, self)
+        self.preferences_dialog = dialog
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.ambient_mode.toggled.connect(self._preview_ambient_mode)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._ambient_preview_enabled = None
-            provider = str(self.settings.get("search/provider", "All"))
-            rating = str(self.settings.get("search/rating", "sfw"))
-            if provider in self.provider_actions:
-                self.selected_provider = provider
-                self.provider_actions[provider].setChecked(True)
-            if rating in self.rating_actions:
-                self.selected_rating = rating
-                self.rating_actions[rating].setChecked(True)
-            self._update_filter_tooltip()
-            self._apply_ambient_mode()
-            media_changed = str(self.settings.get("search/media_filter", "image")) != previous_media
-            current_filter_settings = (
-                bool(self.settings.get("search/exclude_male", True)),
-                bool(self.settings.get("search/filter_gore", True)),
-                tuple(self.settings.get("search/custom_block_tags", []) or []),
+        dialog.accepted.connect(
+            lambda provider=previous_provider, rating=previous_rating, media=previous_media,
+            filters=previous_filter_settings: self._preferences_saved(
+                provider, rating, media, filters
             )
-            filters_changed = current_filter_settings != previous_filter_settings
-            if (self.selected_provider != previous_provider or self.selected_rating != previous_rating or media_changed or filters_changed) and self._rating_allowed():
-                if self.current_query:
-                    self.load_page(self.current_page)
-                else:
-                    self.show_random()
-        else:
-            self._ambient_preview_enabled = None
-            self._apply_ambient_mode()
+        )
+        dialog.rejected.connect(self._preferences_cancelled)
+        dialog.finished.connect(
+            lambda _result, current=dialog: self._clear_preferences_dialog(current)
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_preferences_dialog(self, dialog: PreferencesDialog) -> None:
+        if self.preferences_dialog is dialog:
+            self.preferences_dialog = None
+
+    def _preferences_cancelled(self) -> None:
+        self._ambient_preview_enabled = None
+        self._apply_ambient_mode()
+
+    def _preferences_saved(
+        self,
+        previous_provider: str,
+        previous_rating: str,
+        previous_media: str,
+        previous_filter_settings: tuple[bool, bool, tuple],
+    ) -> None:
+        self._ambient_preview_enabled = None
+        provider = str(self.settings.get("search/provider", "All"))
+        rating = str(self.settings.get("search/rating", "sfw"))
+        if provider in self.provider_actions:
+            self.selected_provider = provider
+            self.provider_actions[provider].setChecked(True)
+        if rating in self.rating_actions:
+            self.selected_rating = rating
+            self.rating_actions[rating].setChecked(True)
+        self._update_filter_tooltip()
+        self._apply_ambient_mode()
+        media_changed = str(self.settings.get("search/media_filter", "image")) != previous_media
+        current_filter_settings = (
+            bool(self.settings.get("search/exclude_male", True)),
+            bool(self.settings.get("search/filter_gore", True)),
+            tuple(self.settings.get("search/custom_block_tags", []) or []),
+        )
+        filters_changed = current_filter_settings != previous_filter_settings
+        if (
+            self.selected_provider != previous_provider
+            or self.selected_rating != previous_rating
+            or media_changed
+            or filters_changed
+        ) and self._rating_allowed():
+            if self.current_query:
+                self.load_page(self.current_page)
+            else:
+                self.show_random()
 
     def queue_download(self, post: ImagePost) -> None:
         folder = str(self.settings.get("downloads/folder", "")).strip()
@@ -2305,6 +2494,19 @@ class MainWindow(QMainWindow):
         self.pool.start(task)
 
     def eventFilter(self, watched, event):
+        if (
+            event.type() == QEvent.Type.Enter
+            and isinstance(watched, QWidget)
+            and (watched is self or self.isAncestorOf(watched))
+        ):
+            # Search results and dialogs create child widgets after startup;
+            # enable tracking as they appear so resize cursors still work over
+            # those dynamically-created surfaces near the window edges.
+            watched.setMouseTracking(True)
+        if event.type() == QEvent.Type.MouseMove:
+            self._update_resize_cursor(event.globalPosition().toPoint())
+        elif event.type() == QEvent.Type.Leave and watched is self and self._resize_cursor_active:
+            self._clear_resize_cursor()
         if (
             isinstance(watched, QWidget)
             and (watched is self or self.isAncestorOf(watched))
@@ -2355,6 +2557,38 @@ class MainWindow(QMainWindow):
                 self.search_input.setGraphicsEffect(None)
         return super().eventFilter(watched, event)
 
+    def _update_resize_cursor(self, global_point: QPoint) -> None:
+        """Show the expected resize cursor over the frameless window edges."""
+        local = self.mapFromGlobal(global_point)
+        border = 8
+        inside = self.rect().contains(local)
+        cursor = None
+        if inside and not self.isMaximized() and not self._fullscreen_active:
+            left, right = local.x() < border, local.x() >= self.width() - border
+            top, bottom = local.y() < border, local.y() >= self.height() - border
+            if (left and top) or (right and bottom):
+                cursor = Qt.CursorShape.SizeFDiagCursor
+            elif (right and top) or (left and bottom):
+                cursor = Qt.CursorShape.SizeBDiagCursor
+            elif left or right:
+                cursor = Qt.CursorShape.SizeHorCursor
+            elif top or bottom:
+                cursor = Qt.CursorShape.SizeVerCursor
+
+        if cursor is not None:
+            if self._resize_cursor_active:
+                QApplication.changeOverrideCursor(QCursor(cursor))
+            else:
+                QApplication.setOverrideCursor(QCursor(cursor))
+                self._resize_cursor_active = True
+        else:
+            self._clear_resize_cursor()
+
+    def _clear_resize_cursor(self) -> None:
+        if self._resize_cursor_active:
+            QApplication.restoreOverrideCursor()
+            self._resize_cursor_active = False
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape and self._fullscreen_active:
             self._exit_fullscreen()
@@ -2398,25 +2632,34 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._resize_settle_timer.start()
+        if hasattr(self, "gallery_status") and self.gallery_status.isVisible():
+            width = min(820, max(280, self.gallery_page.width() - 40))
+            self.gallery_status.setFixedWidth(width)
+            self.gallery_status.adjustSize()
+            height = min(110, max(42, self.gallery_status.sizeHint().height()))
+            self.gallery_status.setGeometry((self.gallery_page.width() - width) // 2, 12, width, height)
         if hasattr(self, "random_ambient"):
             self.random_ambient.setGeometry(self.random_page.rect())
-            source = getattr(self.random_ambient, "_ambient_source", QPixmap())
-            if not source.isNull():
-                self._set_ambient_image(self.random_ambient, source, self.random_page)
             self.random_ambient.lower()
         if hasattr(self, "detail_ambient"):
             self.detail_ambient.setGeometry(self.detail_page.rect())
-            source = getattr(self.detail_ambient, "_ambient_source", QPixmap())
-            if not source.isNull():
-                self._set_ambient_image(self.detail_ambient, source, self.detail_page)
             self.detail_ambient.lower()
         self._position_detail_video_navigation()
+
+    def _finish_resize_settle(self) -> None:
+        """Apply costly view reflows once the user finishes resizing."""
+        if not self.isVisible():
+            return
+        self._refresh_ambient_layers()
         self._render_random_image()
         if hasattr(self, "detail_image"):
             self.detail_image._fit_to_viewport()
-            if self._fullscreen_active and (
-                self.fullscreen_toolbar.isVisible() or self.random_fullscreen_toolbar.isVisible()
-            ):
-                self._show_fullscreen_controls()
-        if self.posts:
-            self._set_gallery_rows_top_aligned()
+        if self.pages.currentWidget() is self.gallery_page and self.posts:
+            columns = self._gallery_column_count()
+            if columns != getattr(self, "_gallery_columns", None):
+                self._set_gallery_rows_top_aligned()
+        if self._fullscreen_active and (
+            self.fullscreen_toolbar.isVisible() or self.random_fullscreen_toolbar.isVisible()
+        ):
+            self._show_fullscreen_controls()

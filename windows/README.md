@@ -21,6 +21,14 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
 
+## Windows 0.1.4
+
+- Made Settings, Media Info, and Favorites non-modal so the main window and multiple dialogs can be used at the same time.
+- Updated Favorites with application-styled window controls, image/video counts, a play indicator on video thumbnails, and removable favorites.
+- Refined Settings controls for removing saved search terms and blocked tags, and removed distracting focus outlines.
+- Added rounded provider error notices with fade-in and fade-out transitions.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
+
 ## Windows 0.1.3
 
 - Added video volume and mute controls, plus a preferred stream resolution setting. The player selects an available provider rendition at or below the chosen limit when possible.

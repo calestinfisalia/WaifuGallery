@@ -1,17 +1,23 @@
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QPixmap
+import re
+
+import requests
+from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QAbstractItemView,
+    QFrame,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QStackedWidget,
@@ -19,8 +25,46 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
+
+
+GITHUB_LATEST_RELEASE = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
+
+
+def _themed_icon(widget: QWidget, name: str) -> QIcon:
+    icon_factory = getattr(widget.parent(), "_icon", None)
+    if callable(icon_factory):
+        return icon_factory(name)
+    return QIcon(str(Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"))
+
+
+class UpdateCheckSignals(QObject):
+    finished = Signal(str, str, str)
+
+
+class UpdateCheckTask(QRunnable):
+    def __init__(self) -> None:
+        super().__init__()
+        self.signals = UpdateCheckSignals()
+
+    def run(self) -> None:
+        try:
+            response = requests.get(
+                GITHUB_LATEST_RELEASE,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
+                timeout=(5, 12),
+            )
+            response.raise_for_status()
+            release = response.json()
+            tag = str(release.get("tag_name", "")).strip()
+            url = str(release.get("html_url", "")).strip()
+            if not tag or not url:
+                raise ValueError("The latest release response is missing its tag or URL.")
+            self.signals.finished.emit(tag, url, "")
+        except Exception as error:
+            self.signals.finished.emit("", "", str(error))
 
 
 class ProviderLoginDialog(QDialog):
@@ -85,27 +129,83 @@ class ProviderLoginDialog(QDialog):
         self.accept()
 
 
+class SettingsTitleBar(QWidget):
+    def __init__(self, parent: QDialog) -> None:
+        super().__init__(parent)
+        self._drag_offset = None
+        self.setObjectName("settingsTitleBar")
+        self.setFixedHeight(42)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 8, 0)
+        title = QLabel("Settings")
+        title.setObjectName("settingsWindowTitle")
+        layout.addWidget(title)
+        layout.addStretch(1)
+        close = QPushButton()
+        close.setIcon(_themed_icon(parent, "close"))
+        close.setIconSize(QSize(16, 16))
+        close.setObjectName("settingsCloseButton")
+        close.setFixedSize(30, 30)
+        close.setToolTip("Close settings")
+        close.setAccessibleName("Close settings")
+        close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        close.clicked.connect(parent.reject)
+        layout.addWidget(close)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            handle = self.window().windowHandle()
+            if handle and handle.startSystemMove():
+                event.accept()
+                return
+            self._drag_offset = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.window().move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+
 class PreferencesDialog(QDialog):
     ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
+    RELEASE_PAGE = "https://github.com/calestinfisalia/WaifuGallery/releases"
 
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("Waifu Gallery Settings")
-        self.resize(760, 520)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 10, 12, 10)
+        self._update_pool = QThreadPool.globalInstance()
+        self._update_check_task = None
+        self.setObjectName("settingsDialog")
+        self.setWindowTitle("Settings")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.resize(800, 560)
+        self.setMinimumSize(720, 500)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QWidget(self)
+        surface.setObjectName("settingsSurface")
+        root = QVBoxLayout(surface)
+        root.setContentsMargins(8, 4, 8, 8)
         root.setSpacing(8)
+        root.addWidget(SettingsTitleBar(self))
         content = QHBoxLayout()
-        content.setSpacing(8)
+        content.setSpacing(10)
         self.sidebar = QWidget()
         self.sidebar.setObjectName("settingsSidebar")
-        self.sidebar.setFixedWidth(142)
-        self.sidebar.setStyleSheet("QWidget#settingsSidebar { background: transparent; }")
+        self.sidebar.setFixedWidth(154)
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(2, 4, 2, 4)
         self.sidebar_layout.setSpacing(3)
         self.pages = QStackedWidget()
+        self.pages.setObjectName("settingsPages")
         content.addWidget(self.sidebar)
         content.addWidget(self.pages, 1)
         root.addLayout(content, 1)
@@ -117,6 +217,7 @@ class PreferencesDialog(QDialog):
         self._build_network_tab()
         self._build_display_tab()
         self._build_about_tab()
+        self._build_update_tab()
         # Keep navigation items grouped at the top instead of spreading them
         # across the full height of the dialog.
         self.sidebar_layout.addStretch(1)
@@ -129,31 +230,49 @@ class PreferencesDialog(QDialog):
         buttons.addWidget(cancel)
         buttons.addWidget(save)
         root.addLayout(buttons)
+        outer.addWidget(surface)
 
     def _build_general_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         layout.addWidget(QLabel("Saved search terms used by Random"))
         self.terms = QListWidget()
-        self.terms.addItems(self._saved_terms())
+        self.terms.setObjectName("customTermsList")
+        self.terms.setFrameShape(QFrame.Shape.NoFrame)
+        self.terms.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.terms.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.terms.setSpacing(2)
+        self.terms.setStyleSheet(
+            "QListWidget#customTermsList { background: transparent; border: 0; padding: 0; }"
+        )
+        for term in self._saved_terms():
+            self._add_term_item(term)
         layout.addWidget(self.terms, 1)
         row = QHBoxLayout()
+        row.setSpacing(8)
         self.new_term = QLineEdit()
+        self.new_term.setObjectName("customTermInput")
         self.new_term.setPlaceholderText("Add a search term")
         add = QPushButton("Add")
-        remove = QPushButton("Remove selected")
         add.clicked.connect(self.add_term)
-        remove.clicked.connect(self.remove_term)
+        self.new_term.returnPressed.connect(self.add_term)
         row.addWidget(self.new_term, 1)
         row.addWidget(add)
-        row.addWidget(remove)
         layout.addLayout(row)
         self._add_page(page, "General", "dices")
 
     def _build_provider_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(12)
         self.provider = QComboBox()
         self.provider.addItems(["All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"])
         self.provider.setCurrentText(str(self.settings.get("search/provider", "All")))
@@ -182,8 +301,13 @@ class PreferencesDialog(QDialog):
 
     def _build_storage_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(12)
         self.save_folder = QLineEdit(str(self.settings.get("downloads/folder", "")))
         self.save_folder.setReadOnly(True)
         browse = QPushButton("Browse…")
@@ -198,7 +322,10 @@ class PreferencesDialog(QDialog):
 
     def _build_filter_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         self.exclude_male = QCheckBox("Exclude posts tagged as male-only")
         self.exclude_male.setChecked(bool(self.settings.get("search/exclude_male", True)))
         self.allow_nsfw = QCheckBox("Allow NSFW results")
@@ -210,32 +337,46 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(QLabel("Custom blocked tags"))
         self.filter_list = QListWidget()
+        self.filter_list.setObjectName("customFilterList")
+        self.filter_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.filter_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.filter_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.filter_list.setSpacing(2)
+        self.filter_list.setStyleSheet(
+            "QListWidget#customFilterList { background: transparent; border: 0; padding: 0; }"
+        )
         saved_tags = self.settings.get("search/custom_block_tags", [])
         if isinstance(saved_tags, str):
             saved_tags = saved_tags.replace(",", " ").split()
-        self.filter_list.addItems([str(tag) for tag in saved_tags])
+        for tag in saved_tags:
+            self._add_chip_item(self.filter_list, str(tag))
         layout.addWidget(self.filter_list, 1)
         add_row = QHBoxLayout()
+        add_row.setSpacing(8)
         self.new_filter = QLineEdit()
+        self.new_filter.setObjectName("customFilterInput")
         self.new_filter.setPlaceholderText("Tag(s), e.g. blood, guro, decapitation")
         add_button = QPushButton("Add filter")
-        remove_button = QPushButton("Remove selected")
         add_button.clicked.connect(self.add_filter)
-        remove_button.clicked.connect(self.remove_filter)
+        self.new_filter.returnPressed.connect(self.add_filter)
         add_row.addWidget(self.new_filter, 1)
         add_row.addWidget(add_button)
-        add_row.addWidget(remove_button)
         layout.addLayout(add_row)
         layout.addWidget(QLabel("Built-in tag filters only match posts tagged by their provider."))
         self._add_page(page, "Filters", "settings-2")
 
     def _build_network_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         self.use_doh = QCheckBox("Use DNS over HTTPS")
         self.use_doh.setChecked(self.settings.use_doh)
         layout.addWidget(self.use_doh)
         form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(12)
         self.doh_provider = QComboBox()
         for name in (*DOH_ENDPOINTS.keys(), "Custom"):
             self.doh_provider.addItem(name, name)
@@ -269,11 +410,16 @@ class PreferencesDialog(QDialog):
 
     def _build_display_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         self.ambient_mode = QCheckBox("Ambient mode (blur the current image behind the viewer)")
         self.ambient_mode.setChecked(bool(self.settings.get("view/ambient_mode", True)))
         layout.addWidget(self.ambient_mode)
         form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(12)
         self.media_filter = QComboBox()
         self.media_filter.addItem("Image only", "image")
         self.media_filter.addItem("Video only", "video")
@@ -304,33 +450,142 @@ class PreferencesDialog(QDialog):
 
     def _build_about_tab(self) -> None:
         page = QWidget()
+        page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.addStretch(1)
+        panel = QWidget()
+        panel.setMaximumWidth(520)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 8, 16, 8)
+        panel_layout.setSpacing(6)
         logo = QLabel()
         pixmap = QPixmap(str(self.ASSET_DIR / "waifugallery.png"))
         if not pixmap.isNull():
             logo.setPixmap(pixmap.scaled(
-                QSize(96, 96),
+                QSize(68, 68),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
+        logo.setFixedHeight(70)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(logo)
+        panel_layout.addWidget(logo)
         title = QLabel("Waifu Gallery")
-        title.setStyleSheet("font-size: 22pt; font-weight: 700;")
+        title.setStyleSheet("font-size: 20pt; font-weight: 700;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        subtitle = QLabel("An independent Python image gallery\nCreated by calestinfisalia")
+        panel_layout.addWidget(title)
+        version = QLabel(f"Version {__version__}")
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version.setStyleSheet(
+            "QLabel { color: #d8c9ff; background: #24283b; border: 1px solid #45415f; "
+            "border-radius: 10px; padding: 4px 12px; }"
+        )
+        panel_layout.addWidget(version, 0, Qt.AlignmentFlag.AlignHCenter)
+        subtitle = QLabel(
+            "An independent Python media gallery for discovering, viewing, and downloading "
+            "images and videos.\nCreated by calestinfisalia"
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setMinimumHeight(58)
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+        subtitle.setStyleSheet("color: #a9b1d6;")
+        panel_layout.addWidget(subtitle)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("color: #303449;")
+        panel_layout.addWidget(separator)
         license_note = QLabel(
-            "Application source: MIT License.\n"
-            "Bundled icons and image artwork retain their own licenses and creator rights."
+            "Source code: MIT License.\n"
+            "Bundled icons and artwork retain their own licenses and creator rights."
         )
         license_note.setWordWrap(True)
-        layout.addWidget(license_note)
+        license_note.setMinimumHeight(64)
+        license_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_note.setStyleSheet("color: #a9b1d6;")
+        panel_layout.addWidget(license_note)
+        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(1)
         self._add_page(page, "About", "info")
+
+    def _build_update_tab(self) -> None:
+        page = QWidget()
+        page.setObjectName("settingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+        title = QLabel("Application updates")
+        title.setStyleSheet("font-size: 16pt; font-weight: 650;")
+        layout.addWidget(title)
+        description = QLabel(
+            "Check the latest stable version published on GitHub Releases. "
+            "The check runs in the background."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        current = QLabel(f"Installed version: {__version__}")
+        current.setObjectName("currentAppVersion")
+        layout.addWidget(current)
+        self.update_status = QLabel("Check GitHub Releases for the latest version.")
+        self.update_status.setWordWrap(True)
+        self.update_status.setMinimumHeight(54)
+        self.update_status.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.update_status)
+        actions = QHBoxLayout()
+        self.check_update_button = QPushButton("Check for updates")
+        self.check_update_button.clicked.connect(self.check_for_updates)
+        actions.addWidget(self.check_update_button)
+        self.open_release_button = QPushButton("Open release page")
+        self.open_release_button.hide()
+        self.open_release_button.clicked.connect(self._open_release_page)
+        actions.addWidget(self.open_release_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        update_note = QLabel(
+            "Setup users: download and run the new setup to update the existing installation. "
+            "Your settings and download folder are preserved. Portable users: replace the old "
+            "executable with the new release. Packaged builds update as a complete release, "
+            "not as individual .py files."
+        )
+        update_note.setWordWrap(True)
+        update_note.setStyleSheet("color: #a9b1d6;")
+        layout.addWidget(update_note)
+        layout.addStretch(1)
+        self._release_url = self.RELEASE_PAGE
+        self._add_page(page, "Updates", "refresh-cw")
+
+    def check_for_updates(self) -> None:
+        if self._update_check_task is not None:
+            return
+        self.check_update_button.setEnabled(False)
+        self.open_release_button.hide()
+        self.update_status.setText("Checking for updates…")
+        task = UpdateCheckTask()
+        self._update_check_task = task
+        task.signals.finished.connect(self._update_check_finished)
+        self._update_pool.start(task)
+
+    def _update_check_finished(self, tag: str, url: str, error: str) -> None:
+        self._update_check_task = None
+        self.check_update_button.setEnabled(True)
+        if error:
+            self.update_status.setText(f"Could not check for updates: {error}")
+            return
+        latest_version = self._version_parts(tag)
+        current_version = self._version_parts(__version__)
+        self._release_url = url or self.RELEASE_PAGE
+        self.open_release_button.setVisible(latest_version > current_version)
+        if latest_version > current_version:
+            self.update_status.setText(f"Version {tag} is available. You have {__version__}.")
+        else:
+            self.update_status.setText(f"You're up to date (version {__version__}).")
+
+    @staticmethod
+    def _version_parts(value: str) -> tuple[int, ...]:
+        numbers = re.findall(r"\d+", value)
+        return tuple(int(number) for number in numbers) or (0,)
+
+    def _open_release_page(self) -> None:
+        QDesktopServices.openUrl(self._release_url)
 
     def _add_page(self, page: QWidget, title: str, icon_name: str) -> None:
         button = QPushButton(title)
@@ -343,11 +598,6 @@ class PreferencesDialog(QDialog):
         icon = icon_factory(icon_name) if callable(icon_factory) else QIcon(str(self.ASSET_DIR / f"{icon_name}.svg"))
         button.setIcon(icon)
         button.setIconSize(QSize(16, 16))
-        button.setStyleSheet("""
-            QPushButton#settingsNavButton { text-align: left; background: transparent; border: 0; border-radius: 8px; padding: 8px 10px; }
-            QPushButton#settingsNavButton:hover { background: #2d334b; }
-            QPushButton#settingsNavButton:checked { background: #343b58; color: #c0caf5; }
-        """)
         index = self.pages.addWidget(page)
         button.clicked.connect(lambda checked=False, page_index=index: self._select_page(page_index))
         self.sidebar_layout.addWidget(button)
@@ -402,30 +652,62 @@ class PreferencesDialog(QDialog):
             self.save_folder.setText(folder)
 
     def add_term(self) -> None:
-        value = self.new_term.text().strip()
+        values = [part.strip() for part in self.new_term.text().split(",") if part.strip()]
         existing = {self.terms.item(i).text().casefold() for i in range(self.terms.count())}
-        if value and value.casefold() not in existing:
-            self.terms.addItem(value)
+        for value in values:
+            if value.casefold() not in existing:
+                self._add_term_item(value)
+                existing.add(value.casefold())
         self.new_term.clear()
 
-    def remove_term(self) -> None:
-        row = self.terms.currentRow()
-        if row >= 0:
-            self.terms.takeItem(row)
+    def _add_term_item(self, value: str) -> None:
+        self._add_chip_item(self.terms, value)
+
+    def _add_chip_item(self, target_list: QListWidget, value: str) -> None:
+        item = QListWidgetItem(value)
+        item.setSizeHint(QSize(0, 32))
+        target_list.addItem(item)
+
+        row = QWidget(target_list)
+        row.setObjectName("customTermRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(2, 0, 2, 0)
+        row_layout.setSpacing(8)
+        row.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        label = QLabel(value)
+        row_layout.addWidget(label)
+        remove = QPushButton()
+        remove.setIcon(_themed_icon(self, "x"))
+        remove.setIconSize(QSize(14, 14))
+        remove.setObjectName("removeCustomTermButton")
+        remove.setFixedSize(22, 22)
+        remove.setToolTip(f'Remove "{value}"')
+        remove.setAccessibleName(f'Remove "{value}"')
+        remove.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        remove.clicked.connect(
+            lambda _checked=False, items=target_list, target=item: self._remove_chip_item(items, target)
+        )
+        row_layout.addWidget(remove)
+        target_list.setItemWidget(item, row)
+
+    @staticmethod
+    def _remove_chip_item(target_list: QListWidget, item: QListWidgetItem) -> None:
+        row = target_list.row(item)
+        if row < 0:
+            return
+        widget = target_list.itemWidget(item)
+        target_list.takeItem(row)
+        if widget is not None:
+            widget.deleteLater()
 
     def add_filter(self) -> None:
         existing = {self.filter_list.item(i).text().casefold() for i in range(self.filter_list.count())}
         for tag in self.new_filter.text().replace(",", " ").split():
             normalized = tag.strip().casefold().replace(" ", "_")
             if normalized and normalized not in existing:
-                self.filter_list.addItem(normalized)
+                self._add_chip_item(self.filter_list, normalized)
                 existing.add(normalized)
         self.new_filter.clear()
-
-    def remove_filter(self) -> None:
-        row = self.filter_list.currentRow()
-        if row >= 0:
-            self.filter_list.takeItem(row)
 
     def save(self) -> None:
         provider = self.provider.currentText()
