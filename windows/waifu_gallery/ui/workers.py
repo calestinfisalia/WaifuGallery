@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QRunnable, QSize, Signal
+from PySide6.QtGui import QImage, QImageReader
 
 from ..providers import BooruCatalog
 
@@ -9,6 +10,28 @@ class TaskSignals(QObject):
     result = Signal(str, object)
     error = Signal(str, str)
     progress = Signal(str, int)
+
+
+def decode_image_bytes(content: bytes, max_dimension: int | None = 2560) -> QImage:
+    """Decode off the GUI thread and cap display images to a practical size."""
+    buffer = QBuffer()
+    buffer.setData(QByteArray(content))
+    if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
+        raise ValueError("Could not open image data.")
+    reader = QImageReader(buffer)
+    reader.setAutoTransform(True)
+    size = reader.size()
+    if max_dimension and size.isValid() and max(size.width(), size.height()) > max_dimension:
+        scale = max_dimension / max(size.width(), size.height())
+        reader.setScaledSize(QSize(
+            max(1, round(size.width() * scale)),
+            max(1, round(size.height() * scale)),
+        ))
+    image = reader.read()
+    buffer.close()
+    if image.isNull():
+        raise ValueError(reader.errorString() or "Unsupported image format.")
+    return image
 
 
 class BackgroundTask(QRunnable):

@@ -1,12 +1,13 @@
-import ctypes
+﻿import ctypes
 from ctypes import wintypes
 import re
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt, QThreadPool, QSize, QTimer, QUrl
-from PySide6.QtGui import QActionGroup, QColor, QCursor, QDesktopServices, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt, QThreadPool, QSize, QTimer, Slot
+from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -35,11 +36,12 @@ from ..models import ImagePost, SearchPage
 from ..providers import BooruCatalog, ProviderError
 from ..settings import AppSettings
 from .downloads import DownloadsDialog
+from .credits import ImageCreditsDialog
 from .favorites import FavoritesDialog, favorite_key
 from .preferences import PreferencesDialog
 from .video import VideoPlayerWidget
 from .viewer import ZoomImage
-from .workers import BackgroundTask, FileDownloadTask
+from .workers import BackgroundTask, FileDownloadTask, decode_image_bytes
 
 
 class GalleryTitleBar(QWidget):
@@ -205,11 +207,13 @@ class MainWindow(QMainWindow):
         self.card_frames: dict[str, QWidget] = {}
         self.active_detail_id = ""
         self.detail_post: ImagePost | None = None
+        self._full_image_loaded = False
         self.favorites_dialog: FavoritesDialog | None = None
         self.favorites_dialog_token = ""
         self._opening_favorite = False
         self._fullscreen_active = False
         self._was_maximized_before_fullscreen = False
+        self._windowed_geometry = None
         self._ambient_preview_enabled: bool | None = None
         self.card_buttons: dict[str, QPushButton] = {}
         self.current_theme = str(self.settings.get("appearance/theme", "Dark"))
@@ -220,8 +224,16 @@ class MainWindow(QMainWindow):
         self.downloads = DownloadsDialog(self)
         self._fullscreen_idle_timer = QTimer(self)
         self._fullscreen_idle_timer.setSingleShot(True)
-        self._fullscreen_idle_timer.setInterval(1800)
+        self._fullscreen_idle_timer.setInterval(1000)
         self._fullscreen_idle_timer.timeout.connect(self._hide_fullscreen_controls)
+        self._media_controls_idle_timer = QTimer(self)
+        self._media_controls_idle_timer.setSingleShot(True)
+        self._media_controls_idle_timer.setInterval(1000)
+        self._media_controls_idle_timer.timeout.connect(self._hide_windowed_video_controls)
+        self._ambient_restore_timer = QTimer(self)
+        self._ambient_restore_timer.setSingleShot(True)
+        self._ambient_restore_timer.setInterval(120)
+        self._ambient_restore_timer.timeout.connect(self._refresh_ambient_layers)
         self.setWindowTitle("Waifu Gallery")
         self.setWindowIcon(self._app_icon())
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -274,18 +286,18 @@ class MainWindow(QMainWindow):
         self.favorite_button = self._icon_button("heart", "Add to favorites")
         self.favorite_button.hide()
         self.favorite_button.clicked.connect(self.toggle_favorite)
+        self.full_image_button = self._icon_button("images", "Load original-resolution image")
+        self.full_image_button.setFixedSize(34, 26)
+        self.full_image_button.setIconSize(QSize(17, 17))
+        self.full_image_button.setToolTip("Load original-resolution image")
+        self.full_image_button.hide()
+        self.full_image_button.clicked.connect(self.load_full_image)
         self._build_filter_menu()
         self.refresh_button = self._icon_button("refresh-cw", "Refresh current view")
         self.download_button = self._icon_button("download", "Download current image")
         self.title_bar.add_action(self.refresh_button)
         self.title_bar.add_action(self.download_button)
         self.title_bar.add_action(self.settings_button)
-
-        self.progress = QProgressBar()
-        self.progress.setObjectName("loadProgress")
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(3)
-        self.progress.hide()
 
         self.pages = QStackedWidget()
         self.random_page = QWidget()
@@ -308,6 +320,18 @@ class MainWindow(QMainWindow):
         )
         self.random_image.setMouseTracking(True)
         self.random_video = VideoPlayerWidget()
+        self.random_video.set_volume(self._saved_video_volume())
+        self.random_video.volumeChanged.connect(self._save_video_volume)
+        self.random_video.bufferingChanged.connect(
+            lambda buffering: self._on_video_buffering("random", buffering)
+        )
+        self.random_video.playbackStatusChanged.connect(
+            lambda status: self._on_video_status("random", status)
+        )
+        self.random_video.playbackActiveChanged.connect(
+            lambda playing: self._on_video_playback_active("random", playing)
+        )
+        self.random_video.playRequested.connect(self._play_random_video)
         self.random_media_stack = QStackedWidget()
         self.random_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.random_media_stack.addWidget(self.random_scroll)
@@ -359,8 +383,16 @@ class MainWindow(QMainWindow):
         self.random_fullscreen_toolbar.setMouseTracking(True)
         self.random_fullscreen_toolbar.installEventFilter(self)
         for widget in (self.random_page, self.random_scroll, self.random_scroll.viewport(), self.random_image,
-                       self.random_video, self.random_media_stack, self.random_video.video,
-                       self.random_video.play_overlay, self.random_video.play_pause):
+                       self.random_video, self.random_video.video_canvas, self.random_video.video,
+                       self.random_video.controls_frame, self.random_video.position,
+                       self.random_video.volume_button, self.random_video.volume_slider,
+                       self.random_video.time_label, self.random_video.buffering_overlay,
+                       self.random_video.buffering_label, self.random_video.buffering_bar,
+                       self.random_video.play_overlay,
+                       self.random_video.play_pause, self.random_media_stack,
+                       self.random_video_fullscreen_button, self.random_video_refresh_action,
+                       self.random_video_favorite_action, self.random_video_download_action,
+                       self.random_video_exit_action):
             widget.setMouseTracking(True)
             widget.installEventFilter(self)
         self.pages.addWidget(self.random_page)
@@ -369,16 +401,34 @@ class MainWindow(QMainWindow):
         gallery_layout = QVBoxLayout(self.gallery_page)
         gallery_layout.setContentsMargins(0, 0, 0, 0)
         self.gallery_status = QLabel("")
+        self.gallery_status.setFixedHeight(26)
+        self.gallery_status.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         gallery_layout.addWidget(self.gallery_status)
+        self.gallery_body = QStackedWidget()
         self.gallery_scroll = QScrollArea()
         self.gallery_scroll.setWidgetResizable(True)
         self.gallery_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.gallery_content = QWidget()
-        self.gallery_grid = QGridLayout(self.gallery_content)
-        self.gallery_grid.setContentsMargins(2, 2, 2, 2)
-        self.gallery_grid.setSpacing(10)
+        self.gallery_rows = QVBoxLayout(self.gallery_content)
+        self.gallery_rows.setContentsMargins(0, 0, 0, 0)
+        self.gallery_rows.setSpacing(4)
         self.gallery_scroll.setWidget(self.gallery_content)
-        gallery_layout.addWidget(self.gallery_scroll, 1)
+        self.gallery_body.addWidget(self.gallery_scroll)
+        self.gallery_loading = QWidget()
+        loading_layout = QVBoxLayout(self.gallery_loading)
+        loading_layout.addStretch(1)
+        self.gallery_loading_label = QLabel("Searching providers...")
+        self.gallery_loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.gallery_loading_bar = QProgressBar()
+        self.gallery_loading_bar.setObjectName("centerLoadProgress")
+        self.gallery_loading_bar.setRange(0, 0)
+        self.gallery_loading_bar.setTextVisible(False)
+        self.gallery_loading_bar.setFixedSize(240, 4)
+        loading_layout.addWidget(self.gallery_loading_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        loading_layout.addWidget(self.gallery_loading_bar, 0, Qt.AlignmentFlag.AlignHCenter)
+        loading_layout.addStretch(1)
+        self.gallery_body.addWidget(self.gallery_loading)
+        gallery_layout.addWidget(self.gallery_body, 1)
         page_nav = QHBoxLayout()
         self.previous_button = self._icon_button("chevron-left", "Previous page")
         self.page_label = QLabel("Page 1")
@@ -396,13 +446,6 @@ class MainWindow(QMainWindow):
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(8)
         self.detail_ambient = self._create_ambient_layer(self.detail_page)
-        detail_header = QHBoxLayout()
-        self.detail_title = QLabel("")
-        self.detail_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        detail_header.addStretch(1)
-        detail_header.addWidget(self.detail_title)
-        detail_header.addStretch(1)
-        detail_layout.addLayout(detail_header)
         self.detail_scroll = QScrollArea()
         self.detail_scroll.setWidgetResizable(False)
         self.detail_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -418,6 +461,18 @@ class MainWindow(QMainWindow):
         )
         self.detail_image.swipeRequested.connect(self._swipe_detail)
         self.detail_video = VideoPlayerWidget()
+        self.detail_video.set_volume(self._saved_video_volume())
+        self.detail_video.volumeChanged.connect(self._save_video_volume)
+        self.detail_video.bufferingChanged.connect(
+            lambda buffering: self._on_video_buffering("detail", buffering)
+        )
+        self.detail_video.playbackStatusChanged.connect(
+            lambda status: self._on_video_status("detail", status)
+        )
+        self.detail_video.playbackActiveChanged.connect(
+            lambda playing: self._on_video_playback_active("detail", playing)
+        )
+        self.detail_video.playRequested.connect(self._play_detail_video)
         self.detail_media_stack = QStackedWidget()
         self.detail_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.detail_media_stack.addWidget(self.detail_scroll)
@@ -434,9 +489,32 @@ class MainWindow(QMainWindow):
             button.setFixedSize(42, 42)
         self.detail_previous_button.clicked.connect(lambda: self._swipe_detail(-1))
         self.detail_next_button.clicked.connect(lambda: self._swipe_detail(1))
+        self.detail_video_previous_overlay = self._icon_button(
+            "chevron-left", "Previous video"
+        )
+        self.detail_video_next_overlay = self._icon_button(
+            "chevron-right", "Next video"
+        )
+        for button in (
+            self.detail_video_previous_overlay,
+            self.detail_video_next_overlay,
+        ):
+            button.setParent(self.detail_page)
+            button.setObjectName("detailNavigation")
+            button.setFixedSize(42, 42)
+            button.hide()
+            button.setMouseTracking(True)
+            button.installEventFilter(self)
+        self.detail_video_previous_overlay.clicked.connect(
+            lambda: self._swipe_detail(-1)
+        )
+        self.detail_video_next_overlay.clicked.connect(lambda: self._swipe_detail(1))
         detail_view_layout = QHBoxLayout()
-        detail_view_layout.setContentsMargins(12, 0, 12, 0)
-        detail_view_layout.setSpacing(12)
+        # Keep the video surface edge-to-edge. The side navigation buttons are
+        # only used for still images; reserving their width here made video
+        # playback look cropped inside two large ambient gutters.
+        detail_view_layout.setContentsMargins(0, 0, 0, 0)
+        detail_view_layout.setSpacing(0)
         detail_view_layout.addWidget(self.detail_previous_button, 0, Qt.AlignmentFlag.AlignVCenter)
         detail_view_layout.addWidget(self.detail_media_stack, 1)
         detail_view_layout.addWidget(self.detail_next_button, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -467,30 +545,39 @@ class MainWindow(QMainWindow):
         self.fullscreen_download_button.clicked.connect(self.download_active_image)
         self.fullscreen_next_button.clicked.connect(lambda: self._swipe_detail(1))
         self.fullscreen_exit_button.clicked.connect(self._exit_fullscreen)
-        self.detail_video_previous_action = self._icon_button("chevron-left", "Previous result")
         self.detail_video_favorite_action = self._icon_button("heart", "Add to favorites")
         self.detail_video_download_action = self._icon_button("download", "Download video")
-        self.detail_video_next_action = self._icon_button("chevron-right", "Next result")
+        self.detail_video_previous_action = self._icon_button("chevron-left", "Previous video")
+        self.detail_video_next_action = self._icon_button("chevron-right", "Next video")
         self.detail_video_exit_action = self._icon_button("restore", "Exit fullscreen")
         for action in (
-            self.detail_video_previous_action,
             self.detail_video_favorite_action,
             self.detail_video_download_action,
+            self.detail_video_previous_action,
             self.detail_video_next_action,
             self.detail_video_exit_action,
         ):
             self.detail_video.add_fullscreen_action(action)
-        self.detail_video_previous_action.clicked.connect(lambda: self._swipe_detail(-1))
         self.detail_video_favorite_action.clicked.connect(self.toggle_favorite)
         self.detail_video_download_action.clicked.connect(self.download_active_image)
+        self.detail_video_previous_action.clicked.connect(lambda: self._swipe_detail(-1))
         self.detail_video_next_action.clicked.connect(lambda: self._swipe_detail(1))
         self.detail_video_exit_action.clicked.connect(self._exit_fullscreen)
         self.fullscreen_toolbar.hide()
 
         for widget in (
             self.detail_page, self.detail_scroll, self.detail_scroll.viewport(), self.detail_image,
-            self.detail_video, self.detail_media_stack, self.detail_video.video,
+            self.detail_video, self.detail_video.video_canvas, self.detail_video.video,
+            self.detail_video.controls_frame, self.detail_video.position,
+            self.detail_video.volume_button, self.detail_video.volume_slider,
+            self.detail_video.time_label, self.detail_video.buffering_overlay,
+            self.detail_video.buffering_label, self.detail_video.buffering_bar,
+            self.detail_media_stack,
             self.detail_video.play_overlay, self.detail_video.play_pause,
+            self.detail_video_fullscreen_button,
+            self.detail_video_favorite_action, self.detail_video_download_action,
+            self.detail_video_previous_action, self.detail_video_next_action,
+            self.detail_video_exit_action,
             self.fullscreen_toolbar, self.fullscreen_previous_button, self.fullscreen_favorite_button,
             self.fullscreen_download_button, self.fullscreen_next_button, self.fullscreen_exit_button,
         ):
@@ -500,7 +587,6 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.pages, 1)
         body_layout.addWidget(content, 1)
         root_layout.addWidget(body, 1)
-        root_layout.addWidget(self.progress)
 
         self.setCentralWidget(root)
         status = QStatusBar()
@@ -510,6 +596,7 @@ class MainWindow(QMainWindow):
         self.footer_meta = QLabel("Ready")
         self.footer_meta.setObjectName("footerMeta")
         status.addPermanentWidget(self.footer_meta, 1)
+        status.addPermanentWidget(self.full_image_button)
         for button in (self.favorite_button, self.fullscreen_button):
             button.setFixedSize(34, 26)
             button.setIconSize(QSize(17, 17))
@@ -563,12 +650,9 @@ class MainWindow(QMainWindow):
             )
             self.theme_actions[theme] = action
 
-        self.image_credits_menu = menu.addMenu("Image credits")
-        self.image_credits_menu.menuAction().setVisible(False)
-        self.credit_artist_action = self.image_credits_menu.addAction("Artist: not provided")
-        self.credit_source_action = self.image_credits_menu.addAction("Source: not provided")
-        self.credit_artist_action.setEnabled(False)
-        self.credit_source_action.setEnabled(False)
+        self.image_credits_action = menu.addAction("Media Info")
+        self.image_credits_action.setVisible(False)
+        self.image_credits_action.triggered.connect(self.show_image_credits)
         menu.addAction("Favorites", self.show_favorites)
         menu.addSeparator()
         menu.addAction("Downloads", self.downloads.show)
@@ -580,7 +664,7 @@ class MainWindow(QMainWindow):
 
     def _update_filter_tooltip(self) -> None:
         rating_names = {"sfw": "Only SFW", "nsfw": "Only NSFW", "all": "Show All"}
-        tooltip = f"Settings · {self.selected_provider} · {rating_names[self.selected_rating]}"
+        tooltip = f"Settings | {self.selected_provider} | {rating_names[self.selected_rating]}"
         self.settings_button.setToolTip(tooltip)
         self.settings_button.setAccessibleName(tooltip)
 
@@ -605,6 +689,13 @@ class MainWindow(QMainWindow):
                     checksum=str(value.get("checksum", "")),
                     title=str(value.get("title", "")),
                     media_type=str(value.get("media_type", "image")),
+                    width=int(value.get("width", 0) or 0),
+                    height=int(value.get("height", 0) or 0),
+                    video_variants=tuple(
+                        (str(item[0]), int(item[1] or 0), int(item[2] or 0))
+                        for item in value.get("video_variants", [])
+                        if isinstance(item, (list, tuple)) and len(item) == 3
+                    ),
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
@@ -623,7 +714,22 @@ class MainWindow(QMainWindow):
             "checksum": post.checksum,
             "title": post.title,
             "media_type": post.media_type,
+            "width": post.width,
+            "height": post.height,
+            "video_variants": [list(item) for item in post.video_variants],
         } for post in posts])
+
+    @staticmethod
+    def _image_size_text(post: ImagePost, pixmap: QPixmap, *, full: bool = False) -> str:
+        displayed = f"{pixmap.width()} x {pixmap.height()}"
+        if full:
+            return displayed
+        if not post.width or not post.height:
+            return f"Preview {displayed} | Original size not reported"
+        original = f"{post.width} x {post.height}"
+        if displayed == original:
+            return f"Preview {displayed}"
+        return f"Preview {displayed} | Original {original}"
 
     def _active_post(self) -> ImagePost | None:
         if self.pages.currentWidget() is self.random_page:
@@ -696,7 +802,7 @@ class MainWindow(QMainWindow):
                 dialog.set_thumbnail(key, cached)
             else:
                 candidates = post.preview_urls or (post.image_url,)
-                self._submit(f"favorite-thumbnail:{token}/{key}", self._fetch_preview, candidates)
+                self._submit(f"favorite-thumbnail:{token}/{key}", self._fetch_decoded_candidates, candidates)
         dialog.exec()
 
     def _clear_favorites_dialog(self, token: str) -> None:
@@ -852,8 +958,8 @@ class MainWindow(QMainWindow):
             QLabel#footerMeta { color: __MUTED__; padding-left: 8px; }
             QProgressBar { border: 0; background: __PANEL__; border-radius: 1px; }
             QProgressBar::chunk { background: __ACCENT__; border-radius: 1px; }
-            QProgressBar#loadProgress { background: transparent; border: 0; border-radius: 0; }
-            QProgressBar#loadProgress::chunk { background: __ACCENT__; border-radius: 0; }
+            QProgressBar#centerLoadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
+            QProgressBar#centerLoadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
             QScrollBar:vertical { background: transparent; width: 9px; margin: 2px; }
             QScrollBar::handle:vertical { background: __BORDER__; border-radius: 4px; min-height: 24px; }
@@ -950,16 +1056,39 @@ class MainWindow(QMainWindow):
             label.setVisible(enabled and has_image)
             label.lower()
 
+    def _refresh_ambient_layers(self) -> None:
+        """Recompose ambient artwork after the window has finished restoring."""
+        for label, page in (
+            (self.random_ambient, self.random_page),
+            (self.detail_ambient, self.detail_page),
+        ):
+            source = getattr(label, "_ambient_source", QPixmap())
+            if not source.isNull():
+                self._set_ambient_image(label, source, page)
+            else:
+                label.setGeometry(page.rect())
+                label.hide()
+                label.lower()
+            page.update()
+        self.random_video._reflow()
+        self.detail_video._reflow()
+        self._position_detail_video_navigation()
+
     @staticmethod
     def _set_zoom_scrollbars(scroll_area: QScrollArea, zoomed: bool) -> None:
-        """Keep the image pannable while hiding scrollbars in zoomed view."""
-        policy = (
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-            if zoomed
-            else Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        """Keep scroll ranges active for panning, hiding only the visual bars."""
+        # AlwaysOff can collapse the scroll range on some Qt styles, which
+        # prevents the zoomed image from panning all the way to its edges.
+        policy = Qt.ScrollBarPolicy.ScrollBarAsNeeded
         scroll_area.setHorizontalScrollBarPolicy(policy)
         scroll_area.setVerticalScrollBarPolicy(policy)
+        if zoomed:
+            scroll_area.setStyleSheet(
+                "QScrollBar:horizontal { height: 0px; }"
+                "QScrollBar:vertical { width: 0px; }"
+            )
+        else:
+            scroll_area.setStyleSheet("")
 
     def _submit(self, key: str, operation, *args, progress_callback=None) -> None:
         task = BackgroundTask(key, operation, *args)
@@ -970,6 +1099,103 @@ class MainWindow(QMainWindow):
             task.kwargs["report_progress"] = lambda value: task.signals.progress.emit(key, value)
         self.tasks[key] = task
         self.pool.start(task)
+
+    def _on_video_buffering(self, source: str, buffering: bool) -> None:
+        player = self.random_video if source == "random" else self.detail_video
+        if player is not None and buffering:
+            player.set_controls_visible(True)
+            if self._fullscreen_active:
+                self._show_fullscreen_controls()
+            else:
+                self._media_controls_idle_timer.start()
+        if buffering:
+            self._on_video_status(source, "Buffering video...")
+
+    def _on_video_status(self, source: str, status: str) -> None:
+        """Reflect the active player's actual state instead of leaving a stale buffer label."""
+        if self._active_video_player() is None:
+            return
+        expected = "random" if self.pages.currentWidget() is self.random_page else "detail"
+        if source != expected:
+            return
+        if status == "Ready":
+            return
+        self.footer_meta.setText(status)
+        if not self._fullscreen_active:
+            self.statusBar().showMessage(status, 0)
+
+    def _on_video_playback_active(self, source: str, playing: bool) -> None:
+        player = self.random_video if source == "random" else self.detail_video
+        if playing:
+            player.set_controls_visible(True)
+            if self._fullscreen_active:
+                self._show_fullscreen_controls()
+            else:
+                self._media_controls_idle_timer.start()
+        else:
+            self._media_controls_idle_timer.stop()
+            player.set_controls_visible(True)
+        # Keep the application's bottom status bar visible during playback.
+        # Only fullscreen mode hides it, as part of the fullscreen layout.
+        if not self._fullscreen_active:
+            self.statusBar().show()
+
+    def _active_video_player(self) -> VideoPlayerWidget | None:
+        if self.pages.currentWidget() is self.random_page:
+            post = getattr(self, "random_post", None)
+            return self.random_video if post is not None and post.media_type == "video" else None
+        if self.pages.currentWidget() is self.detail_page:
+            return self.detail_video if self.detail_post and self.detail_post.media_type == "video" else None
+        return None
+
+    def _hide_windowed_video_controls(self) -> None:
+        if self._fullscreen_active:
+            return
+        player = self._active_video_player()
+        if (
+            player is not None
+            and player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        ):
+            player.set_controls_visible(False)
+
+    def _start_video_stream(self, player: VideoPlayerWidget, post: ImagePost) -> None:
+        self.footer_meta.setText("Buffering video...")
+        self.statusBar().showMessage("Buffering video...")
+        try:
+            max_height = int(self.settings.get("video/max_height", 0) or 0)
+            stream = self._catalog().create_video_stream(post, max_height or None)
+            player.set_source(stream.url, autoplay=True, stream_proxy=stream)
+        except Exception as error:
+            player.show_prepare_error(f"Could not start video stream: {error}")
+            self.statusBar().showMessage(f"Could not start video stream: {error}")
+
+    def _saved_video_volume(self) -> int:
+        try:
+            return max(0, min(100, int(self.settings.get("video/volume", 70))))
+        except (TypeError, ValueError):
+            return 70
+
+    def _save_video_volume(self, value: int) -> None:
+        value = max(0, min(100, int(value)))
+        self.settings.set("video/volume", value)
+        for player in (
+            getattr(self, "random_video", None),
+            getattr(self, "detail_video", None),
+        ):
+            if player is not None and player.volume_slider.value() != value:
+                player.set_volume(value)
+
+    def _play_random_video(self) -> None:
+        post = getattr(self, "random_post", None)
+        if post is None or post.media_type != "video":
+            return
+        self._start_video_stream(self.random_video, post)
+
+    def _play_detail_video(self) -> None:
+        post = getattr(self, "detail_post", None)
+        if post is None or post.media_type != "video":
+            return
+        self._start_video_stream(self.detail_video, post)
 
     def _task_succeeded(self, key: str, result) -> None:
         self.tasks.pop(key, None)
@@ -982,11 +1208,14 @@ class MainWindow(QMainWindow):
             if self.random_post.media_type == "video":
                 self._show_random_video(self.random_post)
             else:
-                self._show_random_image(self.random_content)
+                self._submit(f"random-image:{identifier}", decode_image_bytes, self.random_content)
             self._sync_favorite_buttons()
+        elif category == "random-image" and int(identifier) == self.request_id:
+            self._show_random_image(QPixmap.fromImage(result))
         elif category == "post-detail" and identifier == self.active_detail_id:
-            pixmap = QPixmap()
-            if pixmap.loadFromData(result):
+            pixmap = QPixmap.fromImage(result)
+            if not pixmap.isNull():
+                self._full_image_loaded = False
                 self.detail_media_stack.setCurrentWidget(self.detail_scroll)
                 self.detail_video.clear()
                 self.detail_image.set_image(pixmap)
@@ -995,40 +1224,45 @@ class MainWindow(QMainWindow):
                 self.fullscreen_button.setVisible(not self._fullscreen_active)
                 self._sync_favorite_buttons()
                 self.footer_meta.setText(
-                    f"{self.detail_post.provider} · {self.detail_post.rating.upper()} · "
-                    f"{pixmap.width()} × {pixmap.height()}"
+                    f"{self.detail_post.provider} | {self.detail_post.rating.upper()} | "
+                    f"{self._image_size_text(self.detail_post, pixmap)}"
                 )
+                self.full_image_button.setToolTip("Load original-resolution image")
+                self.full_image_button.setEnabled(True)
+                self.full_image_button.show()
             else:
                 self.fullscreen_button.hide()
                 self.detail_image.set_placeholder("The provider returned an unsupported image format.")
             self._finish_loading()
             self.statusBar().showMessage("Image loaded", 3000)
         elif category == "random-video" and int(identifier) == self.request_id:
-            self.random_video.set_source(str(result))
+            self.random_video.set_source(str(result), autoplay=True)
             self._set_image_credits_visible(True)
             self._finish_loading()
-            self.statusBar().showMessage("Video ready · Press Play to watch", 4000)
+            self.statusBar().showMessage("Video playback started", 4000)
         elif category == "post-detail-video" and identifier == self.active_detail_id:
-            self.detail_video.set_source(str(result))
+            self.detail_video.set_source(str(result), autoplay=True)
             self._set_image_credits_visible(True)
             self._finish_loading()
-            self.statusBar().showMessage("Video ready · Press Play to watch", 4000)
+            self.statusBar().showMessage("Video playback started", 4000)
         elif category == "random-video-preview" and int(identifier) == self.request_id:
             pixmap = QPixmap()
             if pixmap.loadFromData(result):
                 self.random_video.set_poster(pixmap)
-                self._set_ambient_image(self.random_ambient, pixmap, self.random_page)
+                if self.random_post and self.random_post.media_type == "video":
+                    self._set_ambient_image(self.random_ambient, pixmap, self.random_page)
         elif category == "detail-video-preview" and identifier == self.active_detail_id:
             pixmap = QPixmap()
             if pixmap.loadFromData(result):
                 self.detail_video.set_poster(pixmap)
-                self._set_ambient_image(self.detail_ambient, pixmap, self.detail_page)
+                if self.detail_post and self.detail_post.media_type == "video":
+                    self._set_ambient_image(self.detail_ambient, pixmap, self.detail_page)
         elif category == "thumbnail":
             generation, index = map(int, identifier.split("/"))
             if generation != self.gallery_generation or index >= len(self.posts):
                 return
-            pixmap = QPixmap()
-            if pixmap.loadFromData(result):
+            pixmap = QPixmap.fromImage(result)
+            if not pixmap.isNull():
                 post = self.posts[index]
                 self.thumbnail_cache[post.post_id] = pixmap
                 self._set_card_image(index, post, pixmap)
@@ -1036,14 +1270,39 @@ class MainWindow(QMainWindow):
             token, favorite_id = identifier.split("/", 1)
             if token != self.favorites_dialog_token or not self.favorites_dialog:
                 return
-            pixmap = QPixmap()
-            if pixmap.loadFromData(result):
+            pixmap = QPixmap.fromImage(result)
+            if not pixmap.isNull():
                 self.favorites_dialog.set_thumbnail(favorite_id, pixmap)
             else:
                 self.favorites_dialog.set_thumbnail_error(favorite_id)
         elif category == "download":
             self.downloads.update_download(identifier, f"Saved: {result}")
             self.statusBar().showMessage(f"Saved image to {result}", 5000)
+        elif category == "full-image":
+            view, token = identifier.split("/", 1)
+            if view == "random":
+                if token != str(self.request_id) or self.pages.currentWidget() is not self.random_page:
+                    return
+                full_pixmap = QPixmap.fromImage(result)
+                self.random_image.set_image(full_pixmap)
+                self._set_ambient_image(self.random_ambient, full_pixmap, self.random_page)
+                post = self.random_post
+            else:
+                if token != self.active_detail_id or self.pages.currentWidget() is not self.detail_page:
+                    return
+                full_pixmap = QPixmap.fromImage(result)
+                self.detail_image.set_image(full_pixmap)
+                self._set_ambient_image(self.detail_ambient, full_pixmap, self.detail_page)
+                post = self.detail_post
+            self.footer_meta.setText(
+                f"{post.provider} | {post.rating.upper()} | "
+                f"{self._image_size_text(post, full_pixmap, full=True)}"
+            )
+            self._full_image_loaded = True
+            self._full_image_previous = QPixmap()
+            self._full_image_view = None
+            self.full_image_button.hide()
+            self.statusBar().showMessage("Original-resolution image loaded", 4000)
 
     def _task_failed(self, key: str, error: str) -> None:
         self.tasks.pop(key, None)
@@ -1054,7 +1313,7 @@ class MainWindow(QMainWindow):
             self._open_detail_after_page = None
             self._finish_loading()
             self.gallery_status.setText(f"Search failed: {error}")
-            self.page_label.setText(f"Page {self.current_page} · Failed")
+            self.page_label.setText(f"Page {self.current_page} | Failed")
             if pending_detail:
                 if self._fullscreen_active:
                     self._exit_fullscreen()
@@ -1066,11 +1325,13 @@ class MainWindow(QMainWindow):
             self.random_media_stack.setCurrentWidget(self.random_scroll)
             self.random_video.clear()
             self.fullscreen_button.hide()
-            self.random_image.set_placeholder(f"Could not load an image\n{error}")
-            self.statusBar().showMessage(f"Could not load image: {error}")
+            media_filter = str(self.settings.get("search/media_filter", "image"))
+            media_name = {"image": "image", "video": "video", "all": "media"}.get(media_filter, "media")
+            self.random_image.set_placeholder(f"Could not load {media_name}\n{error}")
+            self.statusBar().showMessage(f"Could not load {media_name}: {error}")
         elif category == "random-video" and int(identifier) == self.request_id:
             self._finish_loading()
-            self.random_video.message.setText(f"Could not prepare video: {error}")
+            self.random_video.show_prepare_error(f"Could not prepare video: {error}")
             self.statusBar().showMessage(f"Could not prepare video: {error}")
         elif category == "post-detail" and identifier == self.active_detail_id:
             self._finish_loading()
@@ -1080,7 +1341,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Could not load image: {error}")
         elif category == "post-detail-video" and identifier == self.active_detail_id:
             self._finish_loading()
-            self.detail_video.message.setText(f"Could not prepare video: {error}")
+            self.detail_video.show_prepare_error(f"Could not prepare video: {error}")
             self.statusBar().showMessage(f"Could not prepare video: {error}")
         elif category == "thumbnail":
             generation, index = map(int, identifier.split("/"))
@@ -1094,20 +1355,49 @@ class MainWindow(QMainWindow):
                 self.favorites_dialog.set_thumbnail_error(favorite_id)
         elif category == "download":
             self.downloads.update_download(identifier, f"Failed: {error}")
+        elif category == "full-image":
+            view, token = identifier.split("/", 1)
+            is_current = (
+                view == "random"
+                and token == str(self.request_id)
+                and self.pages.currentWidget() is self.random_page
+            ) or (
+                view == "detail"
+                and token == self.active_detail_id
+                and self.pages.currentWidget() is self.detail_page
+            )
+            if not is_current:
+                return
+            previous = getattr(self, "_full_image_previous", QPixmap())
+            image_state = getattr(self, "_full_image_view", None)
+            if image_state and not previous.isNull():
+                target_image, ambient, page = image_state
+                target_image.set_image(previous)
+                self._set_ambient_image(ambient, previous, page)
+            self._full_image_previous = QPixmap()
+            self._full_image_view = None
+            self.full_image_button.setEnabled(True)
+            self.full_image_button.setToolTip("Load original-resolution image")
+            self.statusBar().showMessage(f"Could not load original image: {error}", 6000)
 
     def _begin_loading(self, message: str) -> None:
-        # Keep the bar empty while the provider is searching. It becomes
-        # determinate only after image bytes start arriving.
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.show()
+        if not self._fullscreen_active:
+            self.statusBar().show()
+            self.statusBar().raise_()
         self.footer_meta.setText(message)
         self.statusBar().showMessage(message)
+        if self.pages.currentWidget() is self.gallery_page:
+            self.gallery_loading_label.setText(message)
+            self.gallery_body.setCurrentWidget(self.gallery_loading)
 
     def _finish_loading(self) -> None:
-        self.progress.hide()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
+        if self.pages.currentWidget() is self.gallery_page:
+            self.gallery_body.setCurrentWidget(self.gallery_scroll)
+
+    def _ensure_status_bar_visible(self) -> None:
+        if not self._fullscreen_active:
+            self.statusBar().show()
+            self.statusBar().raise_()
 
     def _update_load_progress(self, key: str, value: int) -> None:
         category, _, identifier = key.partition(":")
@@ -1115,11 +1405,29 @@ class MainWindow(QMainWindow):
             return
         if category in {"post-detail", "post-detail-video", "detail-video-preview"} and identifier != self.active_detail_id:
             return
-        if value < 0:
-            self.progress.setRange(0, 100)
-            self.progress.setValue(0)
-        else:
-            self.progress.setValue(max(0, min(100, value)))
+        if category == "full-image":
+            view, _, token = identifier.partition("/")
+            if view == "random":
+                if token != str(self.request_id) or self.pages.currentWidget() is not self.random_page:
+                    return
+                target = self.random_image
+            elif view == "detail":
+                if token != self.active_detail_id or self.pages.currentWidget() is not self.detail_page:
+                    return
+                target = self.detail_image
+            else:
+                return
+            target.set_loading_progress("Loading full-size image...", value)
+            return
+        target = self.random_image if category in {"random", "random-image"} else (
+            self.detail_image if category in {"post-detail"} else None
+        )
+        if target is not None:
+            if value < 0:
+                target.loading_bar.setRange(0, 0)
+            else:
+                target.loading_bar.setRange(0, 100)
+                target.loading_bar.setValue(max(0, min(100, value)))
 
     def _active_rating(self) -> str:
         return self.selected_rating
@@ -1141,6 +1449,10 @@ class MainWindow(QMainWindow):
     def show_random(self) -> None:
         if not self._rating_allowed():
             return
+        if not self._fullscreen_active:
+            self.statusBar().show()
+        self._set_normal_video_actions("random", False)
+        self._set_normal_video_actions("detail", False)
         self._set_ambient_image(self.random_ambient, QPixmap(), self.random_page)
         self.detail_video.clear()
         self.random_video.clear()
@@ -1163,13 +1475,19 @@ class MainWindow(QMainWindow):
         self.random_post = None
         self.random_content = None
         self.random_pixmap = None
+        self._full_image_loaded = False
+        self.full_image_button.hide()
+        self.full_image_button.setEnabled(True)
+        self.full_image_button.setToolTip("Load original-resolution image")
         self.random_media_stack.setCurrentWidget(self.random_scroll)
         self._set_image_credits_visible(False)
         self._update_image_credits(None)
         self.random_image.set_image(QPixmap())
         self.fullscreen_button.hide()
-        self.random_image.set_placeholder("Loading an image…")
-        self._begin_loading("Finding an image…")
+        media_filter = str(self.settings.get("search/media_filter", "image"))
+        media_name = {"image": "image", "video": "video", "all": "media"}.get(media_filter, "media")
+        self.random_image.set_placeholder(f"Loading {media_name}...")
+        self._begin_loading(f"Finding a {media_name}...")
         self._sync_favorite_buttons()
         self._submit(
             f"random:{identifier}", self._catalog().random_image,
@@ -1184,17 +1502,24 @@ class MainWindow(QMainWindow):
         self.search_input.clear()
         self.show_random()
 
-    def _show_random_image(self, content: bytes) -> None:
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(content):
+    def _show_random_image(self, pixmap: QPixmap) -> None:
+        if pixmap.isNull():
             self._finish_loading()
             self.random_image.set_placeholder("The provider returned an unsupported image format.")
             return
         self.random_pixmap = pixmap
-        self.random_content = content
+        self._full_image_loaded = False
+        if not self._fullscreen_active:
+            self.statusBar().show()
+        # The preview is now retained as a pixmap; do not keep a second copy
+        # of the compressed response bytes in memory.
+        self.random_content = None
         self.random_media_stack.setCurrentWidget(self.random_scroll)
         self.random_video.clear()
         self.random_image.set_image(pixmap)
+        self.full_image_button.setToolTip("Load original-resolution image")
+        self.full_image_button.setEnabled(True)
+        self.full_image_button.show()
         self._set_image_credits_visible(True)
         self._set_ambient_image(self.random_ambient, pixmap, self.random_page)
         self.fullscreen_button.setVisible(not self._fullscreen_active)
@@ -1202,25 +1527,35 @@ class MainWindow(QMainWindow):
         post = getattr(self, "random_post", None)
         if post:
             self.footer_meta.setText(
-                f"{post.provider} · {post.rating.upper()} · {pixmap.width()} × {pixmap.height()}"
+                f"{post.provider} | {post.rating.upper()} | {self._image_size_text(post, pixmap)}"
             )
         self._finish_loading()
         self.statusBar().showMessage("Image loaded", 3000)
 
     def _show_random_video(self, post: ImagePost) -> None:
+        if not self._fullscreen_active:
+            self.statusBar().show()
+            self.statusBar().raise_()
+        self.full_image_button.hide()
         self.random_video.clear()
+        # Remove the previous media's ambient immediately; the new poster is
+        # used to build its own blurred background after the preview arrives.
+        self._set_ambient_image(self.random_ambient, QPixmap(), self.random_page)
         self.random_media_stack.setCurrentWidget(self.random_video)
-        self.random_video.message.setText("Preparing video…")
-        self._submit(
-            f"random-video:{self.request_id}", self._catalog().cache_video, post,
-            progress_callback=self._update_load_progress,
-        )
+        # Keep the random video poster centered in the available viewer area.
+        self.random_video.set_poster_alignment(Qt.AlignmentFlag.AlignCenter)
+        self.random_video.set_deferred_source(post.image_url)
+        if not self._fullscreen_active:
+            QTimer.singleShot(0, self._ensure_status_bar_visible)
+        self._set_normal_video_actions("random", True)
         if post.preview_urls:
             self._submit(f"random-video-preview:{self.request_id}", self._fetch_preview, post.preview_urls)
+        self._set_image_credits_visible(True)
         self.fullscreen_button.setVisible(not self._fullscreen_active)
         self._sync_favorite_buttons()
-        self.footer_meta.setText(f"{post.provider} · {post.rating.upper()} · VIDEO")
-        self._begin_loading("Preparing video…")
+        self.footer_meta.setText(f"{post.provider} | {post.rating.upper()} | VIDEO")
+        self._finish_loading()
+        self.statusBar().showMessage("Video ready | Press Play to stream", 4000)
 
     def _render_random_image(self) -> None:
         self.random_image._fit_to_viewport()
@@ -1232,15 +1567,19 @@ class MainWindow(QMainWindow):
         if not query:
             self.go_home()
             return
+        if not self._fullscreen_active:
+            self.statusBar().show()
         self.current_query = query
+        self.full_image_button.hide()
         self.title_bar.home_button.show()
-        self.footer_meta.setText(f"Searching · {query}")
+        self.footer_meta.setText(f"Searching | {query}")
         self.current_page = 1
         self.load_page(1)
 
     def load_page(self, page: int, detail_index: int | None = None) -> None:
         if not self.current_query or not self._rating_allowed():
             return
+        self.full_image_button.hide()
         self.random_video.clear()
         self.detail_video.clear()
         self._open_detail_after_page = detail_index
@@ -1264,8 +1603,8 @@ class MainWindow(QMainWindow):
         self.gallery_generation += 1
         self.posts = ()
         self._clear_gallery()
-        self.gallery_status.setText("Loading results…")
-        self.page_label.setText(f"Page {self.current_page} · Loading")
+        self.gallery_status.setText("")
+        self.page_label.setText(f"Page {self.current_page} | Loading")
         self.previous_button.setEnabled(False)
         self.next_button.setEnabled(False)
         if detail_index is not None:
@@ -1274,19 +1613,35 @@ class MainWindow(QMainWindow):
             self.detail_previous_button.setEnabled(False)
             self.detail_next_button.setEnabled(False)
         self.gallery_scroll.verticalScrollBar().setValue(0)
-        self._begin_loading("Searching providers…")
+        self._begin_loading("Searching providers...")
         self._submit(f"search:{identifier}", self._catalog().search, self.current_query, self._active_rating(),
                      self.selected_provider, self.current_page, 50)
 
     def _show_search_results(self, page: SearchPage) -> None:
+        if not self._fullscreen_active:
+            self.statusBar().show()
+            self.statusBar().raise_()
+        self.gallery_body.setCurrentWidget(self.gallery_scroll)
         self.posts = page.posts
         self._page_has_more = page.has_more
-        self.footer_meta.setText(f"Search · {len(self.posts)} images · Page {self.current_page}")
+        image_count = sum(post.media_type != "video" for post in self.posts)
+        video_count = len(self.posts) - image_count
+        media_filter = str(self.settings.get("search/media_filter", "image"))
+        if media_filter == "all":
+            media_summary = f"{video_count} videos · {image_count} images"
+        elif media_filter == "video":
+            media_summary = f"{video_count} videos"
+        else:
+            media_summary = f"{image_count} images"
+        self.footer_meta.setText(
+            f"Search | {media_summary} | Page {self.current_page}"
+        )
         self._clear_gallery()
         for index, post in enumerate(self.posts):
             self._add_card(index, post)
             self._submit_thumbnail(index, post)
-        self.page_label.setText(f"Page {self.current_page} · {len(self.posts)} images")
+        self._set_gallery_rows_top_aligned()
+        self.page_label.setText(f"Page {self.current_page} | {len(self.posts)} results")
         self.previous_button.setEnabled(self.current_page > 1)
         self.next_button.setEnabled(page.has_more)
         if page.fallback_from and page.posts:
@@ -1297,9 +1652,11 @@ class MainWindow(QMainWindow):
         elif page.provider_errors and page.posts:
             self.gallery_status.setText("Some providers could not be reached: " + " | ".join(page.provider_errors))
         elif page.posts:
-            self.gallery_status.setText(f'Results for “{self.current_query}”')
+            self.gallery_status.setText(f'Results for "{self.current_query}"')
         else:
-            self.gallery_status.setText(f'No images found for “{self.current_query}”.')
+            media_filter = str(self.settings.get("search/media_filter", "image"))
+            media_name = {"image": "images", "video": "videos", "all": "media"}.get(media_filter, "images")
+            self.gallery_status.setText(f'No {media_name} found for "{self.current_query}".')
         self._finish_loading()
         pending_index = self._open_detail_after_page
         self._open_detail_after_page = None
@@ -1314,39 +1671,93 @@ class MainWindow(QMainWindow):
     def _clear_gallery(self) -> None:
         self.card_buttons.clear()
         self.card_frames.clear()
-        while self.gallery_grid.count():
-            entry = self.gallery_grid.takeAt(0)
+        while self.gallery_rows.count():
+            entry = self.gallery_rows.takeAt(0)
             widget = entry.widget()
             if widget:
                 widget.deleteLater()
+
+    def _set_gallery_rows_top_aligned(self) -> None:
+        """Rebuild compact, centered rows and leave spare height below them."""
+        while self.gallery_rows.count():
+            entry = self.gallery_rows.takeAt(0)
+            old_row = entry.widget()
+            if old_row:
+                # Keep card widgets alive while replacing only the row wrappers
+                # after a window resize.
+                for frame in self.card_frames.values():
+                    if frame.parentWidget() is old_row:
+                        frame.setParent(self.gallery_content)
+                old_row.deleteLater()
+
+        columns = self._gallery_column_count()
+        for start in range(0, len(self.posts), columns):
+            row = QWidget(self.gallery_content)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            end = min(start + columns, len(self.posts))
+            partial = end - start < columns
+            if partial:
+                row_layout.addStretch(1)
+            for index in range(start, end):
+                frame = self.card_frames.get(self.posts[index].post_id)
+                if frame:
+                    row_layout.addWidget(frame, 0 if partial else 1)
+            if partial:
+                row_layout.addStretch(1)
+            self.gallery_rows.addWidget(row)
+        self.gallery_rows.addStretch(1)
+
+    def _gallery_column_count(self) -> int:
+        capacity = max(1, self.gallery_scroll.viewport().width() // 225)
+        return min(capacity, max(1, len(self.posts)))
 
     def _add_card(self, index: int, post: ImagePost) -> None:
         frame = QWidget()
         card_layout = QVBoxLayout(frame)
         card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(4)
-        button = QPushButton("Loading preview…")
+        card_layout.setSpacing(2)
+        preview_container = QWidget()
+        preview_layout = QGridLayout(preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(0)
+        if post.media_type == "video" and not post.preview_urls:
+            button = QPushButton("Video preview unavailable")
+            button.setIcon(self._icon("play"))
+            button.setIconSize(QSize(28, 28))
+        else:
+            button = QPushButton("Loading preview...")
         button.setObjectName("previewImage")
         button.setMinimumSize(190, 225)
         button.clicked.connect(lambda _checked=False, selected=post: self.open_post(selected))
-        card_layout.addWidget(button)
+        preview_layout.addWidget(button, 0, 0)
+        if post.media_type == "video":
+            play_badge = QLabel()
+            play_badge.setPixmap(self._icon("play").pixmap(QSize(22, 22)))
+            play_badge.setFixedSize(46, 46)
+            play_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            play_badge.setStyleSheet(
+                "background: rgba(16, 17, 24, 190); border-radius: 23px; padding: 12px;"
+            )
+            play_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            preview_layout.addWidget(play_badge, 0, 0, Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(preview_container)
         if post.title:
             title = QLabel(post.title)
             title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             title.setWordWrap(True)
             card_layout.addWidget(title)
-        columns = max(2, self.gallery_scroll.viewport().width() // 225)
-        self.gallery_grid.addWidget(frame, index // columns, index % columns)
         self.card_buttons[post.post_id] = button
         self.card_frames[post.post_id] = frame
         if post.post_id in self.thumbnail_cache:
             self._set_card_image(index, post, self.thumbnail_cache[post.post_id])
 
     def _submit_thumbnail(self, index: int, post: ImagePost) -> None:
-        if post.post_id in self.thumbnail_cache:
+        if post.post_id in self.thumbnail_cache or not post.preview_urls:
             return
         key = f"thumbnail:{self.gallery_generation}/{index}"
-        self._submit(key, self._fetch_preview, post.preview_urls)
+        self._submit(key, self._fetch_decoded_candidates, post.preview_urls)
 
     def _fetch_preview(self, candidates: tuple[str, ...]) -> bytes:
         failures = []
@@ -1356,6 +1767,44 @@ class MainWindow(QMainWindow):
             except ProviderError as error:
                 failures.append(str(error))
         raise ProviderError(failures[-1] if failures else "No thumbnail URL was supplied.")
+
+    def _fetch_decoded_preview(self, post: ImagePost, report_progress=None):
+        content = self._catalog().fetch_post_preview(post, report_progress)
+        return decode_image_bytes(content)
+
+    def _fetch_decoded_candidates(self, candidates: tuple[str, ...]):
+        return decode_image_bytes(self._fetch_preview(candidates), max_dimension=560)
+
+    def _fetch_decoded_original(self, post: ImagePost, report_progress=None):
+        content = self._catalog().fetch_image(post.image_url, report_progress)
+        return decode_image_bytes(content, max_dimension=None)
+
+    def load_full_image(self) -> None:
+        post = self._active_post()
+        if post is None or post.media_type != "image" or self._full_image_loaded:
+            return
+        if self.pages.currentWidget() is self.random_page:
+            identifier = f"random/{self.request_id}"
+            target_image = self.random_image
+            ambient = self.random_ambient
+            page = self.random_page
+        elif self.pages.currentWidget() is self.detail_page:
+            identifier = f"detail/{self.active_detail_id}"
+            target_image = self.detail_image
+            ambient = self.detail_ambient
+            page = self.detail_page
+        else:
+            return
+        self._full_image_previous = target_image.original
+        self._full_image_view = (target_image, ambient, page)
+        self._set_ambient_image(ambient, QPixmap(), page)
+        target_image.set_placeholder("Loading full-size image...")
+        self.full_image_button.setEnabled(False)
+        self.full_image_button.setToolTip("Loading full-size image...")
+        self._submit(
+            f"full-image:{identifier}", self._fetch_decoded_original, post,
+            progress_callback=self._update_load_progress,
+        )
 
     def _set_card_image(self, index: int, post: ImagePost, pixmap: QPixmap) -> None:
         if index >= len(self.posts) or self.posts[index].post_id != post.post_id:
@@ -1367,10 +1816,25 @@ class MainWindow(QMainWindow):
             button.setIconSize(QSize(175, 195))
 
     def open_post(self, post: ImagePost) -> None:
+        self._media_controls_idle_timer.stop()
         self.random_video.clear()
         self.detail_video.clear()
+        self._set_normal_video_actions("random", False)
+        self._set_normal_video_actions("detail", False)
         self._set_ambient_image(self.detail_ambient, QPixmap(), self.detail_page)
         self.detail_post = post
+        self._full_image_loaded = False
+        self.full_image_button.hide()
+        self.full_image_button.setEnabled(True)
+        self.full_image_button.setToolTip("Load original-resolution image")
+        if post.media_type == "video":
+            if not self._fullscreen_active:
+                self.statusBar().show()
+                self.statusBar().raise_()
+            self.full_image_button.hide()
+            self._set_normal_video_actions("detail", True)
+        elif not self._fullscreen_active:
+            self.statusBar().show()
         self._set_image_credits_visible(False)
         self.detail_from_search = bool(
             not self._opening_favorite
@@ -1383,43 +1847,56 @@ class MainWindow(QMainWindow):
         self.title_bar.home_button.setVisible(self.detail_origin in {"search", "favorites"})
         self.fullscreen_button.hide()
         show_navigation = self._detail_has_navigation()
-        self.detail_previous_button.setVisible(show_navigation and not self._fullscreen_active)
-        self.detail_next_button.setVisible(show_navigation and not self._fullscreen_active)
+        show_detail_arrows = (
+            show_navigation
+            and not self._fullscreen_active
+            and post.media_type != "video"
+        )
+        self.detail_previous_button.setVisible(show_detail_arrows)
+        self.detail_next_button.setVisible(show_detail_arrows)
+        show_video_arrows = (
+            show_navigation
+            and not self._fullscreen_active
+            and post.media_type == "video"
+        )
+        self.detail_video_previous_overlay.setVisible(show_video_arrows)
+        self.detail_video_next_overlay.setVisible(show_video_arrows)
         self.fullscreen_previous_button.setVisible(show_navigation)
         self.fullscreen_next_button.setVisible(show_navigation)
         self._update_detail_navigation()
         self.active_detail_id = str(uuid4())
-        self.detail_title.setText(post.title or f"{post.provider} | {post.rating.upper()}")
         self._update_image_credits(post)
         self.detail_image.set_image(QPixmap())
         self.pages.setCurrentWidget(self.detail_page)
+        self._position_detail_video_navigation()
         self._sync_favorite_buttons()
         self.back_button.show()
         if post.media_type == "video":
             self.detail_media_stack.setCurrentWidget(self.detail_video)
-            self.detail_video.message.setText("Preparing video…")
-            self._submit(
-                f"post-detail-video:{self.active_detail_id}", self._catalog().cache_video, post,
-                progress_callback=self._update_load_progress,
-            )
+            self.detail_video.set_poster_alignment(Qt.AlignmentFlag.AlignCenter)
+            self.detail_video.set_deferred_source(post.image_url)
+            if not self._fullscreen_active:
+                QTimer.singleShot(0, self._ensure_status_bar_visible)
             preview = self.thumbnail_cache.get(post.post_id)
             if preview:
                 self.detail_video.set_poster(preview)
                 self._set_ambient_image(self.detail_ambient, preview, self.detail_page)
             elif post.preview_urls:
                 self._submit(f"detail-video-preview:{self.active_detail_id}", self._fetch_preview, post.preview_urls)
-            else:
-                self._set_ambient_image(self.detail_ambient, QPixmap(), self.detail_page)
-            self.footer_meta.setText(f"{post.provider} · {post.rating.upper()} · VIDEO")
-            self._begin_loading("Preparing video…")
+            self.footer_meta.setText(f"{post.provider} | {post.rating.upper()} | VIDEO")
+            self._set_image_credits_visible(True)
+            self._finish_loading()
+            self.statusBar().showMessage("Video ready | Press Play to stream", 4000)
         else:
+            self._full_image_loaded = False
             self.detail_media_stack.setCurrentWidget(self.detail_scroll)
             self.detail_image.set_placeholder("Loading image...")
             self._begin_loading("Loading image...")
             self._submit(
-                f"post-detail:{self.active_detail_id}", self._catalog().fetch_image, post.image_url,
+                f"post-detail:{self.active_detail_id}", self._fetch_decoded_preview, post,
                 progress_callback=self._update_load_progress,
             )
+        self._position_detail_video_navigation()
 
     def _swipe_detail(self, direction: int) -> None:
         """Browse adjacent search results or saved favorites."""
@@ -1472,42 +1949,78 @@ class MainWindow(QMainWindow):
             next_available = self.detail_from_search and (
                 (index >= 0 and index < len(collection) - 1) or self._page_has_more
             )
-        for button in (self.detail_previous_button, self.fullscreen_previous_button):
+        for button in (
+            self.detail_previous_button,
+            self.detail_video_previous_overlay,
+            self.fullscreen_previous_button,
+            self.detail_video_previous_action,
+        ):
             button.setEnabled(previous_available)
-        for button in (self.detail_next_button, self.fullscreen_next_button):
+        for button in (
+            self.detail_next_button,
+            self.detail_video_next_overlay,
+            self.fullscreen_next_button,
+            self.detail_video_next_action,
+        ):
             button.setEnabled(next_available)
         show_navigation = self._detail_has_navigation()
-        self.detail_previous_button.setVisible(show_navigation and not self._fullscreen_active)
-        self.detail_next_button.setVisible(show_navigation and not self._fullscreen_active)
+        show_detail_arrows = (
+            show_navigation
+            and not self._fullscreen_active
+            and self.detail_post is not None
+            and self.detail_post.media_type != "video"
+        )
+        self.detail_previous_button.setVisible(show_detail_arrows)
+        self.detail_next_button.setVisible(show_detail_arrows)
+        show_video_arrows = (
+            show_navigation
+            and not self._fullscreen_active
+            and self.detail_post is not None
+            and self.detail_post.media_type == "video"
+        )
+        self.detail_video_previous_overlay.setVisible(show_video_arrows)
+        self.detail_video_next_overlay.setVisible(show_video_arrows)
         self.fullscreen_previous_button.setVisible(show_navigation)
         self.fullscreen_next_button.setVisible(show_navigation)
+        show_fullscreen_video_navigation = (
+            show_navigation
+            and self._fullscreen_active
+            and self.detail_post is not None
+            and self.detail_post.media_type == "video"
+        )
+        self.detail_video_previous_action.setVisible(show_fullscreen_video_navigation)
+        self.detail_video_next_action.setVisible(show_fullscreen_video_navigation)
+
+    def _position_detail_video_navigation(self) -> None:
+        if not hasattr(self, "detail_video_previous_overlay"):
+            return
+        page = self.detail_page
+        button_height = self.detail_video_previous_overlay.height()
+        center_y = max(0, (page.height() - button_height) // 2)
+        self.detail_video_previous_overlay.move(12, center_y)
+        self.detail_video_next_overlay.move(
+            max(12, page.width() - self.detail_video_next_overlay.width() - 12),
+            center_y,
+        )
+        if self.detail_video_previous_overlay.isVisible():
+            self.detail_video_previous_overlay.raise_()
+            self.detail_video_next_overlay.raise_()
 
     def _update_image_credits(self, post: ImagePost | None) -> None:
-        artists = ", ".join(post.artists) if post and post.artists else "not provided"
-        source = post.source if post and post.source else "not provided"
-        artist_label = artists if len(artists) <= 72 else artists[:69] + "..."
-        source_label = source if len(source) <= 72 else source[:69] + "..."
-        self.credit_artist_action.setText(f"Artist: {artist_label}")
-        self.credit_artist_action.setToolTip(artists)
-        self.credit_source_action.setText(f"Source: {source_label}")
-        source_url = QUrl(source)
-        can_open_source = source_url.isValid() and source_url.scheme().lower() in ("http", "https")
-        self.credit_source_action.setEnabled(can_open_source)
-        self.credit_source_action.setToolTip(
-            f"Open source: {source}" if can_open_source else source
-        )
-        try:
-            self.credit_source_action.triggered.disconnect()
-        except RuntimeError:
-            pass
-        if can_open_source:
-            self.credit_source_action.triggered.connect(
-                lambda _checked=False, url=source_url: QDesktopServices.openUrl(url)
-            )
+        self._credits_post = post
+
+    def show_image_credits(self) -> None:
+        post = getattr(self, "_credits_post", None)
+        if post is None:
+            return
+        dialog = ImageCreditsDialog(post, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_tag:
+            self.search_input.setText(dialog.selected_tag)
+            self.start_search()
 
     def _set_image_credits_visible(self, visible: bool) -> None:
         """Expose credits only when a full image or video is currently loaded."""
-        self.image_credits_menu.menuAction().setVisible(visible)
+        self.image_credits_action.setVisible(visible)
 
     def back_to_results(self) -> None:
         if self._fullscreen_active:
@@ -1523,6 +2036,7 @@ class MainWindow(QMainWindow):
             self.show_favorites()
         elif self.detail_origin == "search":
             self.pages.setCurrentWidget(self.gallery_page)
+            self.full_image_button.hide()
             self.title_bar.home_button.show()
         else:
             self.go_home()
@@ -1536,21 +2050,54 @@ class MainWindow(QMainWindow):
             return
         self._fullscreen_source = "random" if current_page is self.random_page else "detail"
         self._was_maximized_before_fullscreen = self.isMaximized()
+        self._windowed_geometry = self.geometry()
         self._fullscreen_active = True
+        active_player = self.random_video if self._fullscreen_source == "random" else self.detail_video
+        active_player.set_fullscreen_mode(True)
+        self._update_detail_navigation()
         self.random_video.set_fullscreen_toggle_visible(False)
         self.detail_video.set_fullscreen_toggle_visible(False)
         self.title_bar.hide()
         self.statusBar().hide()
         self.fullscreen_button.hide()
-        if self._fullscreen_source != "random":
-            self.detail_title.hide()
         self.detail_previous_button.hide()
         self.detail_next_button.hide()
-        self.showFullScreen()
+        # Use a borderless monitor-sized normal window instead of Qt's native
+        # fullscreen state. On Windows the native state can composite video
+        # above screenshot overlays and other top-level windows.
+        screen = self.screen()
+        if screen is None and self.windowHandle() is not None:
+            screen = self.windowHandle().screen()
+        self.showNormal()
+        if screen is not None:
+            self.setGeometry(screen.geometry())
+        active_player._schedule_reflow()
         self._sync_favorite_buttons()
         self._show_fullscreen_controls()
         image = self.random_image if self._fullscreen_source == "random" else self.detail_image
         QTimer.singleShot(0, image._fit_to_viewport)
+
+    def _set_normal_video_actions(self, source: str, visible: bool) -> None:
+        if source == "random":
+            actions = (
+                self.random_video_refresh_action,
+                self.random_video_favorite_action,
+                self.random_video_download_action,
+            )
+            exit_action = self.random_video_exit_action
+            player = self.random_video
+        else:
+            actions = (
+                self.detail_video_favorite_action,
+                self.detail_video_download_action,
+            )
+            exit_action = self.detail_video_exit_action
+            player = self.detail_video
+        for action in actions:
+            action.setVisible(visible)
+        exit_action.hide()
+        if visible:
+            player.controls_frame.raise_()
 
     def _exit_fullscreen(self) -> None:
         if not self._fullscreen_active:
@@ -1561,27 +2108,41 @@ class MainWindow(QMainWindow):
         self.random_fullscreen_toolbar.hide()
         self.random_video.set_fullscreen_actions_visible(False)
         self.detail_video.set_fullscreen_actions_visible(False)
+        self.random_video.set_fullscreen_mode(False)
+        self.detail_video.set_fullscreen_mode(False)
         if self._was_maximized_before_fullscreen:
             self.showMaximized()
         else:
             self.showNormal()
+            if self._windowed_geometry is not None:
+                self.setGeometry(self._windowed_geometry)
+        self.random_video._schedule_reflow()
+        self.detail_video._schedule_reflow()
+        self._ambient_restore_timer.start()
         self.title_bar.show()
+        current_page = self.pages.currentWidget()
+        # Restore the app footer after leaving fullscreen, including for a
+        # paused or buffering video.
         self.statusBar().show()
         self.random_video.set_fullscreen_toggle_visible(self.pages.currentWidget() is self.random_page)
         self.detail_video.set_fullscreen_toggle_visible(self.pages.currentWidget() is self.detail_page)
-        if getattr(self, "_fullscreen_source", "detail") != "random":
-            self.detail_title.show()
+        current_page = self.pages.currentWidget()
+        current_post = self.random_post if current_page is self.random_page else self.detail_post
+        if current_post is not None and current_post.media_type == "video":
+            self._set_normal_video_actions(
+                "random" if current_page is self.random_page else "detail", True
+            )
+            player = self._active_video_player()
+            if player and player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                player.set_controls_visible(True)
+                self._media_controls_idle_timer.start()
         image_page = self.pages.currentWidget()
         image_ready = (
             (image_page is self.random_page and not self.random_image.original.isNull())
             or (image_page is self.detail_page and not self.detail_image.original.isNull())
         )
         self.fullscreen_button.setVisible(image_ready)
-        show_detail_navigation = self.pages.currentWidget() is self.detail_page and self._detail_has_navigation()
-        self.detail_previous_button.setVisible(show_detail_navigation)
-        self.detail_next_button.setVisible(show_detail_navigation)
-        self.fullscreen_previous_button.setVisible(show_detail_navigation)
-        self.fullscreen_next_button.setVisible(show_detail_navigation)
+        self._update_detail_navigation()
         self._sync_favorite_buttons()
         image = self.random_image if getattr(self, "_fullscreen_source", "detail") == "random" else self.detail_image
         QTimer.singleShot(0, image._fit_to_viewport)
@@ -1597,6 +2158,7 @@ class MainWindow(QMainWindow):
         if post is not None and post.media_type == "video":
             toolbar.hide()
             player.set_fullscreen_toggle_visible(False)
+            player.set_fullscreen_controls_visible(True)
             self.random_video.set_fullscreen_actions_visible(source == "random")
             self.detail_video.set_fullscreen_actions_visible(source != "random")
             favorite = any(favorite_key(item) == favorite_key(post) for item in self._favorite_posts())
@@ -1604,9 +2166,6 @@ class MainWindow(QMainWindow):
                 self.random_video_favorite_action.setIcon(self._icon("heart-filled" if favorite else "heart"))
             else:
                 self.detail_video_favorite_action.setIcon(self._icon("heart-filled" if favorite else "heart"))
-                can_navigate = self._detail_has_navigation()
-                self.detail_video_previous_action.setVisible(can_navigate)
-                self.detail_video_next_action.setVisible(can_navigate)
             player.controls_frame.raise_()
             self._fullscreen_idle_timer.start()
             return
@@ -1629,6 +2188,11 @@ class MainWindow(QMainWindow):
             self.random_fullscreen_toolbar.hide()
             self.random_video.set_fullscreen_actions_visible(False)
             self.detail_video.set_fullscreen_actions_visible(False)
+            source = getattr(self, "_fullscreen_source", "detail")
+            post = getattr(self, "random_post", None) if source == "random" else self.detail_post
+            if post is not None and post.media_type == "video":
+                player = self.random_video if source == "random" else self.detail_video
+                player.set_fullscreen_controls_visible(False)
 
     def download_active_image(self) -> None:
         if self.pages.currentWidget() is self.detail_page:
@@ -1720,7 +2284,13 @@ class MainWindow(QMainWindow):
             folder = str(Path.home() / "Pictures" / "Waifu Gallery")
         extension = Path(post.image_url.split("?", 1)[0]).suffix or ".jpg"
         suggested = str(Path(folder) / f"waifu_{post.post_id}{extension}")
-        filename, _ = QFileDialog.getSaveFileName(self, "Save image", suggested, "Images (*.jpg *.jpeg *.png *.webp *.gif);;All files (*.*)")
+        is_video = post.media_type == "video"
+        title = "Save video" if is_video else "Save image"
+        file_types = (
+            "Videos (*.mp4 *.m4v *.webm *.mov *.mkv *.avi);;All files (*.*)"
+            if is_video else "Images (*.jpg *.jpeg *.png *.webp *.gif);;All files (*.*)"
+        )
+        filename, _ = QFileDialog.getSaveFileName(self, title, suggested, file_types)
         if not filename:
             return
         key = str(uuid4())
@@ -1740,6 +2310,7 @@ class MainWindow(QMainWindow):
             and (watched is self or self.isAncestorOf(watched))
             and event.type() == QEvent.Type.MouseButtonPress
             and event.button() == Qt.MouseButton.LeftButton
+            and not self._fullscreen_active
             and not self.isMaximized()
         ):
             handle = self.windowHandle()
@@ -1760,8 +2331,19 @@ class MainWindow(QMainWindow):
                     if edges and handle.startSystemResize(edges):
                         event.accept()
                         return True
-        if self._fullscreen_active and event.type() == QEvent.Type.MouseMove:
-            self._show_fullscreen_controls()
+        if event.type() in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
+            if self._fullscreen_active:
+                self._show_fullscreen_controls()
+            else:
+                player = self._active_video_player()
+                if (
+                    player is not None
+                    and isinstance(watched, QWidget)
+                    and (watched is player or player.isAncestorOf(watched))
+                ):
+                    player.set_controls_visible(True)
+                    if player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                        self._media_controls_idle_timer.start()
         if watched is self.search_input:
             if event.type() == QEvent.Type.FocusIn:
                 glow = QGraphicsDropShadowEffect(self.search_input)
@@ -1828,6 +2410,7 @@ class MainWindow(QMainWindow):
             if not source.isNull():
                 self._set_ambient_image(self.detail_ambient, source, self.detail_page)
             self.detail_ambient.lower()
+        self._position_detail_video_navigation()
         self._render_random_image()
         if hasattr(self, "detail_image"):
             self.detail_image._fit_to_viewport()
@@ -1836,10 +2419,4 @@ class MainWindow(QMainWindow):
             ):
                 self._show_fullscreen_controls()
         if self.posts:
-            columns = max(2, self.gallery_scroll.viewport().width() // 225)
-            while self.gallery_grid.count():
-                self.gallery_grid.takeAt(0)
-            for index, post in enumerate(self.posts):
-                frame = self.card_frames.get(post.post_id)
-                if frame:
-                    self.gallery_grid.addWidget(frame, index // columns, index % columns)
+            self._set_gallery_rows_top_aligned()

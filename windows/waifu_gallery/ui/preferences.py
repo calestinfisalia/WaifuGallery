@@ -281,8 +281,22 @@ class PreferencesDialog(QDialog):
         media = str(self.settings.get("search/media_filter", "image"))
         self.media_filter.setCurrentIndex(max(0, self.media_filter.findData(media)))
         form.addRow("Media showing", self.media_filter)
+        self.video_resolution = QComboBox()
+        self.video_resolution.addItem("Auto (provider source)", 0)
+        self.video_resolution.addItem("Up to 2160p", 2160)
+        self.video_resolution.addItem("Up to 1080p", 1080)
+        self.video_resolution.addItem("Up to 720p", 720)
+        self.video_resolution.addItem("Up to 480p", 480)
+        resolution = int(self.settings.get("video/max_height", 0) or 0)
+        resolution_index = self.video_resolution.findData(resolution)
+        self.video_resolution.setCurrentIndex(max(0, resolution_index))
+        form.addRow("Video stream resolution", self.video_resolution)
         layout.addLayout(form)
-        note = QLabel("Media selection applies to Random and Search results. Video playback depends on the installed Windows codecs.")
+        note = QLabel(
+            "Resolution selects the closest provider video variant at or below this limit. "
+            "If a provider supplies only one file, that source is used. Media selection "
+            "applies to Random and Search results; playback also depends on installed codecs."
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch(1)
@@ -449,5 +463,6 @@ class PreferencesDialog(QDialog):
         self.settings.set("network/doh_custom_endpoint", self.doh_custom_endpoint.text().strip())
         self.settings.set("view/ambient_mode", self.ambient_mode.isChecked())
         self.settings.set("search/media_filter", self.media_filter.currentData())
+        self.settings.set("video/max_height", self.video_resolution.currentData())
         set_doh_enabled(self.use_doh.isChecked(), doh_endpoint)
         self.accept()

@@ -21,6 +21,14 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
 
+## Windows 0.1.3
+
+- Added video volume and mute controls, plus a preferred stream resolution setting. The player selects an available provider rendition at or below the chosen limit when possible.
+- Improved video playback lifecycle, buffering/status updates, and fullscreen controls; video thumbnails and search results report image and video counts separately.
+- Added centered load progress for media and full-resolution image retrieval. Display previews are decoded at a capped size for faster viewing; downloads keep the provider's original media.
+- Updated media information and clickable tag search, along with refreshed player icons and release packaging for portable and setup builds.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
+
 ## Run on Windows
 
 Install Python 3.10 or newer, then run:
@@ -39,7 +47,15 @@ To build the Windows folder distribution after the first run:
 
 The output is `dist\Waifu Gallery\Waifu Gallery.exe`.
 
-The release installer and single-file portable build are generated separately from the same folder distribution. The release artifacts are written under `dist-release`.
+Build both release files after running the application at least once:
+
+```powershell
+.\build_release.ps1
+```
+
+The script creates `dist-release\WaifuGallery-Setup-x64.exe` and `dist-release\WaifuGallery-Portable-x64.exe`. It requires Inno Setup 7 for the installer.
+
+The installer detects the existing Waifu Gallery installation and asks before updating it. It reuses the previous install folder and replaces the program files in place. Settings are stored in the current Windows user's registry and downloads are stored in the selected download folder, so an update keeps both. The portable executable does not install or replace the installed app.
 
 ## Provider credentials
 

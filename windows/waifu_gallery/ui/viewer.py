@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QProgressBar,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -28,6 +29,12 @@ class ZoomImage(QLabel):
         self.scroll_area = None
         self._drag_position = None
         self._swipe_start = None
+        self.loading_bar = QProgressBar(self)
+        self.loading_bar.setObjectName("centerLoadProgress")
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedSize(220, 4)
+        self.loading_bar.hide()
 
     def set_image(self, pixmap: QPixmap) -> None:
         self.original = pixmap
@@ -40,7 +47,13 @@ class ZoomImage(QLabel):
         if pixmap.isNull():
             self.setPixmap(QPixmap())
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.loading_bar.hide()
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(0)
             return
+        self.loading_bar.hide()
+        self.loading_bar.setRange(0, 100)
+        self.loading_bar.setValue(0)
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.factor > 1.0 else Qt.CursorShape.ArrowCursor)
         self._fit_to_viewport()
 
@@ -51,10 +64,40 @@ class ZoomImage(QLabel):
         self.setPixmap(QPixmap())
         self.setText(message)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        is_loading = any(word in message.lower() for word in ("loading", "preparing", "searching"))
+        if is_loading:
+            # Each media request starts with a fresh busy indicator instead
+            # of retaining the previous image's completed percentage.
+            self.loading_bar.setRange(0, 0)
+            self.loading_bar.setValue(0)
+            self.loading_bar.show()
+        else:
+            self.loading_bar.hide()
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(0)
         self.setMinimumSize(1, 1)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if self.scroll_area is not None:
             self.scroll_area.setWidgetResizable(True)
+
+    def set_loading_progress(self, label: str, value: int) -> None:
+        """Show byte-download progress while keeping the loading view centered."""
+        if value < 0:
+            self.setText(label)
+            self.loading_bar.setRange(0, 0)
+        else:
+            percentage = max(0, min(100, value))
+            self.setText(f"{label} {percentage}%")
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(percentage)
+        self.loading_bar.show()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.loading_bar.move(
+            max(0, (self.width() - self.loading_bar.width()) // 2),
+            max(0, self.height() // 2 + 22),
+        )
 
     def _fit_to_viewport(self) -> None:
         if self.original.isNull():
@@ -64,8 +107,11 @@ class ZoomImage(QLabel):
             available = self.size()
         if available.width() < 50 or available.height() < 50:
             available = self.original.size()
+        # Scale the displayed preview to the available viewer area even when
+        # the provider's sample is smaller than the window. The explicit
+        # original-resolution action remains available for pixel-level detail.
         self.base_scale = min(available.width() / self.original.width(),
-                              available.height() / self.original.height(), 1.0)
+                              available.height() / self.original.height())
         self._render()
 
     def _render(self) -> None:
@@ -86,14 +132,17 @@ class ZoomImage(QLabel):
         old_height = max(1, self.height())
         viewport_point = None
         horizontal = vertical = None
+        ratio_x = ratio_y = 0.5
         if self.viewport is not None and self.scroll_area is not None:
-            viewport_point = self.mapTo(self.viewport, event.position().toPoint())
+            image_point = event.position().toPoint()
+            viewport_point = self.mapTo(self.viewport, image_point)
             horizontal = self.scroll_area.horizontalScrollBar()
             vertical = self.scroll_area.verticalScrollBar()
-            content_x = horizontal.value() + viewport_point.x()
-            content_y = vertical.value() + viewport_point.y()
-            ratio_x = content_x / old_width
-            ratio_y = content_y / old_height
+            # Keep the pointer anchored to the same point inside the image.
+            # Using scroll value + viewport coordinates double-counted the
+            # centered offset when a portrait image was narrower than its view.
+            ratio_x = min(1.0, max(0.0, image_point.x() / old_width))
+            ratio_y = min(1.0, max(0.0, image_point.y() / old_height))
         multiplier = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         previous = self.factor
         self.factor = min(6.0, max(1.0, self.factor * multiplier))
@@ -101,17 +150,19 @@ class ZoomImage(QLabel):
         self.zoomChanged.emit(self.factor > 1.0)
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.factor > 1.0 else Qt.CursorShape.ArrowCursor)
         if self.factor != previous and viewport_point is not None:
-            new_width = max(1, round(old_width * self.factor / previous))
-            new_height = max(1, round(old_height * self.factor / previous))
             QTimer.singleShot(0, lambda: self._keep_zoom_anchor(
-                horizontal, vertical, round(ratio_x * new_width - viewport_point.x()),
-                round(ratio_y * new_height - viewport_point.y())))
+                horizontal, vertical, self, self.viewport, ratio_x, ratio_y, viewport_point))
         event.accept()
 
     @staticmethod
-    def _keep_zoom_anchor(horizontal, vertical, x: int, y: int) -> None:
-        horizontal.setValue(x)
-        vertical.setValue(y)
+    def _keep_zoom_anchor(horizontal, vertical, image, viewport, ratio_x: float, ratio_y: float, point) -> None:
+        # QScrollArea centers an image while that axis is smaller than the
+        # viewport, then switches to scroll coordinates after it grows larger.
+        # Account for both states so zooming doesn't jump/crop sideways.
+        x_offset = max(0, (viewport.width() - image.width()) // 2)
+        y_offset = max(0, (viewport.height() - image.height()) // 2)
+        horizontal.setValue(round(x_offset + ratio_x * image.width() - point.x()))
+        vertical.setValue(round(y_offset + ratio_y * image.height() - point.y()))
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.factor > 1.0 and self.scroll_area is not None:
