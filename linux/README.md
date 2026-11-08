@@ -1,12 +1,22 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux porting workspace. It starts as a copy of the Windows Python/PySide6 implementation so Linux-specific changes can be developed here without changing `windows/`.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.4 while Linux launch and packaging files remain separate.
 
 ## Status
 
-This is a porting baseline, not a Linux release yet. The UI currently uses a frameless window and contains Windows-specific native resize handling. Review and adapt that code for Linux window managers and Wayland/X11 before relying on the UI. The Linux build and runtime have not been verified yet.
+The source includes the Windows 0.1.3–0.1.4 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, and media information. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
-The source uses PySide6, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers and optional DNS over HTTPS.
+The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers and optional DNS over HTTPS.
+
+## Features
+
+- Random browsing, tag search, paged results, zoom/pan, favorites, downloads, and media information.
+- Danbooru, yande.re, Gelbooru, and Rule34.xxx providers; Gelbooru and Rule34.xxx require provider credentials.
+- SFW/NSFW rating, male-only and gore filters, custom blocked tags, image/video selection, and configurable video stream resolution.
+- Video play/pause, seeking, volume/mute, buffering and playback-error feedback, and fullscreen controls.
+- Optional process-local DoH using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom RFC 8484 endpoint.
+
+The application filters content only by provider metadata and tags. Follow each provider's usage rules. Credentials are stored in the user's QSettings profile and are not encrypted by the application.
 
 ## Run from source
 
@@ -20,7 +30,7 @@ The script creates `.venv`, installs `requirements.txt`, and starts the applicat
 
 ## Packaging
 
-AppImage and Flatpak packaging are not configured yet. Build and verify the application on Linux first, then add Linux-specific packaging metadata and test image saving, window resizing, DNS over HTTPS, and provider access.
+AppImage and Flatpak packaging are not configured yet. Build and verify the application on Linux first, including image/video playback, image saving, window resizing, DNS over HTTPS, and provider access.
 
 ## License and credits
 

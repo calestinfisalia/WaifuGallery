@@ -29,6 +29,46 @@ class AppPreferences(context: Context) {
         get() = store.getString("gelbooru_api_key", "") ?: ""
         set(value) = store.edit().putString("gelbooru_api_key", value.trim()).apply()
 
+    var rule34UserId: String
+        get() = store.getString("rule34_user_id", "") ?: ""
+        set(value) = store.edit().putString("rule34_user_id", value.trim()).apply()
+
+    var rule34ApiKey: String
+        get() = store.getString("rule34_api_key", "") ?: ""
+        set(value) = store.edit().putString("rule34_api_key", value.trim()).apply()
+
+    var dohProvider: String
+        get() = store.getString("doh_provider", "Cloudflare") ?: "Cloudflare"
+        set(value) = store.edit().putString("doh_provider", value).apply()
+
+    var customDohEndpoint: String
+        get() = store.getString("custom_doh_endpoint", "") ?: ""
+        set(value) = store.edit().putString("custom_doh_endpoint", value.trim()).apply()
+
+    var filterGore: Boolean
+        get() = store.getBoolean("filter_gore", true)
+        set(value) = store.edit().putBoolean("filter_gore", value).apply()
+
+    var excludeMale: Boolean
+        get() = store.getBoolean("exclude_male", true)
+        set(value) = store.edit().putBoolean("exclude_male", value).apply()
+
+    var customBlockTags: String
+        get() = store.getString("custom_block_tags", "") ?: ""
+        set(value) = store.edit().putString("custom_block_tags", value).apply()
+
+    var mediaFilter: String
+        get() = store.getString("media_filter", "image") ?: "image"
+        set(value) = store.edit().putString("media_filter", value).apply()
+
+    var videoMaxHeight: Int
+        get() = store.getInt("video_max_height", 0)
+        set(value) = store.edit().putInt("video_max_height", value.coerceAtLeast(0)).apply()
+
+    var ambientMode: Boolean
+        get() = store.getBoolean("ambient_mode", true)
+        set(value) = store.edit().putBoolean("ambient_mode", value).apply()
+
     var customSearchIndex: Int
         get() = store.getInt("custom_search_index", 0)
         set(value) = store.edit().putInt("custom_search_index", value).apply()
@@ -67,6 +107,21 @@ class AppPreferences(context: Context) {
                     tags = item.optJSONArray("tags").toStringList().toSet(),
                     source = item.optString("source"),
                     artists = item.optJSONArray("artists").toStringList(),
+                    mediaType = item.optString("mediaType", "image"),
+                    title = item.optString("title", ""),
+                    width = item.optInt("width", 0),
+                    height = item.optInt("height", 0),
+                    videoVariants = item.optJSONArray("videoVariants")?.let { variants ->
+                        (0 until variants.length()).mapNotNull { variantIndex ->
+                            val variant = variants.optJSONObject(variantIndex) ?: return@mapNotNull null
+                            val url = variant.optString("url")
+                            if (url.isBlank()) null else VideoVariant(
+                                url = url,
+                                width = variant.optInt("width", 0),
+                                height = variant.optInt("height", 0),
+                            )
+                        }
+                    }.orEmpty(),
                 )
             }.getOrNull()
         }
@@ -89,6 +144,19 @@ class AppPreferences(context: Context) {
                 put("tags", JSONArray(post.tags))
                 put("source", post.source)
                 put("artists", JSONArray(post.artists))
+                put("mediaType", post.mediaType)
+                put("title", post.title)
+                put("width", post.width)
+                put("height", post.height)
+                put("videoVariants", JSONArray().apply {
+                    post.videoVariants.forEach { variant ->
+                        put(JSONObject().apply {
+                            put("url", variant.url)
+                            put("width", variant.width)
+                            put("height", variant.height)
+                        })
+                    }
+                })
             })
         }
         store.edit().putString("favorite_posts", array.toString()).apply()

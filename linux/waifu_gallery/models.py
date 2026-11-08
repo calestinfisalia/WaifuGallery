@@ -13,6 +13,10 @@ class ImagePost:
     source: str = ""
     checksum: str = ""
     title: str = ""
+    media_type: str = "image"
+    width: int = 0
+    height: int = 0
+    video_variants: tuple[tuple[str, int, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "waifu-gallery"
-version = "0.1.0"
-description = "An independently implemented Linux desktop image gallery for public booru APIs"
+version = "0.1.4"
+description = "A Linux desktop image and video gallery for public booru APIs"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["PySide6>=6.8,<7", "requests>=2.32,<3"]

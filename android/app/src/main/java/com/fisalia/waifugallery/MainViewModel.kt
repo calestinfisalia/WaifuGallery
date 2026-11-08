@@ -66,12 +66,21 @@ data class UiState(
     val searchVisible: Boolean = false,
     val showPreferences: Boolean = false,
     val requestGelbooruCredentials: Boolean = false,
+    val requestRule34Credentials: Boolean = false,
     val showDownloadQueue: Boolean = false,
     val downloads: List<DownloadItem> = emptyList(),
     val error: String? = null,
     val notice: String? = null,
     val allowNsfw: Boolean = false,
     val useDoh: Boolean = false,
+    val dohProvider: String = "Cloudflare",
+    val customDohEndpoint: String = "",
+    val filterGore: Boolean = true,
+    val excludeMale: Boolean = true,
+    val customBlockTags: String = "",
+    val mediaFilter: String = "image",
+    val videoMaxHeight: Int = 0,
+    val ambientMode: Boolean = true,
     val provider: String = "Auto",
     val customTerms: List<String> = emptyList(),
     val saveFolderLabel: String? = null,
@@ -82,11 +91,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val api = BooruApi(
         useDoh = { preferences.useDoh },
         gelbooruCredentials = { preferences.gelbooruUserId to preferences.gelbooruApiKey },
+        rule34Credentials = { preferences.rule34UserId to preferences.rule34ApiKey },
+        dohProvider = { preferences.dohProvider },
+        customDohEndpoint = { preferences.customDohEndpoint },
+        filterGore = { preferences.filterGore },
+        excludeMale = { preferences.excludeMale },
+        customBlockTags = { preferences.customBlockTags },
+        mediaFilter = { preferences.mediaFilter },
     )
     private val _state = MutableStateFlow(
         UiState(
             allowNsfw = preferences.allowNsfw,
             useDoh = preferences.useDoh,
+            dohProvider = preferences.dohProvider,
+            customDohEndpoint = preferences.customDohEndpoint,
+            filterGore = preferences.filterGore,
+            excludeMale = preferences.excludeMale,
+            customBlockTags = preferences.customBlockTags,
+            mediaFilter = preferences.mediaFilter,
+            videoMaxHeight = preferences.videoMaxHeight,
+            ambientMode = preferences.ambientMode,
             provider = preferences.selectedProvider,
             favorites = preferences.favoritePosts(),
             customTerms = preferences.customSearchTerms(),
@@ -107,9 +131,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openPreferences() = _state.update { it.copy(showPreferences = true) }
     fun closePreferences() = _state.update { it.copy(showPreferences = false) }
     fun openGelbooruCredentials() = _state.update { it.copy(requestGelbooruCredentials = true) }
+    fun openRule34Credentials() = _state.update { it.copy(requestRule34Credentials = true) }
     fun cancelGelbooruCredentials() {
         pendingGalleryFilters = null
         _state.update { it.copy(requestGelbooruCredentials = false) }
+    }
+    fun cancelRule34Credentials() {
+        pendingGalleryFilters = null
+        _state.update { it.copy(requestRule34Credentials = false) }
     }
     fun openFavorites() = _state.update { it.copy(screen = AppScreen.FAVORITES, searchVisible = false) }
     fun openDownloadQueue() = _state.update { it.copy(showPreferences = false, showDownloadQueue = true) }
@@ -160,6 +189,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (provider == "Gelbooru" && !hasGelbooruCredentials()) {
             pendingGalleryFilters = provider to rating
             openGelbooruCredentials()
+            return
+        }
+        if (provider == "Rule34.xxx" && !hasRule34Credentials()) {
+            pendingGalleryFilters = provider to rating
+            openRule34Credentials()
             return
         }
         if (provider == _state.value.galleryProvider && rating == _state.value.rating) return
@@ -318,9 +352,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.useDoh = value
         _state.update { it.copy(useDoh = value) }
     }
+    fun setDohProvider(value: String) {
+        preferences.dohProvider = value
+        _state.update { it.copy(dohProvider = value) }
+    }
+    fun setCustomDohEndpoint(value: String) {
+        preferences.customDohEndpoint = value.trim()
+        _state.update { it.copy(customDohEndpoint = value.trim()) }
+    }
+    fun setFilterGore(value: Boolean) {
+        preferences.filterGore = value
+        _state.update { it.copy(filterGore = value) }
+        refreshCurrentResults()
+    }
+    fun setExcludeMale(value: Boolean) {
+        preferences.excludeMale = value
+        _state.update { it.copy(excludeMale = value) }
+        refreshCurrentResults()
+    }
+    fun setCustomBlockTags(value: String) {
+        preferences.customBlockTags = value
+        _state.update { it.copy(customBlockTags = value) }
+        refreshCurrentResults()
+    }
+    fun setMediaFilter(value: String) {
+        preferences.mediaFilter = value
+        _state.update { it.copy(mediaFilter = value) }
+        refreshCurrentResults()
+    }
+    fun setVideoMaxHeight(value: Int) {
+        preferences.videoMaxHeight = value
+        _state.update { it.copy(videoMaxHeight = preferences.videoMaxHeight) }
+    }
+    fun setAmbientMode(value: Boolean) {
+        preferences.ambientMode = value
+        _state.update { it.copy(ambientMode = value) }
+    }
+    private fun refreshCurrentResults() {
+        when (_state.value.screen) {
+            AppScreen.RANDOM -> refreshRandom()
+            AppScreen.GALLERY -> loadGallery()
+            else -> Unit
+        }
+    }
     fun setProvider(value: String) {
         if (value == "Gelbooru" && !hasGelbooruCredentials()) {
             openGelbooruCredentials()
+            return
+        }
+        if (value == "Rule34.xxx" && !hasRule34Credentials()) {
+            openRule34Credentials()
             return
         }
         preferences.selectedProvider = value
@@ -329,6 +410,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun hasGelbooruCredentials(): Boolean =
         preferences.gelbooruUserId.isNotBlank() && preferences.gelbooruApiKey.isNotBlank()
+
+    fun hasRule34Credentials(): Boolean = preferences.rule34UserId.isNotBlank() && preferences.rule34ApiKey.isNotBlank()
+
+    fun logoutProvider(provider: String) {
+        when (provider) {
+            "Gelbooru" -> { preferences.gelbooruUserId = ""; preferences.gelbooruApiKey = "" }
+            "Rule34.xxx" -> { preferences.rule34UserId = ""; preferences.rule34ApiKey = "" }
+        }
+        val selectedAsDefault = _state.value.provider == provider
+        val selectedInGallery = _state.value.galleryProvider == provider
+        if (selectedAsDefault) {
+            preferences.selectedProvider = "Auto"
+            _state.update { it.copy(provider = "Auto") }
+        }
+        if (selectedInGallery && _state.value.galleryQuery.isNotBlank()) {
+            _state.update { it.copy(galleryProvider = "All", page = 1, totalPages = null, hasMore = false) }
+            loadGallery()
+        } else if (selectedAsDefault && _state.value.screen == AppScreen.RANDOM) refreshRandom()
+    }
 
     fun saveGelbooruCredentials(userId: String, apiKey: String) {
         preferences.gelbooruUserId = userId
@@ -349,6 +449,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     requestGelbooruCredentials = false,
                 )
             }
+            if (pendingFilters != null && _state.value.galleryQuery.isNotBlank()) loadGallery()
+            else if (_state.value.screen == AppScreen.RANDOM) refreshRandom()
+        }
+    }
+    fun saveRule34Credentials(userId: String, apiKey: String) {
+        preferences.rule34UserId = userId
+        preferences.rule34ApiKey = apiKey
+        if (hasRule34Credentials()) {
+            preferences.selectedProvider = "Rule34.xxx"
+            val pendingFilters = pendingGalleryFilters
+            pendingGalleryFilters = null
+            _state.update { current -> current.copy(
+                provider = "Rule34.xxx",
+                galleryProvider = if (pendingFilters != null) "Rule34.xxx" else current.galleryProvider,
+                rating = pendingFilters?.second ?: current.rating,
+                page = if (pendingFilters != null) 1 else current.page,
+                totalPages = if (pendingFilters != null) null else current.totalPages,
+                hasMore = if (pendingFilters != null) false else current.hasMore,
+                error = null,
+                requestRule34Credentials = false,
+            ) }
             if (pendingFilters != null && _state.value.galleryQuery.isNotBlank()) loadGallery()
             else if (_state.value.screen == AppScreen.RANDOM) refreshRandom()
         }
@@ -421,7 +542,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } finally {
                         downloaded.delete()
                     }
-                    _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.SAVED, progress = 1f) else it }, notice = "Image saved") }
+                    _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.SAVED, progress = 1f) else it }, notice = "Media saved") }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -492,7 +613,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun writeImage(post: ImagePost, source: File) {
         val app = getApplication<Application>()
         val name = "waifu_${post.id.substringAfterLast(':').replace(Regex("[^A-Za-z0-9_-]"), "_")}.${post.extension.ifBlank { "jpg" }}"
-        val mime = when (post.extension.lowercase()) {
+        val mime = if (post.mediaType == "video") "video/${post.extension.lowercase().ifBlank { "mp4" }}" else when (post.extension.lowercase()) {
             "png" -> "image/png"
             "webp" -> "image/webp"
             "gif" -> "image/gif"
@@ -520,7 +641,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Waifu Gallery")
         }
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw IOException("Could not create image in Pictures")
+        val collection = if (post.mediaType == "video") MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val uri = resolver.insert(collection, values) ?: throw IOException("Could not create media in Pictures")
         try {
             resolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } } ?: throw IOException("Could not write image")
         } catch (error: Exception) {

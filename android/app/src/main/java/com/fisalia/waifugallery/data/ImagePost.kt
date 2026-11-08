@@ -12,7 +12,14 @@ data class ImagePost(
     val tags: Set<String>,
     val source: String,
     val artists: List<String>,
+    val mediaType: String = "image",
+    val title: String = "",
+    val width: Int = 0,
+    val height: Int = 0,
+    val videoVariants: List<VideoVariant> = emptyList(),
 )
+
+data class VideoVariant(val url: String, val width: Int, val height: Int)
 
 data class SearchPage(
     val posts: List<ImagePost>,

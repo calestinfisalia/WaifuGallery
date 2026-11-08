@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.InetAddress
 import java.io.IOException
+import java.io.StringReader
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
@@ -21,38 +22,58 @@ import kotlinx.coroutines.withContext
 class BooruApi(
     private val useDoh: () -> Boolean,
     private val gelbooruCredentials: () -> Pair<String, String>,
+    private val rule34Credentials: () -> Pair<String, String> = { "" to "" },
+    private val dohProvider: () -> String = { "Cloudflare" },
+    private val customDohEndpoint: () -> String = { "" },
+    private val filterGore: () -> Boolean = { true },
+    private val excludeMale: () -> Boolean = { true },
+    private val customBlockTags: () -> String = { "" },
+    private val mediaFilter: () -> String = { "image" },
 ) {
-    private data class Provider(val name: String, val endpoint: String, val yandere: Boolean)
+    private data class Provider(val name: String, val endpoint: String, val yandere: Boolean = false)
     private data class ProviderSearchResult(val posts: List<ImagePost>, val totalCount: Int?)
     private data class CachedCount(val value: Int, val storedAt: Long)
 
-    private val danbooru = Provider("Danbooru", "https://danbooru.donmai.us/posts.json", false)
+    private val danbooru = Provider("Danbooru", "https://danbooru.donmai.us/posts.json")
     private val yandere = Provider("yande.re", "https://yande.re/post.json", true)
-    private val gelbooru = Provider("Gelbooru", "https://gelbooru.com/index.php", false)
+    private val gelbooru = Provider("Gelbooru", "https://gelbooru.com/index.php")
+    private val rule34 = Provider("Rule34.xxx", "https://api.rule34.xxx/index.php")
     private val countCache = ConcurrentHashMap<String, CachedCount>()
     private val randomHistory = mutableMapOf<String, ArrayDeque<String>>()
     private val randomHistoryLock = Any()
 
     private val standardClient: OkHttpClient by lazy { baseClient(readSeconds = 30, callSeconds = 45).build() }
     private val standardImageClient: OkHttpClient by lazy { imageClientBuilder().build() }
-    private val dohClient: OkHttpClient by lazy {
-        val bootstrap = baseClient(readSeconds = 30, callSeconds = 45).build()
-        val cloudflareDns = DnsOverHttps.Builder()
-            .client(bootstrap)
-            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
-            .bootstrapDnsHosts(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("1.0.0.1"))
-            .build()
-        bootstrap.newBuilder().dns(cloudflareDns).build()
+    private val dohClients = ConcurrentHashMap<String, OkHttpClient>()
+    private val dohClient: OkHttpClient get() = createDohClient("api", baseClient(30, 45).build())
+    private val dohImageClient: OkHttpClient get() = createDohClient("image", imageClientBuilder().build())
+
+    private fun dohUrl(): String = when (dohProvider()) {
+        "Cloudflare Security" -> "https://security.cloudflare-dns.com/dns-query"
+        "Cloudflare Family" -> "https://family.cloudflare-dns.com/dns-query"
+        "Google Public DNS" -> "https://dns.google/dns-query"
+        "AdGuard DNS" -> "https://dns.adguard-dns.com/dns-query"
+        "Custom" -> customDohEndpoint().ifBlank { "https://cloudflare-dns.com/dns-query" }
+        else -> "https://cloudflare-dns.com/dns-query"
     }
 
-    private val dohImageClient: OkHttpClient by lazy {
-        val bootstrap = imageClientBuilder().build()
-        val cloudflareDns = DnsOverHttps.Builder()
-            .client(bootstrap)
-            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
-            .bootstrapDnsHosts(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("1.0.0.1"))
-            .build()
-        bootstrap.newBuilder().dns(cloudflareDns).build()
+    private fun dohBootstrapAddresses(): Array<InetAddress> = when (dohProvider()) {
+        "Google Public DNS" -> arrayOf(InetAddress.getByName("8.8.8.8"), InetAddress.getByName("8.8.4.4"))
+        "AdGuard DNS" -> arrayOf(InetAddress.getByName("94.140.14.14"), InetAddress.getByName("94.140.15.15"))
+        else -> arrayOf(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("1.0.0.1"))
+    }
+
+    private fun createDohClient(kind: String, bootstrap: OkHttpClient): OkHttpClient {
+        val endpoint = dohUrl()
+        val key = "$kind|$endpoint"
+        return dohClients.getOrPut(key) {
+            val dns = DnsOverHttps.Builder()
+                .client(bootstrap)
+                .url(endpoint.toHttpUrl())
+                .bootstrapDnsHosts(*dohBootstrapAddresses())
+                .build()
+            bootstrap.newBuilder().dns(dns).build()
+        }
     }
 
     private fun baseClient(readSeconds: Long, callSeconds: Long): OkHttpClient.Builder = OkHttpClient.Builder()
@@ -65,8 +86,9 @@ class BooruApi(
         .addInterceptor { chain ->
             val request = chain.request()
             val host = request.url.host.lowercase()
-            if ((host == "gelbooru.com" || host.endsWith(".gelbooru.com")) && request.header("Referer") == null) {
-                chain.proceed(request.newBuilder().header("Referer", "https://gelbooru.com/").build())
+            if (request.header("Referer") == null && (host.contains("gelbooru") || host.contains("rule34"))) {
+                val referer = if (host.contains("rule34")) "https://rule34.xxx/" else "https://gelbooru.com/"
+                chain.proceed(request.newBuilder().header("Referer", referer).build())
             } else {
                 chain.proceed(request)
             }
@@ -81,9 +103,11 @@ class BooruApi(
                 "Danbooru" -> listOf(danbooru)
                 "yande.re" -> listOf(yandere)
                 "Gelbooru" -> listOf(gelbooru)
+                "Rule34.xxx" -> listOf(rule34)
                 else -> buildList {
                     add(yandere)
                     if (hasGelbooruCredentials()) add(gelbooru)
+                    if (hasRule34Credentials()) add(rule34)
                     add(danbooru)
                 }
             }
@@ -123,9 +147,11 @@ class BooruApi(
             "Danbooru" -> listOf(danbooru)
             "yande.re" -> listOf(yandere)
             "Gelbooru" -> listOf(gelbooru)
+            "Rule34.xxx" -> listOf(rule34)
             else -> buildList {
                 add(yandere)
                 if (hasGelbooruCredentials()) add(gelbooru)
+                if (hasRule34Credentials()) add(rule34)
                 add(danbooru)
             }
         }
@@ -195,8 +221,8 @@ class BooruApi(
                 posts += result.mapNotNull { parsePost(it, provider) }
             }
             val filtered = posts.filter {
-                ratingMatches(it, rating) && acceptableGender(it) &&
-                    (rating != RatingFilter.SFW || safeForSfw(it))
+                    ratingMatches(it, rating) && (!excludeMale() || acceptableGender(it)) &&
+                    (rating != RatingFilter.SFW || safeForSfw(it)) && acceptedPost(it)
             }
             val count = countMatches(provider, tags, rating)
             if (count != null && knownTotal == null) knownTotal = count
@@ -207,6 +233,7 @@ class BooruApi(
     }
 
     private fun countMatches(provider: Provider, tags: List<String>, rating: RatingFilter): Int? {
+        if (provider.name == "Rule34.xxx") return null
         val perRatingCounts = ratings(rating).map { ratingTag ->
             val queryTags = tags + listOfNotNull(ratingTag?.let { "rating:${providerRatingTag(provider, it)}" })
             runCatching { requestCount(provider, queryTags.joinToString(" ")) }.getOrNull() ?: return null
@@ -221,24 +248,25 @@ class BooruApi(
         }
         val endpoint = when (provider.name) {
             "Danbooru" -> provider.endpoint.replace("/posts.json", "/counts/posts.json")
-            "Gelbooru" -> provider.endpoint
+            "Gelbooru", "Rule34.xxx" -> provider.endpoint
             else -> provider.endpoint.replace("/post.json", "/post.xml")
         }
         val urlBuilder = endpoint.toHttpUrl().newBuilder()
             .addQueryParameter("tags", tags)
             .addQueryParameter("limit", "1")
-        if (provider.name == "Gelbooru") urlBuilder.addQueryParameter("json", "1")
-        if (provider.name == "Gelbooru") {
+        if (provider.name == "Gelbooru" || provider.name == "Rule34.xxx") urlBuilder.addQueryParameter("json", "1")
+        if (provider.name == "Gelbooru" || provider.name == "Rule34.xxx") {
             urlBuilder.addQueryParameter("page", "dapi")
                 .addQueryParameter("s", "post")
                 .addQueryParameter("q", "index")
         }
         addGelbooruCredentials(provider, urlBuilder)
+        addRule34Credentials(provider, urlBuilder)
         val url = urlBuilder.build()
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Waifu Gallery/0.1 (search count)")
-            .header("Accept", if (provider.name == "Danbooru" || provider.name == "Gelbooru") "application/json" else "application/xml")
+            .header("Accept", if (provider.name == "Danbooru" || provider.name == "Gelbooru" || provider.name == "Rule34.xxx") "application/json" else "application/xml")
             .build()
         apiClient().newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
@@ -288,7 +316,7 @@ class BooruApi(
                     params["page"] = Random.nextInt(1, 121).toString()
                 } else if (provider.name == "Danbooru") {
                     params["random"] = "1"
-                } else if (provider.name == "Gelbooru") {
+                } else if (provider.name == "Gelbooru" || provider.name == "Rule34.xxx") {
                     params["page"] = Random.nextInt(1, 121).toString()
                 }
                 var result = requestPosts(provider, params)
@@ -298,9 +326,9 @@ class BooruApi(
                 }
                 posts += result
                     .mapNotNull { parsePost(it, provider) }
-                    .filter { it.rating == rating && (rating != "s" || safeForSfw(it)) }
+                    .filter { it.rating == rating && (rating != "s" || safeForSfw(it)) && acceptedPost(it) }
             }
-            val filtered = posts.filter(::acceptableGender)
+            val filtered = if (excludeMale()) posts.filter(::acceptableGender) else posts
             if (filtered.isNotEmpty()) return filtered
         }
         return emptyList()
@@ -309,19 +337,20 @@ class BooruApi(
     private fun requestPosts(provider: Provider, params: Map<String, String>): List<JSONObject> {
         val urlBuilder = provider.endpoint.toHttpUrl().newBuilder()
         params.forEach { (key, value) ->
-            val apiKey = if (provider.name == "Gelbooru" && key == "page") "pid" else key
-            val apiValue = if (provider.name == "Gelbooru" && key == "page") {
+            val apiKey = if (provider.name in setOf("Gelbooru", "Rule34.xxx") && key == "page") "pid" else key
+            val apiValue = if (provider.name in setOf("Gelbooru", "Rule34.xxx") && key == "page") {
                 (value.toIntOrNull()?.minus(1) ?: 0).coerceAtLeast(0).toString()
             } else value
             urlBuilder.addQueryParameter(apiKey, apiValue)
         }
-        if (provider.name == "Gelbooru") {
+        if (provider.name == "Gelbooru" || provider.name == "Rule34.xxx") {
             urlBuilder.addQueryParameter("json", "1")
                 .addQueryParameter("page", "dapi")
                 .addQueryParameter("s", "post")
                 .addQueryParameter("q", "index")
         }
         addGelbooruCredentials(provider, urlBuilder)
+        addRule34Credentials(provider, urlBuilder)
         val requestBuilder = Request.Builder()
             .url(urlBuilder.build())
             .header("User-Agent", "Waifu Gallery/0.1 (image viewer)")
@@ -340,17 +369,19 @@ class BooruApi(
                         Thread.sleep((retryAfter ?: (attempt + 1L)) * 500L)
                         return@repeat
                     }
-                    val body = response.body?.string().orEmpty()
-                    val array = try {
-                        JSONArray(body)
-                    } catch (_: Exception) {
-                        val wrapped = JSONObject(body)
-                        wrapped.optJSONArray("posts")
-                            ?: wrapped.optJSONArray("post")
-                            ?: wrapped.optJSONObject("post")?.let { JSONArray().put(it) }
-                            ?: JSONArray()
+                    var body = response.body?.string().orEmpty()
+                    if (provider.name == "Rule34.xxx" && body.isBlank()) {
+                        // Some DAPI responses are empty in JSON mode. Retry the
+                        // same query as the legacy XML response before failing.
+                        val xmlRequest = request.newBuilder()
+                            .url(request.url.newBuilder().removeAllQueryParameters("json").build())
+                            .header("Accept", "application/xml")
+                            .build()
+                        apiClient().newCall(xmlRequest).execute().use { xmlResponse ->
+                            if (xmlResponse.isSuccessful) body = xmlResponse.body?.string().orEmpty()
+                        }
                     }
-                    return (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+                    return parsePostsResponse(provider, body)
                 }
             } catch (error: IOException) {
                 lastError = error
@@ -359,6 +390,84 @@ class BooruApi(
             }
         }
         throw lastError ?: IOException("Request failed")
+    }
+
+    private fun parsePostsResponse(provider: Provider, rawBody: String): List<JSONObject> {
+        val body = rawBody.trim()
+        if (body.isEmpty()) {
+            if (provider.name == "Rule34.xxx") {
+                throw IOException("Rule34.xxx returned an empty response. Sign out and sign in again with the user ID and API key from your account settings, then retry.")
+            }
+            throw IOException("${provider.name} returned an empty response")
+        }
+
+        if (provider.name == "Rule34.xxx") {
+            val lower = body.lowercase()
+            if (lower.contains("missing authentication") || lower.contains("invalid api key") || lower.contains("invalid user_id")) {
+                throw IOException("Rule34.xxx rejected the credentials. Re-enter the user ID and API key from your account settings.")
+            }
+            if (body.startsWith("<")) return parseRule34Xml(body)
+        }
+
+        val payload = try {
+            JSONArray(body)
+        } catch (_: Exception) {
+            try {
+                JSONObject(body)
+            } catch (error: Exception) {
+                val hint = if (provider.name == "Rule34.xxx") {
+                    "Rule34.xxx returned neither JSON nor DAPI XML. Verify the account credentials and retry later."
+                } else {
+                    "${provider.name} returned an unreadable response"
+                }
+                throw IOException(hint, error)
+            }
+        }
+
+        val array = when (payload) {
+            is JSONArray -> payload
+            is JSONObject -> payload.optJSONArray("posts")
+                ?: payload.optJSONArray("post")
+                ?: payload.optJSONObject("post")?.let { JSONArray().put(it) }
+                ?: JSONArray()
+            else -> JSONArray()
+        }
+        return (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+    }
+
+    private fun parseRule34Xml(body: String): List<JSONObject> {
+        try {
+            val parser = Xml.newPullParser().apply {
+                setInput(StringReader(body))
+            }
+            val posts = mutableListOf<JSONObject>()
+            var foundRoot = false
+            while (parser.next() != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType != org.xmlpull.v1.XmlPullParser.START_TAG) continue
+                when (parser.name.lowercase()) {
+                    "posts" -> {
+                        foundRoot = true
+                        val success = parser.getAttributeValue(null, "success")?.lowercase()
+                        if (success == "false" || success == "0") {
+                            throw IOException("Rule34.xxx search is temporarily unavailable. Retry later.")
+                        }
+                    }
+                    "post" -> {
+                        val item = JSONObject()
+                        for (index in 0 until parser.attributeCount) {
+                            item.put(parser.getAttributeName(index), parser.getAttributeValue(index))
+                        }
+                        posts += item
+                    }
+                }
+            }
+            if (!foundRoot) throw IOException("Rule34.xxx returned malformed DAPI XML")
+            return posts
+        } catch (error: IOException) {
+            throw error
+        } catch (error: Exception) {
+            throw IOException("Rule34.xxx returned malformed DAPI XML", error)
+        }
     }
 
     private fun addGelbooruCredentials(provider: Provider, builder: okhttp3.HttpUrl.Builder) {
@@ -371,16 +480,29 @@ class BooruApi(
             .addQueryParameter("api_key", apiKey)
     }
 
+    private fun addRule34Credentials(provider: Provider, builder: okhttp3.HttpUrl.Builder) {
+        if (provider.name != "Rule34.xxx") return
+        val (userId, apiKey) = rule34Credentials()
+        if (userId.isBlank() || apiKey.isBlank()) throw IOException("Rule34.xxx is locked. Add your user ID and API key in Preferences.")
+        builder.addQueryParameter("user_id", userId).addQueryParameter("api_key", apiKey)
+    }
+
     private fun hasGelbooruCredentials(): Boolean = gelbooruCredentials().let { (userId, apiKey) ->
         userId.isNotBlank() && apiKey.isNotBlank()
     }
+    private fun hasRule34Credentials(): Boolean = rule34Credentials().let { (userId, apiKey) -> userId.isNotBlank() && apiKey.isNotBlank() }
 
     private fun parsePost(post: JSONObject, provider: Provider): ImagePost? {
-        val image = firstNonEmpty(post, "jpeg_url", "large_file_url", "sample_url", "file_url")
+        val rawFile = firstNonEmpty(post, "file_url", "source_url")
+        val isVideo = post.optString("file_ext").lowercase() in VIDEO_EXTENSIONS ||
+            rawFile?.substringBefore('?')?.substringAfterLast('.', "")?.lowercase() in VIDEO_EXTENSIONS
+        val image = (if (isVideo) rawFile else firstNonEmpty(post, "jpeg_url", "large_file_url", "sample_url", "file_url"))
             ?: gelbooruImageUrl(post)
+            ?: rule34ImageUrl(post)
             ?: return null
         val thumbnails = listOf("preview_file_url", "preview_url", "sample_url", "jpeg_url", "large_file_url", "file_url")
             .mapNotNull { field -> post.optString(field).takeIf { it.isNotBlank() && it != "null" } }
+            .filterNot { it.substringBefore('?').substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS }
             .distinct()
             .ifEmpty { listOf(image) }
         val thumbnail = thumbnails.first()
@@ -390,7 +512,24 @@ class BooruApi(
             .flatMap { field -> parseTags(post.opt(field)) }
             .map { it.lowercase() }
             .toSet()
-        val ext = image.substringBefore('?').substringAfterLast('.', "jpg").lowercase()
+        val ext = (post.optString("file_ext").takeIf { it.isNotBlank() } ?: image.substringBefore('?').substringAfterLast('.', "jpg")).lowercase()
+        val rating = normalizeRating(provider, post.optString("rating", "").lowercase())
+        val width = post.optInt("width", 0).coerceAtLeast(0)
+        val height = post.optInt("height", 0).coerceAtLeast(0)
+        val variantDimensions = listOf(
+            "file_url" to (width to height),
+            "large_file_url" to (post.optInt("large_width", width).coerceAtLeast(0) to post.optInt("large_height", height).coerceAtLeast(0)),
+            "sample_url" to (post.optInt("sample_width", 0).coerceAtLeast(0) to post.optInt("sample_height", 0).coerceAtLeast(0)),
+            "jpeg_url" to (post.optInt("jpeg_width", 0).coerceAtLeast(0) to post.optInt("jpeg_height", 0).coerceAtLeast(0)),
+        )
+        val videoVariants = variantDimensions.mapNotNull { (field, dimensions) ->
+            val variantUrl = post.optString(field).takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val suffix = variantUrl.substringBefore('?').substringAfterLast('.', "").lowercase()
+            if (suffix !in VIDEO_EXTENSIONS) return@mapNotNull null
+            VideoVariant(variantUrl, dimensions.first, dimensions.second)
+        }.distinctBy { it.url }.ifEmpty {
+            if (isVideo) listOf(VideoVariant(image, width, height)) else emptyList()
+        }
         return ImagePost(
             id = id,
             dedupeKey = dedupeKey,
@@ -399,10 +538,15 @@ class BooruApi(
             thumbnailUrl = thumbnail,
             thumbnailCandidates = thumbnails,
             extension = ext,
-            rating = normalizeRating(provider, post.optString("rating", "").lowercase()),
+            rating = rating,
             tags = allTags,
             source = post.optString("source", ""),
             artists = post.optString("tag_string_artist", "").split(Regex("\\s+")).filter(String::isNotBlank),
+            mediaType = if (isVideo) "video" else "image",
+            title = post.optString("title", post.optString("name", "")),
+            width = width,
+            height = height,
+            videoVariants = videoVariants,
         )
     }
 
@@ -412,8 +556,14 @@ class BooruApi(
         return "https://img3.gelbooru.com/images/$directory/$filename"
     }
 
+    private fun rule34ImageUrl(post: JSONObject): String? {
+        val directory = post.optString("directory").takeIf(String::isNotBlank) ?: return null
+        val filename = post.optString("image").takeIf(String::isNotBlank) ?: return null
+        return "https://img.rule34.xxx/images/$directory/$filename"
+    }
+
     private fun normalizeRating(provider: Provider, rating: String): String =
-        if (provider.name != "Gelbooru") rating else when (rating) {
+        if (provider.name != "Gelbooru" && provider.name != "Rule34.xxx") rating else when (rating) {
             "general", "safe" -> "s"
             "sensitive", "questionable" -> "q"
             "explicit" -> "e"
@@ -437,8 +587,8 @@ class BooruApi(
     }
 
     private fun providerRatingTag(provider: Provider, rating: String): String =
-        if (provider.name != "Gelbooru") rating else when (rating) {
-            "s" -> "general"
+        if (provider.name != "Gelbooru" && provider.name != "Rule34.xxx") rating else when (rating) {
+            "s" -> if (provider.name == "Rule34.xxx") "safe" else "general"
             "q" -> "questionable"
             "e" -> "explicit"
             else -> rating
@@ -452,6 +602,13 @@ class BooruApi(
 
     private fun safeForSfw(post: ImagePost): Boolean = post.tags.none { it in SFW_BLOCK_TAGS }
 
+    private fun acceptedPost(post: ImagePost): Boolean {
+        val custom = customBlockTags().split(Regex("[,\\s]+")).filter(String::isNotBlank).map { it.lowercase().replace(' ', '_') }.toSet()
+        val blocked = post.tags.any { it in custom }
+        return !blocked && (!filterGore() || post.tags.none { it in GORE_BLOCK_TAGS }) &&
+            (mediaFilter() == "all" || post.mediaType == mediaFilter())
+    }
+
     private fun acceptableGender(post: ImagePost): Boolean {
         val boys = setOf("1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "male_focus", "male_only")
         // Many yande.re posts omit gender tags; keep those instead of discarding valid results.
@@ -459,6 +616,8 @@ class BooruApi(
     }
 
     private companion object {
+        val VIDEO_EXTENSIONS = setOf("mp4", "m4v", "webm", "mov", "mkv", "avi")
+        val GORE_BLOCK_TAGS = setOf("amputation", "blood", "blood_splatter", "body_horror", "decapitation", "dismemberment", "disembowelment", "exposed_organs", "gore", "guro", "intestines", "mutilation", "open_wound", "severed_head", "wound")
         val SFW_BLOCK_TAGS = setOf(
             "anal", "blowjob", "cum", "cum_in_pussy", "cum_on_body", "cum_on_face",
             "cumshot", "ejaculation", "explicit", "fellatio", "genital", "hentai",
