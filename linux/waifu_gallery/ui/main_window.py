@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
+from .. import __version__
 from ..models import ImagePost, SearchPage
 from ..providers import BooruCatalog, ProviderError
 from ..settings import AppSettings
@@ -56,6 +57,7 @@ from .downloads import DownloadsDialog
 from .credits import ImageCreditsDialog
 from .favorites import FavoritesDialog, favorite_key
 from .preferences import PreferencesDialog
+from .updates import ReleaseNotesDialog, UpdateCheckTask, version_parts
 from .video import VideoPlayerWidget
 from .viewer import ZoomImage
 from .workers import BackgroundTask, FileDownloadTask, decode_image_bytes
@@ -209,6 +211,8 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self.pool.setMaxThreadCount(8)
         self.tasks = {}
+        self._startup_update_task = None
+        self._update_notice_dialog = None
         self.request_id = 0
         self.gallery_generation = 0
         self.current_query = ""
@@ -280,6 +284,7 @@ class MainWindow(QMainWindow):
             app.installEventFilter(self)
         self._apply_theme(self.current_theme)
         QTimer.singleShot(0, self.show_random)
+        QTimer.singleShot(0, self._check_for_startup_update)
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
@@ -289,7 +294,13 @@ class MainWindow(QMainWindow):
     def _raise_main_over_open_dialogs(self) -> None:
         if not self.isActiveWindow():
             return
-        dialog_names = {"favoritesDialog", "mediaInfoDialog", "settingsDialog"}
+        dialog_names = {
+            "downloadsDialog",
+            "favoritesDialog",
+            "mediaInfoDialog",
+            "releaseNotesDialog",
+            "settingsDialog",
+        }
         for dialog in self.findChildren(QDialog):
             if dialog.isVisible() and dialog.objectName() in dialog_names:
                 dialog.lower()
@@ -988,6 +999,12 @@ class MainWindow(QMainWindow):
             QDialog#favoritesDialog { background: transparent; border: 0; }
             QWidget#favoritesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QWidget#favoritesTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+            QDialog#downloadsDialog, QDialog#releaseNotesDialog { background: transparent; border: 0; }
+            QWidget#downloadsSurface, QWidget#releaseNotesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QWidget#dialogTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+            QLabel#dialogWindowTitle { color: __STRONG__; font-weight: 650; }
+            QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 700; }
+            QLabel#releaseNotesVersion { color: __MUTED__; }
             QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
             QPushButton#favoritesCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
             QPushButton#favoritesCloseButton:hover { background: #F7768E; }
@@ -2232,23 +2249,51 @@ class MainWindow(QMainWindow):
         if source == "random":
             actions = (
                 self.random_video_refresh_action,
-                self.random_video_favorite_action,
                 self.random_video_download_action,
             )
+            favorite_action = self.random_video_favorite_action
             exit_action = self.random_video_exit_action
             player = self.random_video
         else:
             actions = (
-                self.detail_video_favorite_action,
                 self.detail_video_download_action,
             )
+            favorite_action = self.detail_video_favorite_action
             exit_action = self.detail_video_exit_action
             player = self.detail_video
         for action in actions:
             action.setVisible(visible)
+        favorite_action.hide()
         exit_action.hide()
         if visible:
             player.controls_frame.raise_()
+
+    def _check_for_startup_update(self) -> None:
+        if self._startup_update_task is not None:
+            return
+        task = UpdateCheckTask()
+        self._startup_update_task = task
+        task.signals.finished.connect(self._startup_update_checked)
+        self.pool.start(task)
+
+    def _startup_update_checked(
+        self, tag: str, url: str, notes: str, error: str
+    ) -> None:
+        self._startup_update_task = None
+        if error or version_parts(tag) <= version_parts(__version__):
+            return
+        dialog = ReleaseNotesDialog(tag, url, notes, self)
+        dialog.finished.connect(
+            lambda _result, current=dialog: self._clear_update_notice(current)
+        )
+        self._update_notice_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_update_notice(self, dialog: ReleaseNotesDialog) -> None:
+        if self._update_notice_dialog is dialog:
+            self._update_notice_dialog = None
 
     def _exit_fullscreen(self) -> None:
         if not self._fullscreen_active:
@@ -2512,15 +2557,24 @@ class MainWindow(QMainWindow):
             # enable tracking as they appear so resize cursors still work over
             # those dynamically-created surfaces near the window edges.
             watched.setMouseTracking(True)
-        if event.type() == QEvent.Type.MouseMove:
+        if (
+            event.type() == QEvent.Type.MouseMove
+            and isinstance(watched, QWidget)
+            and watched.window() is self
+        ):
             self._update_resize_cursor(event.globalPosition().toPoint())
-        elif event.type() == QEvent.Type.Leave and watched is self and self._resize_cursor_active:
+        elif (
+            event.type() == QEvent.Type.Leave
+            and watched is self
+            and self._resize_cursor_active
+        ):
             self._clear_resize_cursor()
         if (
             isinstance(watched, QWidget)
             and (watched is self or self.isAncestorOf(watched))
             and event.type() == QEvent.Type.MouseButtonPress
             and event.button() == Qt.MouseButton.LeftButton
+            and watched.window() is self
             and not self._fullscreen_active
             and not self.isMaximized()
         ):

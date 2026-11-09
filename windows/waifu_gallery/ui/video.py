@@ -159,6 +159,7 @@ class VideoPlayerWidget(QWidget):
         self.audio.setVolume(0.7)
         self._update_volume_button()
         self.position = QSlider(Qt.Orientation.Horizontal)
+        self.position.setObjectName("videoPositionSlider")
         self.position.setRange(0, 0)
         self.position.sliderMoved.connect(self._slider_moved)
         self.time_label = QLabel("00:00 / 00:00")
@@ -224,6 +225,29 @@ class VideoPlayerWidget(QWidget):
             QPushButton#videoPlayPause { padding: 0; }
             QPushButton#videoVolumeButton { padding: 0; border: 0; background: transparent; }
             QSlider#videoVolumeSlider { min-height: 18px; }
+            QSlider#videoPositionSlider::groove:horizontal,
+            QSlider#videoVolumeSlider::groove:horizontal {
+                height: 5px;
+                background: #454862;
+                border-radius: 2px;
+            }
+            QSlider#videoPositionSlider::sub-page:horizontal,
+            QSlider#videoVolumeSlider::sub-page:horizontal {
+                background: #bb9af7;
+                border-radius: 2px;
+            }
+            QSlider#videoPositionSlider::add-page:horizontal,
+            QSlider#videoVolumeSlider::add-page:horizontal {
+                background: #454862;
+                border-radius: 2px;
+            }
+            QSlider#videoPositionSlider::handle:horizontal,
+            QSlider#videoVolumeSlider::handle:horizontal {
+                width: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+                background: #bb9af7;
+            }
             QLabel { color: #c8cce0; }
         """)
 

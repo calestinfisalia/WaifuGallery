@@ -1,9 +1,6 @@
 from pathlib import Path
 
-import re
-
-import requests
-from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QSize, Qt, QThreadPool, Signal
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,9 +25,8 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
-
-
-GITHUB_LATEST_RELEASE = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
+from .dialog_chrome import FramelessResizableDialog
+from .updates import UpdateCheckTask, version_parts
 
 
 def _themed_icon(widget: QWidget, name: str) -> QIcon:
@@ -38,33 +34,6 @@ def _themed_icon(widget: QWidget, name: str) -> QIcon:
     if callable(icon_factory):
         return icon_factory(name)
     return QIcon(str(Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"))
-
-
-class UpdateCheckSignals(QObject):
-    finished = Signal(str, str, str)
-
-
-class UpdateCheckTask(QRunnable):
-    def __init__(self) -> None:
-        super().__init__()
-        self.signals = UpdateCheckSignals()
-
-    def run(self) -> None:
-        try:
-            response = requests.get(
-                GITHUB_LATEST_RELEASE,
-                headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
-                timeout=(5, 12),
-            )
-            response.raise_for_status()
-            release = response.json()
-            tag = str(release.get("tag_name", "")).strip()
-            url = str(release.get("html_url", "")).strip()
-            if not tag or not url:
-                raise ValueError("The latest release response is missing its tag or URL.")
-            self.signals.finished.emit(tag, url, "")
-        except Exception as error:
-            self.signals.finished.emit("", "", str(error))
 
 
 class ProviderLoginDialog(QDialog):
@@ -173,7 +142,7 @@ class SettingsTitleBar(QWidget):
         super().mouseReleaseEvent(event)
 
 
-class PreferencesDialog(QDialog):
+class PreferencesDialog(FramelessResizableDialog):
     ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
     RELEASE_PAGE = "https://github.com/calestinfisalia/WaifuGallery/releases"
     settings_changed = Signal()
@@ -635,25 +604,20 @@ class PreferencesDialog(QDialog):
         task.signals.finished.connect(self._update_check_finished)
         self._update_pool.start(task)
 
-    def _update_check_finished(self, tag: str, url: str, error: str) -> None:
+    def _update_check_finished(self, tag: str, url: str, _notes: str, error: str) -> None:
         self._update_check_task = None
         self.check_update_button.setEnabled(True)
         if error:
             self.update_status.setText(f"Could not check for updates: {error}")
             return
-        latest_version = self._version_parts(tag)
-        current_version = self._version_parts(__version__)
+        latest_version = version_parts(tag)
+        current_version = version_parts(__version__)
         self._release_url = url or self.RELEASE_PAGE
         self.open_release_button.setVisible(latest_version > current_version)
         if latest_version > current_version:
             self.update_status.setText(f"Version {tag} is available. You have {__version__}.")
         else:
             self.update_status.setText(f"You're up to date (version {__version__}).")
-
-    @staticmethod
-    def _version_parts(value: str) -> tuple[int, ...]:
-        numbers = re.findall(r"\d+", value)
-        return tuple(int(number) for number in numbers) or (0,)
 
     def _open_release_page(self) -> None:
         QDesktopServices.openUrl(self._release_url)

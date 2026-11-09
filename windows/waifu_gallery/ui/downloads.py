@@ -1,23 +1,41 @@
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .dialog_chrome import DialogTitleBar, FramelessResizableDialog
 
 
-class DownloadsDialog(QDialog):
+class DownloadsDialog(FramelessResizableDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("downloadsDialog")
         self.setWindowTitle("Downloads")
+        self.setMinimumSize(420, 280)
         self.resize(560, 380)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QWidget(self)
+        surface.setObjectName("downloadsSurface")
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(10, 4, 10, 10)
+        layout.setSpacing(8)
+        layout.addWidget(DialogTitleBar(self, "Downloads"))
         self.items = QListWidget()
         layout.addWidget(self.items, 1)
         row = QHBoxLayout()
         clear = QPushButton("Clear history")
-        close = QPushButton("Close")
         clear.clicked.connect(self.clear_history)
-        close.clicked.connect(self.close)
         row.addStretch(1)
         row.addWidget(clear)
-        row.addWidget(close)
         layout.addLayout(row)
+        outer.addWidget(surface)
         self.records: dict[str, tuple[QLabel, QProgressBar]] = {}
 
     def clear_history(self) -> None:

@@ -13,6 +13,8 @@ import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.RatingFilter
+import com.fisalia.waifugallery.data.ReleaseUpdate
+import com.fisalia.waifugallery.data.ReleaseUpdateChecker
 import com.fisalia.waifugallery.data.SearchPage
 import java.io.IOException
 import java.io.File
@@ -84,6 +86,7 @@ data class UiState(
     val provider: String = "Auto",
     val customTerms: List<String> = emptyList(),
     val saveFolderLabel: String? = null,
+    val releaseUpdate: ReleaseUpdate? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -121,8 +124,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadJob: Job? = null
     private var pendingGalleryFilters: Pair<String, RatingFilter>? = null
 
-    init { refreshRandom() }
+    init {
+        refreshRandom()
+        viewModelScope.launch {
+            ReleaseUpdateChecker.checkForUpdate(getApplication())?.let { update ->
+                _state.update { it.copy(releaseUpdate = update) }
+            }
+        }
+    }
 
+    fun dismissReleaseUpdate() = _state.update { it.copy(releaseUpdate = null) }
     fun updateQuery(value: String) = _state.update { it.copy(queryInput = value) }
     fun toggleSearch() {
         _state.update { it.copy(searchVisible = !it.searchVisible, queryInput = if (it.searchVisible) "" else it.queryInput) }

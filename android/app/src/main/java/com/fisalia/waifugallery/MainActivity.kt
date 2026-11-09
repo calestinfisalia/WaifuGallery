@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity() {
 private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     val state by model.state.collectAsState()
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var aboutPost by remember { mutableStateOf<ImagePost?>(null) }
     var showAppAbout by remember { mutableStateOf(false) }
@@ -295,6 +296,32 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     }
     aboutPost?.let { post -> AboutDialog(post = post, onDismiss = { aboutPost = null }) }
     if (showAppAbout) AppAboutDialog(onDismiss = { showAppAbout = false })
+    state.releaseUpdate?.let { update ->
+        AlertDialog(
+            onDismissRequest = model::dismissReleaseUpdate,
+            title = { Text("Update available") },
+            text = {
+                Column(
+                    Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Waifu Gallery ${update.version}", fontWeight = FontWeight.SemiBold)
+                    Text(update.notes.ifBlank { "A newer stable release is available." })
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.dismissReleaseUpdate()
+                    uriHandler.openUri(update.url)
+                }) { Text("Download update") }
+            },
+            dismissButton = {
+                TextButton(onClick = model::dismissReleaseUpdate) { Text("Later") }
+            },
+        )
+    }
     if (state.showDownloadQueue) {
         DownloadQueueDialog(
             downloads = state.downloads,

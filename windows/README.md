@@ -17,10 +17,18 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - The toolbar download button saves the currently displayed media; the download list, progress, and clearable history are in the app menu.
 - User-defined search terms used by Random.
 - Settings are saved automatically as you change them; close Settings whenever you're done.
+- Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
 - Optional process-local DNS over HTTPS, with Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard, and a custom RFC 8484 HTTPS endpoint.
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
+
+## Windows 0.1.6
+
+- Updated video slider track colors and handles; the player favorite icon is now shown only in fullscreen controls.
+- Settings, Favorites, Downloads, and update notices use resizable application-styled windows instead of operating-system dialog chrome.
+- Checks GitHub Releases on startup and shows the release notes when a newer stable version is available.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.5
 

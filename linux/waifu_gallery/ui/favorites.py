@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ImagePost
+from .dialog_chrome import FramelessResizableDialog
 
 
 def favorite_key(post: ImagePost) -> str:
@@ -72,7 +73,7 @@ class FavoritesTitleBar(QWidget):
         super().mouseReleaseEvent(event)
 
 
-class FavoritesDialog(QDialog):
+class FavoritesDialog(FramelessResizableDialog):
     def __init__(self, posts: list[ImagePost], open_post, remove_post, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("favoritesDialog")
