@@ -20,8 +20,33 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
 - Optional process-local DNS over HTTPS, with Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard, and a custom RFC 8484 HTTPS endpoint.
+- Encrypted, cross-platform user data export/import for favorites, provider credentials, and portable preferences.
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
+
+## Encrypted user data backup
+
+Open Settings → Backup & Data to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
+
+The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Set a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials, while Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
+
+## UI behavior and troubleshooting
+
+- Search result cards display the media only, with no post title. Changing pages clears the previous cards while the new page loads.
+- Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
+- Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
+- Video buffering shows a centered spinner without a surrounding card. Player controls and progress use gray accents without the purple outline.
+- The bottom media footer is blank except for a loaded image in Random or Search detail, where it shows provider, image type, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it.
+- Provider notices use a gray capsule background without the purple outline.
+
+For a reproducible bug report, include Windows version, image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../linux/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
+
+## Windows 0.1.7
+
+- Added encrypted, interoperable user-data export/import for favorites, provider credentials, and portable preferences.
+- Refined Random image metadata and fixed the Search loading overlay and Settings opening errors.
+- Updated provider notices to gray capsules without a purple outline.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.6
 
@@ -61,7 +86,7 @@ Install Python 3.10 or newer, then run:
 .\run.ps1
 ```
 
-The first run creates `.venv` and installs dependencies. Later runs reuse that environment.
+The first run creates `.venv`; each run installs or updates dependencies from `requirements.txt` before starting, so new project dependencies are picked up by existing environments.
 
 To build the Windows folder distribution after the first run:
 

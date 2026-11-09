@@ -612,12 +612,16 @@ class BooruCatalog:
         return [], False
 
     def _request_provider_json(self, provider: str, endpoint: str, params: dict, headers: dict):
-        uses_api_credentials = provider in {"Gelbooru", "Rule34.xxx"}
-        timeout = (5, 22) if uses_api_credentials else (4, 12)
-        attempts = 2 if uses_api_credentials else 1
+        uses_api_credentials = (
+            provider == "Gelbooru" and bool(self.user_id and self.api_key)
+        ) or (
+            provider == "Rule34.xxx" and bool(self.rule34_user_id and self.rule34_api_key)
+        )
+        timeout = (4, 10)
+        attempts = 1
         for attempt in range(attempts):
             try:
-                response = self._session().get(
+                response = self._session(retry=False).get(
                     endpoint, params=params, headers=headers, timeout=timeout
                 )
                 if not response.ok:
@@ -674,7 +678,7 @@ class BooruCatalog:
                     continue
                 if uses_api_credentials:
                     raise ProviderError(
-                        f"{provider} did not respond after two attempts. Its API may be overloaded; retry later."
+                        f"{provider} request timed out. Its API may be overloaded; retry later."
                     ) from error
                 raise
 
@@ -701,18 +705,20 @@ class BooruCatalog:
         reason_type = type(cause).__name__ if cause is not None else type(error).__name__
         return f"{prefix} ({reason_type}). Check the provider/network and retry."
 
-    def _session(self) -> requests.Session:
-        client = getattr(self._sessions, "client", None)
+    def _session(self, *, retry: bool = True) -> requests.Session:
+        session_name = "client" if retry else "search_client"
+        client = getattr(self._sessions, session_name, None)
         if client is None:
             client = requests.Session()
-            # Fail over quickly when a provider is overloaded instead of retrying
-            # the same 5xx response and leaving the UI in a long loading state.
-            retry_policy = Retry(total=2, connect=2, read=1, status=0, backoff_factor=0.3,
-                                 allowed_methods=frozenset({"GET"}),
-                                 respect_retry_after_header=True)
+            retry_policy = (
+                Retry(total=2, connect=2, read=1, status=0, backoff_factor=0.3,
+                      allowed_methods=frozenset({"GET"}),
+                      respect_retry_after_header=True)
+                if retry else Retry(total=0)
+            )
             client.mount("https://", HTTPAdapter(max_retries=retry_policy))
             client.headers.update({"User-Agent": "Waifu Gallery/0.1 (Windows desktop image browser)"})
-            self._sessions.client = client
+            setattr(self._sessions, session_name, client)
         return client
 
     @staticmethod
@@ -790,10 +796,12 @@ class BooruCatalog:
         suffix = Path(urlparse(image_url).path).suffix.casefold()
         is_video = suffix in VIDEO_EXTENSIONS or f".{file_ext}" in VIDEO_EXTENSIONS
         media_type = "video" if is_video else "image"
+        preview_file_url = cls._absolute(cls._first(raw, "preview_file_url", "preview_url"))
+        sample_url = cls._absolute(cls._first(raw, "sample_url", "jpeg_url"))
         preview_candidates = (
-            cls._absolute(cls._first(raw, "preview_file_url", "preview_url")),
-            cls._absolute(cls._first(raw, "sample_url", "jpeg_url")),
-            image_url,
+            (sample_url, preview_file_url, image_url)
+            if is_video
+            else (preview_file_url, sample_url, image_url)
         )
         previews = tuple(dict.fromkeys(
             url for url in preview_candidates

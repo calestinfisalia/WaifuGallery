@@ -57,6 +57,8 @@ import androidx.compose.material.icons.filled.NavigateNext
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -88,6 +90,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -115,6 +118,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.disk.DiskCache
@@ -125,6 +130,14 @@ import kotlin.math.abs
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.RatingFilter
+import com.fisalia.waifugallery.data.UserDataBackup
+import com.fisalia.waifugallery.data.UserDataBackupCodec
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.security.GeneralSecurityException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val AppBackground = Color(0xFF17171C)
 private val Panel = Color(0xFF24242B)
@@ -165,8 +178,47 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     var aboutPost by remember { mutableStateOf<ImagePost?>(null) }
     var showAppAbout by remember { mutableStateOf(false) }
     var confirmFavoriteRemoval by remember { mutableStateOf<ImagePost?>(null) }
-    BackHandler(state.screen == AppScreen.DETAIL || state.screen == AppScreen.FAVORITES) {
-        if (state.screen == AppScreen.DETAIL) model.backToGallery() else model.goHome()
+    var mediaFullscreen by remember { mutableStateOf(false) }
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(activity) {
+        onDispose {
+            activity?.window?.let {
+                WindowCompat.getInsetsController(it, it.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+    SideEffect {
+        val controller = activity?.window?.let {
+            WindowCompat.getInsetsController(it, it.decorView)
+        }
+        if (mediaFullscreen) {
+            controller?.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    LaunchedEffect(state.screen) {
+        if (state.screen != AppScreen.RANDOM && state.screen != AppScreen.DETAIL) {
+            mediaFullscreen = false
+        }
+    }
+    LaunchedEffect(state.screen, state.image?.id, state.detailImage?.id) {
+        val currentPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
+        if (currentPost?.mediaType != "video") mediaFullscreen = false
+    }
+    BackHandler(
+        mediaFullscreen || state.screen == AppScreen.DETAIL || state.screen == AppScreen.FAVORITES,
+    ) {
+        if (mediaFullscreen) {
+            mediaFullscreen = false
+        } else if (state.screen == AppScreen.DETAIL) {
+            model.backToGallery()
+        } else {
+            model.goHome()
+        }
     }
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         uri?.let(model::rememberSaveFolder)
@@ -202,7 +254,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     )) {
         Surface(Modifier.fillMaxSize(), color = AppBackground) {
             Scaffold(containerColor = AppBackground, topBar = {
-                HeaderBar(
+                if (!mediaFullscreen) HeaderBar(
                     isDetail = state.screen == AppScreen.DETAIL,
                     showHome = state.screen == AppScreen.FAVORITES || (state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM),
                     searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
@@ -237,7 +289,13 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                 )
             }) { padding ->
                 when (state.screen) {
-                    AppScreen.RANDOM -> RandomScreen(state, imageLoader, Modifier.padding(padding))
+                    AppScreen.RANDOM -> RandomScreen(
+                        state,
+                        imageLoader,
+                        Modifier.padding(padding),
+                        mediaFullscreen,
+                        onFullscreenChanged = { mediaFullscreen = it },
+                    )
                     AppScreen.GALLERY -> GalleryScreen(state, imageLoader, model, Modifier.padding(padding))
                     AppScreen.FAVORITES -> FavoritesScreen(state, imageLoader, model, Modifier.padding(padding), onRequestRemoval = { confirmFavoriteRemoval = it })
                     AppScreen.DETAIL -> DetailScreen(
@@ -246,6 +304,8 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                         onPageSelected = model::selectDetail,
                         onLoadAdjacentPage = model::loadAdjacentDetailPage,
                         modifier = Modifier.padding(padding),
+                        mediaFullscreen = mediaFullscreen,
+                        onFullscreenChanged = { mediaFullscreen = it },
                     )
                 }
             }
@@ -451,7 +511,13 @@ private fun AppAboutDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun RandomScreen(state: UiState, imageLoader: ImageLoader, modifier: Modifier = Modifier) {
+private fun RandomScreen(
+    state: UiState,
+    imageLoader: ImageLoader,
+    modifier: Modifier = Modifier,
+    mediaFullscreen: Boolean = false,
+    onFullscreenChanged: (Boolean) -> Unit = {},
+) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         state.image?.let { post ->
             ImageFrame(
@@ -460,16 +526,15 @@ private fun RandomScreen(state: UiState, imageLoader: ImageLoader, modifier: Mod
                 imageLoader,
                 Modifier.fillMaxSize(),
                 zoomEnabled = true,
-                showLoadingIndicator = true,
+                showLoadingIndicator = !state.isLoading,
                 ambientMode = state.ambientMode,
                 videoMaxHeight = state.videoMaxHeight,
+                mediaFullscreen = mediaFullscreen,
+                onFullscreenChanged = onFullscreenChanged,
             )
         }
         if (state.image == null && !state.isLoading) Text("No image loaded")
-        if (state.isLoading) LinearProgressIndicator(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
-            color = Accent,
-        )
+        if (state.isLoading) LoadingSpinner(Modifier.align(Alignment.Center))
     }
 }
 
@@ -511,11 +576,7 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
                 }
             }
             if (state.isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Loading images...", color = Color.LightGray)
-                LinearProgressIndicator(
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
-                    color = Accent,
-                )
+                LoadingSpinner()
             }
             if (!state.isLoading && state.gallery.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No images found")
@@ -669,6 +730,8 @@ private fun DetailScreen(
     onPageSelected: (Int) -> Unit,
     onLoadAdjacentPage: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    mediaFullscreen: Boolean = false,
+    onFullscreenChanged: (Boolean) -> Unit = {},
 ) {
     val posts = state.detailPosts
     val selectedIndex = posts.indexOfFirst { it.id == state.detailImage?.id }.coerceAtLeast(0)
@@ -712,6 +775,8 @@ private fun DetailScreen(
                     ambientMode = state.ambientMode,
                     playbackAllowed = page == pagerState.currentPage,
                     videoMaxHeight = state.videoMaxHeight,
+                    mediaFullscreen = mediaFullscreen,
+                    onFullscreenChanged = onFullscreenChanged,
                 )
             }
         } else {
@@ -724,11 +789,13 @@ private fun DetailScreen(
                     zoomEnabled = true,
                     ambientMode = state.ambientMode,
                     videoMaxHeight = state.videoMaxHeight,
+                    mediaFullscreen = mediaFullscreen,
+                    onFullscreenChanged = onFullscreenChanged,
                 )
             }
         }
         }
-        if (posts.isNotEmpty()) {
+        if (posts.isNotEmpty() && !mediaFullscreen) {
             val absoluteIndex = (state.detailFirstPage - 1) * 50 + pagerState.currentPage + 1
             val total = state.totalResults ?: state.totalPages?.times(50)
             Surface(
@@ -777,11 +844,15 @@ private fun ImageFrame(
     ambientMode: Boolean = false,
     playbackAllowed: Boolean = true,
     videoMaxHeight: Int = 0,
+    mediaFullscreen: Boolean = false,
+    onFullscreenChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = remember(context) { context.findActivity() }
-    val videoControlInset = if (post.mediaType == "video" && !allowThumbnailFallback) 78.dp else 0.dp
+    val videoControlInset = if (
+        post.mediaType == "video" && !allowThumbnailFallback && !mediaFullscreen
+    ) 78.dp else 0.dp
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
     val candidates = (if (allowThumbnailFallback) post.thumbnailCandidates else emptyList()).ifEmpty { listOf(url) }
     val displayedUrl = candidates[candidateIndex.coerceAtMost(candidates.lastIndex)]
@@ -802,6 +873,7 @@ private fun ImageFrame(
     var videoDuration by remember(post.id) { mutableStateOf(0) }
     var videoPosition by remember(post.id) { mutableStateOf(0) }
     var videoError by remember(post.id) { mutableStateOf(false) }
+    var videoBuffering by remember(post.id) { mutableStateOf(false) }
     var videoFeedback by remember(post.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(videoFeedback) {
         if (videoFeedback != null) {
@@ -814,6 +886,7 @@ private fun ImageFrame(
             videoPlaying = false
             videoStarted = false
             videoError = false
+            videoBuffering = false
         }
     }
     LaunchedEffect(post.id, videoMaxHeight) {
@@ -926,11 +999,26 @@ private fun ImageFrame(
                         setOnPreparedListener { player ->
                             player.isLooping = true
                             videoDuration = player.duration.coerceAtLeast(0)
+                            videoBuffering = false
                             if (videoPlaying) start() else pause()
+                        }
+                        setOnInfoListener { _, what, _ ->
+                            when (what) {
+                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START -> {
+                                    videoBuffering = true
+                                    true
+                                }
+                                android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END -> {
+                                    videoBuffering = false
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                         setOnErrorListener { _, _, _ ->
                             videoError = true
                             videoPlaying = false
+                            videoBuffering = false
                             true
                         }
                     }
@@ -997,8 +1085,9 @@ private fun ImageFrame(
         if (post.mediaType == "video" && playbackAllowed && !allowThumbnailFallback && !videoError) {
             Surface(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
-                color = Color(0xEE15151A),
+                color = Color(0xEE1C1E28),
                 shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
             ) {
                 Row(
                     Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -1008,6 +1097,7 @@ private fun ImageFrame(
                         onClick = {
                             if (videoStarted) {
                                 videoPlaying = !videoPlaying
+                                if (!videoPlaying) videoBuffering = false
                                 if (videoPlaying) videoView?.start() else videoView?.pause()
                             } else {
                                 videoStarted = true
@@ -1033,7 +1123,27 @@ private fun ImageFrame(
                         "${formatPlaybackTime(videoPosition)}/${formatPlaybackTime(videoDuration)}",
                         style = MaterialTheme.typography.labelSmall,
                     )
+                    IconButton(onClick = { onFullscreenChanged(!mediaFullscreen) }) {
+                        Icon(
+                            if (mediaFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = if (mediaFullscreen) "Exit fullscreen" else "Enter fullscreen",
+                        )
+                    }
                 }
+            }
+        }
+        if (videoBuffering && videoPlaying && playbackAllowed && !allowThumbnailFallback) {
+            Surface(
+                Modifier.align(Alignment.Center).padding(bottom = videoControlInset),
+                color = Color(0xEE1C1E28),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(14.dp).size(30.dp),
+                    color = Color(0xFFD1D5DB),
+                    strokeWidth = 3.dp,
+                )
             }
         }
         videoFeedback?.let { feedback ->
@@ -1046,10 +1156,7 @@ private fun ImageFrame(
             }
         }
         if (showLoadingIndicator && imageLoading) {
-            LinearProgressIndicator(
-                color = Accent,
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = videoControlInset).height(3.dp),
-            )
+            LoadingSpinner(Modifier.align(Alignment.Center).padding(bottom = videoControlInset))
         }
         if (zoomEnabled && zoom > 1f) {
             TextButton(onClick = { zoom = 1f; pan = Offset.Zero }, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) {
@@ -1065,6 +1172,22 @@ private fun ImageFrame(
                 Text("${post.provider} | ${post.rating.uppercase()}", Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
             }
         }
+    }
+}
+
+@Composable
+private fun LoadingSpinner(modifier: Modifier = Modifier) {
+    Surface(
+        modifier,
+        color = Color(0xEE1C1E28),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.padding(14.dp).size(30.dp),
+            color = Color(0xFFD1D5DB),
+            strokeWidth = 3.dp,
+        )
     }
 }
 
@@ -1214,10 +1337,280 @@ private fun PreferencesDialog(
                         IconButton(onClick = { model.removeCustomTerm(term) }) { Icon(Icons.Default.Delete, "Remove $term") }
                     }
                 }
+                UserDataBackupSection(model)
             }
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
+}
+
+@Composable
+private fun UserDataBackupSection(model: MainViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exportPassphrase by remember { mutableStateOf("") }
+    var confirmExportPassphrase by remember { mutableStateOf("") }
+    var pendingExportPassphrase by remember { mutableStateOf("") }
+    var importPassphrase by remember { mutableStateOf("") }
+    var pendingImport by remember { mutableStateOf<UserDataBackup?>(null) }
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var isBusy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null && pendingExportPassphrase.isNotEmpty()) {
+            val passphrase = pendingExportPassphrase
+            pendingExportPassphrase = ""
+            scope.launch {
+                isBusy = true
+                try {
+                    val content = withContext(Dispatchers.IO) {
+                        UserDataBackupCodec.encrypt(model.createUserDataBackup(), passphrase)
+                    }
+                    withContext(Dispatchers.IO) {
+                        val output = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: throw IOException("Could not open the selected backup file.")
+                        output.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                    }
+                    status = "Encrypted backup exported."
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    if (error is IOException || error is GeneralSecurityException ||
+                        error is IllegalArgumentException || error is SecurityException
+                    ) {
+                        status = "Could not export backup: ${error.message ?: "Unknown error"}"
+                    } else {
+                        throw error
+                    }
+                } finally {
+                    isBusy = false
+                }
+            }
+        } else {
+            pendingExportPassphrase = ""
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            pendingImportUri = uri
+            showImportDialog = true
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Backup & Data", fontWeight = FontWeight.SemiBold)
+        Text(
+            "Encrypted backups include favorites, provider credentials, and portable preferences. " +
+                "Download locations stay on this device. The passphrase cannot be recovered.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    exportPassphrase = ""
+                    confirmExportPassphrase = ""
+                    showExportDialog = true
+                },
+                enabled = !isBusy,
+            ) { Text("Export data") }
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*")) },
+                enabled = !isBusy,
+            ) { Text("Import data") }
+        }
+        if (isBusy) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall)
+    }
+
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = { Text("Encrypt backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Choose a passphrase with at least 8 characters. Use the same passphrase when importing.")
+                    OutlinedTextField(
+                        value = exportPassphrase,
+                        onValueChange = { exportPassphrase = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    OutlinedTextField(
+                        value = confirmExportPassphrase,
+                        onValueChange = { confirmExportPassphrase = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Confirm passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (exportPassphrase.codePointCount(0, exportPassphrase.length) < 8) {
+                            status = "Use a passphrase with at least 8 characters."
+                        } else if (exportPassphrase != confirmExportPassphrase) {
+                            status = "The passphrases do not match."
+                        } else {
+                            pendingExportPassphrase = exportPassphrase
+                            showExportDialog = false
+                            exportLauncher.launch("waifu-gallery-backup.wgbak")
+                        }
+                    },
+                ) { Text("Choose file") }
+            },
+            dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showImportDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showImportDialog = false
+                importPassphrase = ""
+                pendingImportUri = null
+            },
+            title = { Text("Decrypt backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter the passphrase used when this backup was exported.")
+                    OutlinedTextField(
+                        value = importPassphrase,
+                        onValueChange = { importPassphrase = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val passphrase = importPassphrase
+                        showImportDialog = false
+                        importPassphrase = ""
+                        isBusy = true
+                        scope.launch {
+                            try {
+                                val data = withContext(Dispatchers.IO) {
+                                    val uri = pendingImportUri ?: throw IOException("No backup file was selected.")
+                                    val text = context.contentResolver.openInputStream(uri)?.use { input ->
+                                        val output = ByteArrayOutputStream()
+                                        val buffer = ByteArray(8192)
+                                        var total = 0
+                                        while (true) {
+                                            val count = input.read(buffer)
+                                            if (count < 0) break
+                                            total += count
+                                            if (total > 32 * 1024 * 1024) {
+                                                throw IOException("The backup file is too large.")
+                                            }
+                                            output.write(buffer, 0, count)
+                                        }
+                                        output.toString(Charsets.UTF_8.name())
+                                    } ?: throw IOException("Could not read the selected backup file.")
+                                    UserDataBackupCodec.decrypt(text, passphrase)
+                                }
+                                pendingImport = data
+                                pendingImportUri = null
+                                status = "Backup decrypted and validated."
+                            } catch (error: Exception) {
+                                if (error is CancellationException) throw error
+                                if (error is IOException || error is GeneralSecurityException ||
+                                    error is IllegalArgumentException || error is SecurityException
+                                ) {
+                                    status = "Could not import backup: ${error.message ?: "Unknown error"}"
+                                } else {
+                                    throw error
+                                }
+                            } finally {
+                                isBusy = false
+                            }
+                        }
+                    },
+                    enabled = importPassphrase.codePointCount(0, importPassphrase.length) >= 8,
+                ) { Text("Continue") }
+            },
+            dismissButton = { TextButton(onClick = { showImportDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    pendingImport?.let { data ->
+        AlertDialog(
+            onDismissRequest = { pendingImport = null },
+            title = { Text("Import user data") },
+            text = {
+                Text(
+                    "${data.favorites.size} favorites, " +
+                        "${listOf(data.gelbooruUserId, data.rule34UserId).count(String::isNotBlank)} provider accounts, " +
+                        "and portable preferences. Merge keeps existing favorites and credentials when present; " +
+                        "Replace uses the backup's favorites and credentials. Both options import preferences.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        isBusy = true
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) { model.applyUserDataBackup(data, merge = false) }
+                                status = "User data replaced from backup."
+                            } catch (error: Exception) {
+                                if (error is CancellationException) throw error
+                                if (error is IllegalStateException || error is IllegalArgumentException) {
+                                    status = "Could not import backup: ${error.message ?: "Unknown error"}"
+                                } else {
+                                    throw error
+                                }
+                            } finally {
+                                isBusy = false
+                                pendingImport = null
+                            }
+                        }
+                    },
+                    enabled = !isBusy,
+                ) { Text("Replace") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            isBusy = true
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) { model.applyUserDataBackup(data, merge = true) }
+                                    status = "User data merged from backup."
+                                } catch (error: Exception) {
+                                    if (error is CancellationException) throw error
+                                    if (error is IllegalStateException || error is IllegalArgumentException) {
+                                        status = "Could not import backup: ${error.message ?: "Unknown error"}"
+                                    } else {
+                                        throw error
+                                    }
+                                } finally {
+                                    isBusy = false
+                                    pendingImport = null
+                                }
+                            }
+                        },
+                        enabled = !isBusy,
+                    ) { Text("Merge") }
+                    TextButton(onClick = { pendingImport = null }, enabled = !isBusy) { Text("Cancel") }
+                }
+            },
+        )
+    }
 }
 
 @Composable

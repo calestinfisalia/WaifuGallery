@@ -16,6 +16,8 @@ import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.ReleaseUpdate
 import com.fisalia.waifugallery.data.ReleaseUpdateChecker
 import com.fisalia.waifugallery.data.SearchPage
+import com.fisalia.waifugallery.data.UserDataBackup
+import com.fisalia.waifugallery.data.UserDataBackupCodec
 import java.io.IOException
 import java.io.File
 import java.io.FileOutputStream
@@ -105,6 +107,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(
         UiState(
             allowNsfw = preferences.allowNsfw,
+            rating = if (preferences.allowNsfw) {
+                when (preferences.ratingFilter) {
+                    "nsfw" -> RatingFilter.NSFW
+                    "all" -> RatingFilter.ALL
+                    else -> RatingFilter.SFW
+                }
+            } else RatingFilter.SFW,
             useDoh = preferences.useDoh,
             dohProvider = preferences.dohProvider,
             customDohEndpoint = preferences.customDohEndpoint,
@@ -115,7 +124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             videoMaxHeight = preferences.videoMaxHeight,
             ambientMode = preferences.ambientMode,
             provider = preferences.selectedProvider,
-            favorites = preferences.favoritePosts(),
+            favorites = preferences.backupFavoritePosts(),
             customTerms = preferences.customSearchTerms(),
             saveFolderLabel = preferences.saveFolderUri?.let { runCatching { DocumentFile.fromTreeUri(application, Uri.parse(it))?.name }.getOrNull() },
         ),
@@ -214,6 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (provider == _state.value.galleryProvider && rating == _state.value.rating) return
+        preferences.ratingFilter = rating.name.lowercase()
         _state.update { it.copy(galleryProvider = provider, rating = rating, page = 1, totalPages = null, hasMore = false) }
         loadGallery()
     }
@@ -224,6 +234,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (rating == _state.value.rating) return
+        preferences.ratingFilter = rating.name.lowercase()
         _state.update { it.copy(rating = rating, page = 1, totalPages = null, hasMore = false) }
         if (_state.value.galleryQuery.isNotBlank()) loadGallery()
     }
@@ -364,9 +375,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun createUserDataBackup(): UserDataBackup {
+        val current = _state.value
+        return UserDataBackupCodec.create(
+            favorites = preferences.favoritePosts(),
+            gelbooruUserId = preferences.gelbooruUserId,
+            gelbooruApiKey = preferences.gelbooruApiKey,
+            rule34UserId = preferences.rule34UserId,
+            rule34ApiKey = preferences.rule34ApiKey,
+            provider = current.provider,
+            rating = current.rating.name.lowercase(),
+            allowNsfw = current.allowNsfw,
+            customTerms = preferences.customSearchTerms(),
+            excludeMale = current.excludeMale,
+            filterGore = current.filterGore,
+            customBlockTags = current.customBlockTags,
+            mediaFilter = current.mediaFilter,
+            useDoh = current.useDoh,
+            dohProvider = current.dohProvider,
+            customDohEndpoint = current.customDohEndpoint,
+            ambientMode = current.ambientMode,
+            videoMaxHeight = current.videoMaxHeight,
+        )
+    }
+
+    fun applyUserDataBackup(data: UserDataBackup, merge: Boolean) {
+        val favorites = preferences.applyUserData(data, merge)
+        val provider = if (data.provider == "All") "Auto" else data.provider
+        val importedRating = when (data.rating) {
+            "nsfw" -> RatingFilter.NSFW
+            "all" -> RatingFilter.ALL
+            else -> RatingFilter.SFW
+        }
+        _state.update { current ->
+            current.copy(
+                favorites = favorites,
+                provider = provider,
+                allowNsfw = data.allowNsfw,
+                rating = if (data.allowNsfw) importedRating else RatingFilter.SFW,
+                useDoh = data.useDoh,
+                dohProvider = data.dohProvider,
+                customDohEndpoint = data.customDohEndpoint,
+                filterGore = data.filterGore,
+                excludeMale = data.excludeMale,
+                customBlockTags = data.customBlockTags,
+                mediaFilter = data.mediaFilter,
+                videoMaxHeight = data.videoMaxHeight,
+                ambientMode = data.ambientMode,
+                customTerms = data.customTerms,
+                detailPosts = if (current.detailOrigin == AppScreen.FAVORITES) favorites else current.detailPosts,
+                notice = "User data imported",
+            )
+        }
+        refreshCurrentResults()
+    }
+
     fun setAllowNsfw(value: Boolean) {
         preferences.allowNsfw = value
         val resetRating = !value && _state.value.rating != RatingFilter.SFW
+        if (resetRating) preferences.ratingFilter = "sfw"
         _state.update {
             it.copy(
                 allowNsfw = value,

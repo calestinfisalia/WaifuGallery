@@ -14,7 +14,7 @@ body:
     attributes:
       label: App version
       description: Include the version shown in the app or the release you installed.
-      placeholder: "0.1.6"
+      placeholder: "0.1.7"
     validations:
       required: true
   - type: dropdown

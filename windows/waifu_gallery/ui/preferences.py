@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..data_backup import create_payload, decrypt_payload, encrypt_payload
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
 from .dialog_chrome import FramelessResizableDialog
@@ -34,6 +36,62 @@ def _themed_icon(widget: QWidget, name: str) -> QIcon:
     if callable(icon_factory):
         return icon_factory(name)
     return QIcon(str(Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"))
+
+
+def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) -> dict[str, object]:
+    imported_settings = payload["settings"]
+    imported_providers = payload["providers"]
+    favorites = list(payload["favorites"])
+    if merge:
+        existing = settings.get("favorites/posts", [])
+        if isinstance(existing, (list, tuple)):
+            merged = list(existing)
+        else:
+            merged = []
+        identities = {
+            (str(item.get("provider", "")), str(item.get("post_id", "")))
+            for item in merged
+            if isinstance(item, dict)
+        }
+        for item in payload["favorites"]:
+            identity = (item["provider"], item["post_id"])
+            if identity not in identities:
+                merged.append(item)
+                identities.add(identity)
+        favorites = merged
+
+    gelbooru = dict(imported_providers["gelbooru"])
+    rule34 = dict(imported_providers["rule34"])
+    if merge:
+        for prefix, current in (
+            ("gelbooru", settings.gelbooru_credentials),
+            ("rule34", settings.rule34_credentials),
+        ):
+            if all(current):
+                (gelbooru if prefix == "gelbooru" else rule34).update(
+                    user_id=current[0], api_key=current[1]
+                )
+    provider = imported_settings["provider"]
+    return {
+        "favorites/posts": favorites,
+        "gelbooru/user_id": gelbooru["user_id"],
+        "gelbooru/api_key": gelbooru["api_key"],
+        "rule34/user_id": rule34["user_id"],
+        "rule34/api_key": rule34["api_key"],
+        "search/provider": "All" if provider == "Auto" else provider,
+        "search/rating": imported_settings["rating"],
+        "search/allow_nsfw": imported_settings["allow_nsfw"],
+        "search/custom_terms": imported_settings["custom_terms"],
+        "search/exclude_male": imported_settings["exclude_male"],
+        "search/filter_gore": imported_settings["filter_gore"],
+        "search/custom_block_tags": imported_settings["custom_block_tags"],
+        "search/media_filter": imported_settings["media_filter"],
+        "network/use_doh": imported_settings["use_doh"],
+        "network/doh_provider": imported_settings["doh_provider"],
+        "network/doh_custom_endpoint": imported_settings["doh_custom_endpoint"],
+        "view/ambient_mode": imported_settings["ambient_mode"],
+        "video/max_height": imported_settings["video_max_height"],
+    }
 
 
 class ProviderLoginDialog(QDialog):
@@ -186,6 +244,7 @@ class PreferencesDialog(FramelessResizableDialog):
         self._build_filter_tab()
         self._build_network_tab()
         self._build_display_tab()
+        self._build_backup_tab()
         self._build_about_tab()
         self._build_update_tab()
         self._connect_auto_save()
@@ -373,11 +432,7 @@ class PreferencesDialog(FramelessResizableDialog):
 
     def _connect_auto_save(self) -> None:
         self.provider.currentTextChanged.connect(self._provider_changed)
-        for control in (
-            self.default_rating,
-            self.media_filter,
-            self.video_resolution,
-        ):
+        for control in (self.default_rating, self.video_resolution):
             control.currentIndexChanged.connect(self._persist_settings)
         for control in (
             self.exclude_male,
@@ -460,13 +515,6 @@ class PreferencesDialog(FramelessResizableDialog):
         form = QFormLayout()
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(12)
-        self.media_filter = QComboBox()
-        self.media_filter.addItem("Image only", "image")
-        self.media_filter.addItem("Video only", "video")
-        self.media_filter.addItem("View all", "all")
-        media = str(self.settings.get("search/media_filter", "image"))
-        self.media_filter.setCurrentIndex(max(0, self.media_filter.findData(media)))
-        form.addRow("Media showing", self.media_filter)
         self.video_resolution = QComboBox()
         self.video_resolution.addItem("Auto (provider source)", 0)
         self.video_resolution.addItem("Up to 2160p", 2160)
@@ -480,13 +528,143 @@ class PreferencesDialog(FramelessResizableDialog):
         layout.addLayout(form)
         note = QLabel(
             "Resolution selects the closest provider video variant at or below this limit. "
-            "If a provider supplies only one file, that source is used. Media selection "
-            "applies to Random and Search results; playback also depends on installed codecs."
+            "If a provider supplies only one file, that source is used. Playback also depends "
+            "on installed codecs."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch(1)
         self._add_page(page, "Display", "expand")
+
+    def _build_backup_tab(self) -> None:
+        page = QWidget()
+        page.setObjectName("settingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+        title = QLabel("Export or import your user data")
+        title.setStyleSheet("font-size: 16pt; font-weight: 650;")
+        layout.addWidget(title)
+        description = QLabel(
+            "Backups contain favorites, provider credentials, and portable preferences. "
+            "They are encrypted with a passphrase you choose and can be used on Windows, "
+            "Linux, and Android. Device-specific download locations are not included."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        warning = QLabel(
+            "Keep the passphrase safe: it cannot be recovered. Anyone with the backup file "
+            "and its passphrase can access the included provider credentials."
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #d8c9ff;")
+        layout.addWidget(warning)
+        actions = QHBoxLayout()
+        export_button = QPushButton("Export encrypted backup")
+        export_button.clicked.connect(self.export_user_data)
+        import_button = QPushButton("Import backup")
+        import_button.clicked.connect(self.import_user_data)
+        actions.addWidget(export_button)
+        actions.addWidget(import_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        layout.addStretch(1)
+        self._add_page(page, "Backup & Data", "download")
+
+    def export_user_data(self) -> None:
+        passphrase, accepted = QInputDialog.getText(
+            self, "Encrypt backup", "Create a passphrase (at least 8 characters):",
+            QLineEdit.EchoMode.Password,
+        )
+        if not accepted:
+            return
+        confirmation, accepted = QInputDialog.getText(
+            self, "Confirm passphrase", "Enter the passphrase again:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not accepted:
+            return
+        if passphrase != confirmation:
+            QMessageBox.warning(self, "Passphrases do not match", "The backup was not created.")
+            return
+        try:
+            contents = encrypt_payload(create_payload(self.settings), passphrase)
+        except (TypeError, ValueError, OSError) as error:
+            QMessageBox.warning(self, "Could not create backup", str(error))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save encrypted backup", "waifu-gallery-backup.wgbak",
+            "Waifu Gallery backup (*.wgbak);;JSON files (*.json)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as backup_file:
+                backup_file.write(contents)
+        except OSError as error:
+            QMessageBox.critical(self, "Could not save backup", str(error))
+            return
+        QMessageBox.information(self, "Backup created", "Your encrypted backup was saved.")
+
+    def import_user_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import encrypted backup", "",
+            "Waifu Gallery backup (*.wgbak *.json);;All files (*)",
+        )
+        if not path:
+            return
+        passphrase, accepted = QInputDialog.getText(
+            self, "Decrypt backup", "Enter the backup passphrase:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not accepted:
+            return
+        try:
+            with open(path, "rb") as backup_file:
+                raw_contents = backup_file.read(32 * 1024 * 1024 + 1)
+            if len(raw_contents) > 32 * 1024 * 1024:
+                raise ValueError("The backup file is too large.")
+            contents = raw_contents.decode("utf-8")
+            payload = decrypt_payload(contents, passphrase)
+        except (OSError, UnicodeError, ValueError) as error:
+            QMessageBox.warning(self, "Could not import backup", str(error))
+            return
+
+        summary = (
+            f"{len(payload['favorites'])} favorites, "
+            f"{sum(bool(item['user_id']) for item in payload['providers'].values())} provider accounts, "
+            "and portable preferences."
+        )
+        choice = QMessageBox(self)
+        choice.setWindowTitle("Import user data")
+        choice.setText(f"Import {summary}")
+        choice.setInformativeText(
+            "Merge keeps current favorites and existing provider credentials when present. "
+            "Replace uses the backup's favorites and provider credentials. Both options import "
+            "the backup's portable preferences; device-specific download locations are kept."
+        )
+        merge_button = choice.addButton("Merge", QMessageBox.ButtonRole.AcceptRole)
+        replace_button = choice.addButton("Replace", QMessageBox.ButtonRole.DestructiveRole)
+        choice.addButton(QMessageBox.StandardButton.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked not in (merge_button, replace_button):
+            return
+
+        settings = payload["settings"]
+        endpoint = settings["doh_custom_endpoint"] if settings["doh_provider"] == "Custom" else DOH_ENDPOINTS[settings["doh_provider"]]
+        try:
+            if settings["use_doh"]:
+                endpoint = validate_doh_endpoint(endpoint)
+            set_doh_enabled(settings["use_doh"], endpoint if settings["use_doh"] else None)
+            values = _settings_from_backup(payload, self.settings, merge=clicked is merge_button)
+            self.settings.set_many(values)
+        except (OSError, TypeError, ValueError) as error:
+            QMessageBox.warning(self, "Could not import backup", str(error))
+            return
+        self.settings_changed.emit()
+        QMessageBox.information(self, "Backup imported", "Your user data was imported.")
+        self.accept()
 
     def _build_about_tab(self) -> None:
         page = QWidget()
@@ -771,7 +949,6 @@ class PreferencesDialog(FramelessResizableDialog):
             "network/doh_provider": doh_provider,
             "network/doh_custom_endpoint": self.doh_custom_endpoint.text().strip(),
             "view/ambient_mode": self.ambient_mode.isChecked(),
-            "search/media_filter": self.media_filter.currentData(),
             "video/max_height": self.video_resolution.currentData(),
         })
         self.settings_changed.emit()

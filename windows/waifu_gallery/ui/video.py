@@ -12,13 +12,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QProgressBar,
     QSizePolicy,
     QSlider,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
+from .indicators import CircularProgressIndicator
 
 
 class VideoPlayerWidget(QWidget):
@@ -57,6 +57,7 @@ class VideoPlayerWidget(QWidget):
         self._buffering_backdrop_active = False
         self._buffering_active = False
         self._has_video_frame = False
+        self._buffered_percent = -1
         self._reflow_timer = QTimer(self)
         self._reflow_timer.setSingleShot(True)
         self._reflow_timer.setInterval(24)
@@ -171,16 +172,10 @@ class VideoPlayerWidget(QWidget):
         self.buffering_overlay = QFrame(self.video_canvas)
         self.buffering_overlay.setObjectName("videoBufferingOverlay")
         buffering_layout = QVBoxLayout(self.buffering_overlay)
-        buffering_layout.setContentsMargins(18, 14, 18, 14)
-        buffering_layout.setSpacing(10)
-        self.buffering_label = QLabel("Buffering video...")
-        self.buffering_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.buffering_bar = QProgressBar()
-        self.buffering_bar.setObjectName("videoBufferingBar")
-        self.buffering_bar.setRange(0, 0)
-        self.buffering_bar.setTextVisible(False)
-        self.buffering_bar.setFixedSize(180, 4)
-        buffering_layout.addWidget(self.buffering_label)
+        buffering_layout.setContentsMargins(0, 0, 0, 0)
+        buffering_layout.setSpacing(0)
+        self.buffering_bar = CircularProgressIndicator(size=28)
+        self.buffering_bar.setObjectName("videoBufferingIndicator")
         buffering_layout.addWidget(self.buffering_bar, 0, Qt.AlignmentFlag.AlignHCenter)
         self.buffering_overlay.hide()
 
@@ -213,32 +208,27 @@ class VideoPlayerWidget(QWidget):
         self.player.durationChanged.connect(self._update_duration)
         self.player.errorOccurred.connect(self._show_error)
         self.player.mediaStatusChanged.connect(self._media_status_changed)
+        self.player.bufferProgressChanged.connect(self._update_buffer_progress)
         self.position.sliderPressed.connect(self._slider_pressed)
         self.position.sliderReleased.connect(self._slider_released)
         self.setStyleSheet("""
-            QFrame#videoControls { background: rgba(22, 23, 34, 235); border: 1px solid #35384c; border-radius: 13px; }
-            QFrame#videoBufferingOverlay { background: rgba(22, 23, 34, 220); border: 1px solid #454862; border-radius: 14px; }
-            QProgressBar#videoBufferingBar { border: 0; border-radius: 2px; background: #454862; }
-            QProgressBar#videoBufferingBar::chunk { border-radius: 2px; background: #bb9af7; }
             QPushButton#videoPlayOverlay { border: 0; border-radius: 38px; background: rgba(28, 30, 44, 225); color: white; font-size: 30px; }
             QPushButton#videoPlayOverlay:hover { background: rgba(122, 94, 230, 245); }
             QPushButton#videoPlayPause { padding: 0; }
             QPushButton#videoVolumeButton { padding: 0; border: 0; background: transparent; }
             QSlider#videoVolumeSlider { min-height: 18px; }
-            QSlider#videoPositionSlider::groove:horizontal,
             QSlider#videoVolumeSlider::groove:horizontal {
                 height: 5px;
-                background: #454862;
+                background: #292b32;
                 border-radius: 2px;
             }
             QSlider#videoPositionSlider::sub-page:horizontal,
             QSlider#videoVolumeSlider::sub-page:horizontal {
-                background: #bb9af7;
+                background: #8b909b;
                 border-radius: 2px;
             }
-            QSlider#videoPositionSlider::add-page:horizontal,
             QSlider#videoVolumeSlider::add-page:horizontal {
-                background: #454862;
+                background: #292b32;
                 border-radius: 2px;
             }
             QSlider#videoPositionSlider::handle:horizontal,
@@ -246,10 +236,22 @@ class VideoPlayerWidget(QWidget):
                 width: 12px;
                 margin: -4px 0;
                 border-radius: 6px;
-                background: #bb9af7;
+                background: #a0a5af;
             }
             QLabel { color: #c8cce0; }
         """)
+        self._update_buffer_progress(self.player.bufferProgress())
+        self._update_buffer_indicator(False)
+        self.controls_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.buffering_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.buffering_overlay.setStyleSheet(
+            "QFrame#videoBufferingOverlay { background: transparent; border: 0; }"
+        )
+        self.controls_frame.setAutoFillBackground(True)
+        self.controls_frame.setStyleSheet(
+            "QFrame#videoControls { background-color: #1c1e28; "
+            "border: 0; border-radius: 9px; }"
+        )
 
     def _icon(self, name: str) -> QIcon:
         return QIcon(str(self._asset_dir / name))
@@ -347,7 +349,7 @@ class VideoPlayerWidget(QWidget):
         self.position.setRange(0, 0)
         self.position.setValue(0)
         self.time_label.setText("00:00 / 00:00")
-        self.set_buffer_progress(-1)
+        self._reset_buffer_progress()
         self._pending_source = None
         self._loading_requested = False
         self._seek_pending = False
@@ -401,8 +403,7 @@ class VideoPlayerWidget(QWidget):
         self.position.setRange(0, 0)
         self.position.setValue(0)
         self.time_label.setText("00:00 / 00:00")
-        self.buffering_bar.setRange(0, 0)
-        self.set_buffer_progress(-1)
+        self._reset_buffer_progress()
         self._schedule_reflow()
         self._update_controls(self.player.playbackState())
 
@@ -421,6 +422,7 @@ class VideoPlayerWidget(QWidget):
         self._has_video_frame = False
         self.has_source = False
         self._has_started = False
+        self._set_buffering(False)
         self._controls_visible = False
         self.controls_frame.hide()
         self._poster = None
@@ -428,7 +430,7 @@ class VideoPlayerWidget(QWidget):
         self.position.setRange(0, 0)
         self.position.setValue(0)
         self.time_label.setText("00:00 / 00:00")
-        self.set_buffer_progress(-1)
+        self._reset_buffer_progress()
         self.message.clear()
         self.message.hide()
         self.buffering_overlay.hide()
@@ -479,12 +481,33 @@ class VideoPlayerWidget(QWidget):
                 return
             self.player.play()
 
-    def set_buffer_progress(self, value: int) -> None:
-        if value < 0:
-            self.buffering_bar.setRange(0, 0)
-        else:
-            self.buffering_bar.setRange(0, 100)
-            self.buffering_bar.setValue(max(0, min(100, value)))
+    def _update_buffer_progress(self, progress: float) -> None:
+        percent = max(0, min(100, round(progress * 100)))
+        if percent == self._buffered_percent:
+            return
+        self._buffered_percent = percent
+        stop = percent / 100
+        gradient = (
+            "qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            f"stop:0 #8b909b, stop:{stop:.3f} #8b909b, "
+            f"stop:{min(1.0, stop + 0.001):.3f} #292b32, stop:1 #292b32)"
+        )
+        self.position.setStyleSheet(
+            "QSlider#videoPositionSlider { min-height: 18px; }"
+            "QSlider#videoPositionSlider::groove:horizontal { "
+            f"height: 5px; background: {gradient}; border-radius: 2px; }}"
+            "QSlider#videoPositionSlider::sub-page:horizontal { "
+            "background: #8b909b; border-radius: 2px; }"
+            "QSlider#videoPositionSlider::handle:horizontal { "
+            "width: 12px; margin: -4px 0; border-radius: 6px; background: #a0a5af; }"
+        )
+
+    def _reset_buffer_progress(self) -> None:
+        self._buffered_percent = -1
+        self._update_buffer_progress(0.0)
+
+    def _update_buffer_indicator(self, active: bool) -> None:
+        self.buffering_bar.set_active(active)
 
     def show_prepare_error(self, message: str) -> None:
         self.audio.setMuted(True)
@@ -523,6 +546,7 @@ class VideoPlayerWidget(QWidget):
             self._buffering_backdrop_active = opaque_backdrop
             self.video.viewport().update()
         self.buffering_overlay.setVisible(visible)
+        self._update_buffer_indicator(visible)
         if visible:
             self._position_overlay_widgets()
             self.buffering_overlay.raise_()
@@ -557,6 +581,7 @@ class VideoPlayerWidget(QWidget):
             return
         self._slider_target = self.position.sliderPosition()
         self._seek_pending = True
+        self._has_video_frame = False
         self._set_buffering(True)
         self.bufferingChanged.emit(True)
         self.player.setPosition(self._slider_target)
@@ -581,6 +606,11 @@ class VideoPlayerWidget(QWidget):
         if abs(self.player.position() - self._slider_target) > 1500:
             QTimer.singleShot(150, self._finish_seek_if_ready)
             return
+        if (
+            self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            and not self._has_video_frame
+        ):
+            return
         self._seek_pending = False
         self._set_buffering(False)
         self.bufferingChanged.emit(False)
@@ -598,6 +628,8 @@ class VideoPlayerWidget(QWidget):
                 self._set_buffering(False)
                 self.bufferingChanged.emit(False)
                 return
+            if not self._buffering_active:
+                self._has_video_frame = False
             self._set_buffering(True)
             self.bufferingChanged.emit(True)
         elif status in {
@@ -608,7 +640,7 @@ class VideoPlayerWidget(QWidget):
                 not self._seek_pending
                 or abs(self.player.position() - self._slider_target) <= 1500
             )
-            if seek_ready and (
+            if self._has_video_frame and seek_ready and (
                 self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
                 or self._seek_pending
             ):
@@ -673,9 +705,8 @@ class VideoPlayerWidget(QWidget):
         width, height = self.video_canvas.width(), self.video_canvas.height()
         if width <= 0 or height <= 0:
             return
-        size = self.buffering_overlay.sizeHint()
-        overlay_width = min(max(220, size.width()), max(1, width - 24))
-        overlay_height = min(max(64, size.height()), max(1, height - 24))
+        overlay_width = min(self.buffering_bar.width(), width)
+        overlay_height = min(self.buffering_bar.height(), height)
         self.buffering_overlay.setGeometry(
             (width - overlay_width) // 2,
             (height - overlay_height) // 2,
@@ -708,17 +739,11 @@ class VideoPlayerWidget(QWidget):
             # A pause must never leave the buffering veil/status active.
             self._seek_pending = False
             self._set_buffering(False)
-        status = self.player.mediaStatus()
-        buffering_status = status in {
-            QMediaPlayer.MediaStatus.LoadingMedia,
-            QMediaPlayer.MediaStatus.BufferingMedia,
-            QMediaPlayer.MediaStatus.StalledMedia,
-        }
         seek_ready = (
             not self._seek_pending
             or abs(self.player.position() - self._slider_target) <= 1500
         )
-        if playing and seek_ready and (not buffering_status or self._has_video_frame):
+        if playing and seek_ready and self._has_video_frame:
             self._seek_pending = False
             self._has_started = True
             self._set_buffering(False)
@@ -738,9 +763,7 @@ class VideoPlayerWidget(QWidget):
     def _emit_playback_status(self, state=None) -> None:
         if state is None:
             state = self.player.playbackState()
-        if self._buffering_active:
-            text = "Buffering video..."
-        elif state == QMediaPlayer.PlaybackState.PlayingState:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
             text = "Playing"
         elif state == QMediaPlayer.PlaybackState.PausedState:
             text = "Paused"

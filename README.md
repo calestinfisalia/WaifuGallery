@@ -4,11 +4,25 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.6).
-- [Linux](linux/README.md) — Linux port of the Windows 0.1.6 desktop feature set; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.6).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.7).
+- [Linux](linux/README.md) — Linux port aligned with the Windows 0.1.7 desktop feature set; platform runtime and packaging still need Linux verification.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.7).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Feature availability and platform requirements are documented in each project README.
+
+## Encrypted user data backups
+
+Windows, Linux, and Android provide **Settings → Backup & Data** (on Android, in Preferences). Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
+
+The shared version 1 format uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces favorites and provider credentials. Both options import the backup's portable preferences. The local download location is retained.
+
+This encrypts the exported file only. Provider credentials remain stored using each platform's existing local settings storage, so protect access to your device as usual.
+
+## Desktop UI behavior and bug reports
+
+The Windows and Linux desktop apps share the same UI behavior: search cards show media without titles and scale small provider previews to fill their tiles; changing search pages clears old results while loading; zoom hides scrollbars but retains drag-to-pan; Search, Favorites, and Media Info use thin capsule scrollbars; and video buffering uses a bare spinner with gray controls/progress. Provider notices use gray capsules without a purple outline. The image footer shows provider, media type, and resolution only for a loaded image in Random or Search detail, and clears while loading or outside those views. Random-image metadata and search-loading overlays, plus desktop Settings opening, have been fixed.
+
+When reporting a regression, include the OS, whether the media is an image or video, the exact steps to reproduce it, and a screenshot or error text. For desktop issues, check both `windows/waifu_gallery/ui/` and `linux/waifu_gallery/ui/`: changes to shared behavior should remain in sync. Run `python -m compileall` on the changed Python files and `git diff --check` before handing off a fix.
 
 ## Community
 

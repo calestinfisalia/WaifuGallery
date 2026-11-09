@@ -5,13 +5,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QProgressBar,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
 )
 
 from ..models import ImagePost
+from .indicators import CircularProgressIndicator
 
 
 class ZoomImage(QLabel):
@@ -29,11 +29,8 @@ class ZoomImage(QLabel):
         self.scroll_area = None
         self._drag_position = None
         self._swipe_start = None
-        self.loading_bar = QProgressBar(self)
-        self.loading_bar.setObjectName("centerLoadProgress")
-        self.loading_bar.setRange(0, 0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedSize(220, 4)
+        self.loading_bar = CircularProgressIndicator(self)
+        self.loading_bar.setObjectName("centerLoadIndicator")
         self.loading_bar.hide()
 
     def set_image(self, pixmap: QPixmap) -> None:
@@ -47,56 +44,44 @@ class ZoomImage(QLabel):
         if pixmap.isNull():
             self.setPixmap(QPixmap())
             self.setCursor(Qt.CursorShape.ArrowCursor)
-            self.loading_bar.hide()
-            self.loading_bar.setRange(0, 100)
-            self.loading_bar.setValue(0)
+            self.loading_bar.set_active(False)
             return
-        self.loading_bar.hide()
-        self.loading_bar.setRange(0, 100)
-        self.loading_bar.setValue(0)
+        self.loading_bar.set_active(False)
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.factor > 1.0 else Qt.CursorShape.ArrowCursor)
         self._fit_to_viewport()
 
     def set_placeholder(self, message: str) -> None:
-        """Show loading/error text across the scroll area's full viewport."""
+        """Show an error message across the scroll area's full viewport."""
+        self._prepare_placeholder()
+        self.setText(message)
+        self.loading_bar.set_active(False)
+
+    def set_loading(self) -> None:
+        """Show an indeterminate indicator across the full viewport."""
+        self._prepare_placeholder()
+        self.setText("")
+        self.loading_bar.set_active(True)
+
+    def _prepare_placeholder(self) -> None:
         self.original = QPixmap()
         self.factor = 1.0
         self.setPixmap(QPixmap())
-        self.setText(message)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        is_loading = any(word in message.lower() for word in ("loading", "preparing", "searching"))
-        if is_loading:
-            # Each media request starts with a fresh busy indicator instead
-            # of retaining the previous image's completed percentage.
-            self.loading_bar.setRange(0, 0)
-            self.loading_bar.setValue(0)
-            self.loading_bar.show()
-        else:
-            self.loading_bar.hide()
-            self.loading_bar.setRange(0, 100)
-            self.loading_bar.setValue(0)
         self.setMinimumSize(1, 1)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if self.scroll_area is not None:
             self.scroll_area.setWidgetResizable(True)
 
-    def set_loading_progress(self, label: str, value: int) -> None:
-        """Show byte-download progress while keeping the loading view centered."""
-        if value < 0:
-            self.setText(label)
-            self.loading_bar.setRange(0, 0)
-        else:
-            percentage = max(0, min(100, value))
-            self.setText(f"{label} {percentage}%")
-            self.loading_bar.setRange(0, 100)
-            self.loading_bar.setValue(percentage)
-        self.loading_bar.show()
+    def set_loading_progress(self, value: int) -> None:
+        """Show byte-download progress without a text label."""
+        self.setText("")
+        self.loading_bar.set_progress(None if value < 0 else value / 100)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.loading_bar.move(
             max(0, (self.width() - self.loading_bar.width()) // 2),
-            max(0, self.height() // 2 + 22),
+            max(0, (self.height() - self.loading_bar.height()) // 2),
         )
 
     def _fit_to_viewport(self) -> None:
@@ -221,6 +206,8 @@ class ImageViewer(QDialog):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(False)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(self.image)
         self.image.viewport = self.scroll.viewport()
         self.image.scroll_area = self.scroll
@@ -228,7 +215,8 @@ class ImageViewer(QDialog):
         metadata = QLabel(self._metadata_text())
         metadata.setWordWrap(True)
         layout.addWidget(metadata)
-        self.status = QLabel("Loading image…")
+        self.image.set_loading()
+        self.status = QLabel("")
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -252,6 +240,7 @@ class ImageViewer(QDialog):
         self.save_button.setEnabled(True)
 
     def show_error(self, message: str) -> None:
+        self.image.set_placeholder(f"Could not load image: {message}")
         self.status.setText(f"Could not load image: {message}")
 
     def showEvent(self, event) -> None:

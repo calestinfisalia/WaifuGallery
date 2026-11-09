@@ -11,6 +11,14 @@ class AppPreferences(context: Context) {
         get() = store.getBoolean("nsfw", false)
         set(value) = store.edit().putBoolean("nsfw", value).apply()
 
+    var ratingFilter: String
+        get() = (store.getString("rating_filter", "sfw") ?: "sfw")
+            .takeIf { it in setOf("sfw", "nsfw", "all") } ?: "sfw"
+        set(value) {
+            require(value in setOf("sfw", "nsfw", "all"))
+            store.edit().putString("rating_filter", value).apply()
+        }
+
     var useDoh: Boolean
         get() = store.getBoolean("doh", false)
         set(value) = store.edit().putBoolean("doh", value).apply()
@@ -129,7 +137,69 @@ class AppPreferences(context: Context) {
         emptyList()
     }
 
+    fun backupFavoritePosts(): List<ImagePost> {
+        val saved = store.getString("favorite_posts", "[]") ?: "[]"
+        val count = try {
+            JSONArray(saved).length()
+        } catch (error: Exception) {
+            throw IllegalStateException("Saved favorites could not be read for backup.", error)
+        }
+        val favorites = favoritePosts()
+        if (favorites.size != count) {
+            throw IllegalStateException("Some saved favorites could not be read for backup.")
+        }
+        return favorites
+    }
+
     fun setFavoritePosts(posts: List<ImagePost>) {
+        store.edit().putString("favorite_posts", favoritePostsJson(posts)).apply()
+    }
+
+    fun applyUserData(data: UserDataBackup, merge: Boolean): List<ImagePost> {
+        val favorites = if (merge) {
+            val combined = favoritePosts().toMutableList()
+            val existingKeys = combined.mapTo(mutableSetOf()) { "${it.provider}:${it.id}" }
+            data.favorites.forEach { post ->
+                if (existingKeys.add("${post.provider}:${post.id}")) combined.add(post)
+            }
+            combined
+        } else {
+            data.favorites
+        }
+        val gelbooruCredentials = if (merge && hasCredentials(gelbooruUserId, gelbooruApiKey)) {
+            gelbooruUserId to gelbooruApiKey
+        } else data.gelbooruUserId to data.gelbooruApiKey
+        val rule34Credentials = if (merge && hasCredentials(rule34UserId, rule34ApiKey)) {
+            rule34UserId to rule34ApiKey
+        } else data.rule34UserId to data.rule34ApiKey
+
+        val editor = store.edit()
+            .putString("favorite_posts", favoritePostsJson(favorites))
+            .putString("gelbooru_user_id", gelbooruCredentials.first.trim())
+            .putString("gelbooru_api_key", gelbooruCredentials.second.trim())
+            .putString("rule34_user_id", rule34Credentials.first.trim())
+            .putString("rule34_api_key", rule34Credentials.second.trim())
+            .putString("provider", if (data.provider == "All") "Auto" else data.provider)
+            .putBoolean("nsfw", data.allowNsfw)
+            .putString("rating_filter", if (data.allowNsfw) data.rating else "sfw")
+            .putBoolean("doh", data.useDoh)
+            .putString("doh_provider", data.dohProvider)
+            .putString("custom_doh_endpoint", data.customDohEndpoint.trim())
+            .putBoolean("filter_gore", data.filterGore)
+            .putBoolean("exclude_male", data.excludeMale)
+            .putString("custom_block_tags", data.customBlockTags)
+            .putString("media_filter", data.mediaFilter)
+            .putInt("video_max_height", data.videoMaxHeight)
+            .putBoolean("ambient_mode", data.ambientMode)
+            .putString("custom_search_terms", JSONArray(data.customTerms).toString())
+            .putInt("custom_search_index", 0)
+        if (!editor.commit()) {
+            throw IllegalStateException("Could not save imported user data.")
+        }
+        return favorites
+    }
+
+    private fun favoritePostsJson(posts: List<ImagePost>): String {
         val array = JSONArray()
         posts.forEach { post ->
             array.put(JSONObject().apply {
@@ -159,8 +229,11 @@ class AppPreferences(context: Context) {
                 })
             })
         }
-        store.edit().putString("favorite_posts", array.toString()).apply()
+        return array.toString()
     }
+
+    private fun hasCredentials(userId: String, apiKey: String): Boolean =
+        userId.isNotBlank() && apiKey.isNotBlank()
 
     private fun JSONArray?.toStringList(): List<String> = this?.let { array ->
         (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }

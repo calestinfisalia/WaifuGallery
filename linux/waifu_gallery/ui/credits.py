@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ImagePost
+from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
 
 class MediaInfoTitleBar(QWidget):
@@ -117,6 +118,11 @@ class ImageCreditsDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setObjectName("mediaInfoScrollArea")
+        scroll.verticalScrollBar().setObjectName("mediaInfoVerticalScrollBar")
+        scroll.horizontalScrollBar().setObjectName("mediaInfoHorizontalScrollBar")
+        scroll.verticalScrollBar().setStyleSheet(CAPSULE_SCROLLBAR_STYLE)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         tag_container = QWidget()
         tags_layout = QGridLayout(tag_container)
         tags_layout.setContentsMargins(0, 0, 4, 2)

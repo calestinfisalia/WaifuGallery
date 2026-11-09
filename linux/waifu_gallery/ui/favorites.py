@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 
 from ..models import ImagePost
 from .dialog_chrome import FramelessResizableDialog
+from .indicators import CircularProgressIndicator
+from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
 
 def favorite_key(post: ImagePost) -> str:
@@ -86,6 +88,7 @@ class FavoritesDialog(FramelessResizableDialog):
         self._open_post = open_post
         self._remove_post = remove_post
         self.thumbnail_buttons: dict[str, QPushButton] = {}
+        self.thumbnail_indicators: dict[str, CircularProgressIndicator] = {}
         self.remove_buttons: dict[str, QPushButton] = {}
         self.play_badges: dict[str, QLabel] = {}
         self.tiles: list[tuple[str, QWidget]] = []
@@ -106,6 +109,8 @@ class FavoritesDialog(FramelessResizableDialog):
         layout.addWidget(FavoritesTitleBar(self))
         header = QHBoxLayout()
         self.count_label = QLabel()
+        self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.addStretch(1)
         header.addWidget(self.count_label)
         header.addStretch(1)
         layout.addLayout(header)
@@ -117,6 +122,11 @@ class FavoritesDialog(FramelessResizableDialog):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setObjectName("favoritesScrollArea")
+        self.scroll.verticalScrollBar().setObjectName("favoritesVerticalScrollBar")
+        self.scroll.horizontalScrollBar().setObjectName("favoritesHorizontalScrollBar")
+        self.scroll.verticalScrollBar().setStyleSheet(CAPSULE_SCROLLBAR_STYLE)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.content = QWidget()
         self.grid = QGridLayout(self.content)
         self.grid.setContentsMargins(4, 4, 4, 4)
@@ -142,13 +152,14 @@ class FavoritesDialog(FramelessResizableDialog):
             if widget:
                 widget.deleteLater()
         self.thumbnail_buttons.clear()
+        self.thumbnail_indicators.clear()
         self.remove_buttons.clear()
         self.play_badges.clear()
         self.tiles.clear()
         videos = sum(post.media_type == "video" for post in self.posts)
         images = len(self.posts) - videos
         self.count_label.setText(
-            f"Favorites · {len(self.posts)} media · {images} images · {videos} videos"
+            f"{len(self.posts)} media · {images} images · {videos} videos"
         )
         self.empty_label.setVisible(not self.posts)
         self.scroll.setVisible(bool(self.posts))
@@ -157,11 +168,16 @@ class FavoritesDialog(FramelessResizableDialog):
             preview_area = QWidget()
             preview_area.setMinimumSize(160, 180)
             preview_area.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            preview = QPushButton("Loading preview...", preview_area)
+            preview = QPushButton(preview_area)
             preview.setObjectName("previewImage")
             preview.clicked.connect(lambda _checked=False, item=post: self._open_post(item))
             key = favorite_key(post)
             self.thumbnail_buttons[key] = preview
+            if key not in self.thumbnail_cache and key not in self.thumbnail_errors:
+                indicator = CircularProgressIndicator(preview_area, size=28)
+                indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                indicator.set_active(True)
+                self.thumbnail_indicators[key] = indicator
             if post.media_type == "video":
                 play_badge = QLabel(preview_area)
                 icon_factory = getattr(self.parent(), "_icon", None)
@@ -177,6 +193,7 @@ class FavoritesDialog(FramelessResizableDialog):
                     "background: rgba(16, 17, 24, 190); border-radius: 23px; padding: 12px;"
                 )
                 play_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                play_badge.setVisible(key in self.thumbnail_cache)
                 self.play_badges[key] = play_badge
             remove = QPushButton(preview_area)
             remove.setObjectName("favoriteRemoveButton")
@@ -212,10 +229,18 @@ class FavoritesDialog(FramelessResizableDialog):
             preview = self.thumbnail_buttons[key]
             preview.setGeometry(0, 0, tile_width, tile_height)
             preview.setIconSize(QSize(tile_width - 10, tile_height - 10))
+            indicator = self.thumbnail_indicators.get(key)
+            if indicator:
+                indicator.move(
+                    (tile_width - indicator.width()) // 2,
+                    (tile_height - indicator.height()) // 2,
+                )
+                indicator.raise_()
             play_badge = self.play_badges.get(key)
             if play_badge:
                 play_badge.move((tile_width - play_badge.width()) // 2, (tile_height - play_badge.height()) // 2)
-                play_badge.raise_()
+                if key in self.thumbnail_cache:
+                    play_badge.raise_()
             self.remove_buttons[key].setGeometry(tile_width - 40, 8, 32, 32)
             self.remove_buttons[key].raise_()
             self.grid.addWidget(tile, index // columns, index % columns)
@@ -237,15 +262,27 @@ class FavoritesDialog(FramelessResizableDialog):
         self.thumbnail_cache[post_id] = pixmap
         self.thumbnail_errors.discard(post_id)
         button = self.thumbnail_buttons.get(post_id)
+        indicator = self.thumbnail_indicators.get(post_id)
+        if indicator:
+            indicator.set_active(False)
         if button:
             button.setText("")
             button.setIcon(QIcon(pixmap))
+        play_badge = self.play_badges.get(post_id)
+        if play_badge:
+            play_badge.show()
 
     def set_thumbnail_error(self, post_id: str) -> None:
         self.thumbnail_errors.add(post_id)
+        indicator = self.thumbnail_indicators.get(post_id)
+        if indicator:
+            indicator.set_active(False)
         button = self.thumbnail_buttons.get(post_id)
         if button:
             button.setText("Preview unavailable")
+        play_badge = self.play_badges.get(post_id)
+        if play_badge:
+            play_badge.hide()
 
     def remove_favorite(self, post_id: str) -> None:
         self.posts = [post for post in self.posts if favorite_key(post) != post_id]
