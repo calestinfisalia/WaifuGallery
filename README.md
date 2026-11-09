@@ -10,6 +10,11 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Feature availability and platform requirements are documented in each project README.
 
+## Community
+
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and pull request guidance.
+- Report security issues according to [SECURITY.md](SECURITY.md).
+
 ## License and credits
 
 The Waifu Gallery application source code is licensed under the MIT License; see [LICENSE](LICENSE). Android also includes a copy at [android/LICENSE](android/LICENSE).

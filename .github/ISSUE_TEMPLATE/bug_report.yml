@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible problem in Waifu Gallery
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, check whether the issue has already been reported.
+        Do not include passwords, API keys, private URLs, or other sensitive information.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Include the version shown in the app or the release you installed.
+      placeholder: "0.1.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - Android
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: Operating system version
+      placeholder: "Windows 11 24H2, Ubuntu 24.04, Android 15"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Screenshots or logs
+      description: Attach relevant screenshots or logs, after removing credentials and personal information.
+    validations:
+      required: false
