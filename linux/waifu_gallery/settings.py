@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from PySide6.QtCore import QSettings
 
 from .doh import DOH_ENDPOINTS
@@ -14,6 +16,11 @@ class AppSettings:
 
     def set(self, key: str, value) -> None:
         self._store.setValue(key, value)
+        self._store.sync()
+
+    def set_many(self, values: Mapping[str, object]) -> None:
+        for key, value in values.items():
+            self._store.setValue(key, value)
         self._store.sync()
 
     @property

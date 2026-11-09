@@ -58,7 +58,7 @@ data class UiState(
     val detailPreviousFailed: Boolean = false,
     val detailNextFailed: Boolean = false,
     val galleryProvider: String = "All",
-    val rating: RatingFilter = RatingFilter.ALL,
+    val rating: RatingFilter = RatingFilter.SFW,
     val page: Int = 1,
     val totalPages: Int? = null,
     val hasMore: Boolean = false,
@@ -149,7 +149,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun search() {
         val query = _state.value.queryInput.trim()
         if (query.isBlank()) { refreshRandom(); return }
-        _state.update { it.copy(galleryQuery = query, galleryProvider = "All", page = 1, totalPages = null, totalResults = null, hasMore = false, screen = AppScreen.GALLERY, detailPosts = emptyList()) }
+        val selectedProvider = preferences.selectedProvider
+        val galleryProvider = if (selectedProvider == "Auto") "All" else selectedProvider
+        _state.update { it.copy(galleryQuery = query, galleryProvider = galleryProvider, page = 1, totalPages = null, totalResults = null, hasMore = false, screen = AppScreen.GALLERY, detailPosts = emptyList()) }
         loadGallery()
     }
 
@@ -186,6 +188,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setGalleryFilters(provider: String, rating: RatingFilter) {
+        if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
+            _state.update { it.copy(notice = "Enable NSFW results in Preferences to use this rating.") }
+            return
+        }
         if (provider == "Gelbooru" && !hasGelbooruCredentials()) {
             pendingGalleryFilters = provider to rating
             openGelbooruCredentials()
@@ -202,6 +208,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setRating(rating: RatingFilter) {
+        if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
+            _state.update { it.copy(notice = "Enable NSFW results in Preferences to use this rating.") }
+            return
+        }
         if (rating == _state.value.rating) return
         _state.update { it.copy(rating = rating, page = 1, totalPages = null, hasMore = false) }
         if (_state.value.galleryQuery.isNotBlank()) loadGallery()
@@ -345,8 +355,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAllowNsfw(value: Boolean) {
         preferences.allowNsfw = value
-        _state.update { it.copy(allowNsfw = value) }
-        if (_state.value.screen == AppScreen.RANDOM) refreshRandom()
+        val resetRating = !value && _state.value.rating != RatingFilter.SFW
+        _state.update {
+            it.copy(
+                allowNsfw = value,
+                rating = if (resetRating) RatingFilter.SFW else it.rating,
+                page = if (resetRating) 1 else it.page,
+                totalPages = if (resetRating) null else it.totalPages,
+                hasMore = if (resetRating) false else it.hasMore,
+            )
+        }
+        when (_state.value.screen) {
+            AppScreen.RANDOM -> refreshRandom()
+            AppScreen.GALLERY -> if (resetRating) loadGallery()
+            else -> Unit
+        }
     }
     fun setUseDoh(value: Boolean) {
         preferences.useDoh = value
@@ -417,15 +440,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (provider) {
             "Gelbooru" -> { preferences.gelbooruUserId = ""; preferences.gelbooruApiKey = "" }
             "Rule34.xxx" -> { preferences.rule34UserId = ""; preferences.rule34ApiKey = "" }
+            else -> return
         }
         val selectedAsDefault = _state.value.provider == provider
         val selectedInGallery = _state.value.galleryProvider == provider
-        if (selectedAsDefault) {
-            preferences.selectedProvider = "Auto"
-            _state.update { it.copy(provider = "Auto") }
+        if (selectedAsDefault) preferences.selectedProvider = "Auto"
+        _state.update { current ->
+            current.copy(
+                provider = if (selectedAsDefault) "Auto" else current.provider,
+                galleryProvider = if (selectedInGallery) "All" else current.galleryProvider,
+                page = if (selectedInGallery) 1 else current.page,
+                totalPages = if (selectedInGallery) null else current.totalPages,
+                hasMore = if (selectedInGallery) false else current.hasMore,
+                notice = "Signed out of $provider",
+            )
         }
         if (selectedInGallery && _state.value.galleryQuery.isNotBlank()) {
-            _state.update { it.copy(galleryProvider = "All", page = 1, totalPages = null, hasMore = false) }
             loadGallery()
         } else if (selectedAsDefault && _state.value.screen == AppScreen.RANDOM) refreshRandom()
     }

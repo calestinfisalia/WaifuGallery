@@ -232,7 +232,6 @@ class MainWindow(QMainWindow):
         self._fullscreen_active = False
         self._was_maximized_before_fullscreen = False
         self._windowed_geometry = None
-        self._ambient_preview_enabled: bool | None = None
         self.card_buttons: dict[str, QPushButton] = {}
         self.current_theme = str(self.settings.get("appearance/theme", "Dark"))
         if self.current_theme not in ("Dark", "Light", "System"):
@@ -1142,16 +1141,10 @@ class MainWindow(QMainWindow):
         label.lower()
 
     def _ambient_mode_enabled(self) -> bool:
-        if self._ambient_preview_enabled is not None:
-            return self._ambient_preview_enabled
         value = self.settings.get("view/ambient_mode", True)
         if isinstance(value, str):
             return value.strip().casefold() in {"1", "true", "yes", "on"}
         return bool(value)
-
-    def _preview_ambient_mode(self, enabled: bool) -> None:
-        self._ambient_preview_enabled = bool(enabled)
-        self._apply_ambient_mode()
 
     def _apply_ambient_mode(self) -> None:
         enabled = self._ambient_mode_enabled()
@@ -2413,14 +2406,30 @@ class MainWindow(QMainWindow):
         dialog = PreferencesDialog(self.settings, self)
         self.preferences_dialog = dialog
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        dialog.ambient_mode.toggled.connect(self._preview_ambient_mode)
-        dialog.accepted.connect(
-            lambda provider=previous_provider, rating=previous_rating, media=previous_media,
-            filters=previous_filter_settings: self._preferences_saved(
-                provider, rating, media, filters
+        preference_state = {
+            "provider": previous_provider,
+            "rating": previous_rating,
+            "media": previous_media,
+            "filters": previous_filter_settings,
+        }
+
+        def preferences_changed() -> None:
+            self._preferences_updated(
+                preference_state["provider"],
+                preference_state["rating"],
+                preference_state["media"],
+                preference_state["filters"],
             )
-        )
-        dialog.rejected.connect(self._preferences_cancelled)
+            preference_state["provider"] = self.selected_provider
+            preference_state["rating"] = self.selected_rating
+            preference_state["media"] = str(self.settings.get("search/media_filter", "image"))
+            preference_state["filters"] = (
+                bool(self.settings.get("search/exclude_male", True)),
+                bool(self.settings.get("search/filter_gore", True)),
+                tuple(self.settings.get("search/custom_block_tags", []) or []),
+            )
+
+        dialog.settings_changed.connect(preferences_changed)
         dialog.finished.connect(
             lambda _result, current=dialog: self._clear_preferences_dialog(current)
         )
@@ -2432,18 +2441,13 @@ class MainWindow(QMainWindow):
         if self.preferences_dialog is dialog:
             self.preferences_dialog = None
 
-    def _preferences_cancelled(self) -> None:
-        self._ambient_preview_enabled = None
-        self._apply_ambient_mode()
-
-    def _preferences_saved(
+    def _preferences_updated(
         self,
         previous_provider: str,
         previous_rating: str,
         previous_media: str,
         previous_filter_settings: tuple[bool, bool, tuple],
     ) -> None:
-        self._ambient_preview_enabled = None
         provider = str(self.settings.get("search/provider", "All"))
         rating = str(self.settings.get("search/rating", "sfw"))
         if provider in self.provider_actions:

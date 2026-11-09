@@ -31,7 +31,11 @@ class BooruApi(
     private val mediaFilter: () -> String = { "image" },
 ) {
     private data class Provider(val name: String, val endpoint: String, val yandere: Boolean = false)
-    private data class ProviderSearchResult(val posts: List<ImagePost>, val totalCount: Int?)
+    private data class ProviderSearchResult(
+        val posts: List<ImagePost>,
+        val totalCount: Int?,
+        val hasMore: Boolean = false,
+    )
     private data class CachedCount(val value: Int, val storedAt: Long)
 
     private val danbooru = Provider("Danbooru", "https://danbooru.donmai.us/posts.json")
@@ -192,11 +196,12 @@ class BooruApi(
             }
             merged
         } else successes[providerName].orEmpty().take(limit)
+        val providerHasMore = results.any { (_, result) -> result.getOrNull()?.hasMore == true }
         SearchPage(
             posts = posts,
             totalPages = totalCount?.let { ((it + limit - 1) / limit).coerceAtLeast(1) },
             totalResults = totalCount,
-            hasMore = totalCount?.let { page * limit < it } ?: (posts.size >= limit || successes.values.any { it.size >= limit }),
+            hasMore = totalCount?.let { page * limit < it } ?: (posts.size >= limit || providerHasMore),
             providerErrors = errors,
         )
     }
@@ -208,26 +213,43 @@ class BooruApi(
         page: Int,
         limit: Int,
     ): ProviderSearchResult {
+        if (mediaFilter() == "video" && provider.yandere) {
+            return ProviderSearchResult(emptyList(), 0)
+        }
         val tagsQueries = searchTags(query).toMutableList()
         prefixFallback(query)?.let { if (it !in tagsQueries) tagsQueries += it }
         var knownTotal: Int? = null
         for (tags in tagsQueries) {
             val posts = mutableListOf<ImagePost>()
+            var hasMore = false
             for (ratingTag in ratings(rating)) {
                 val queryRating = ratingTag?.let { providerRatingTag(provider, it) }
-                val params = mutableMapOf("tags" to (tags + listOfNotNull(queryRating?.let { "rating:$it" })).joinToString(" "), "limit" to minOf(limit, 100).toString(), "page" to page.toString())
+                val requestTags = tags + listOfNotNull(
+                    if (mediaFilter() == "video") "video" else null,
+                    queryRating?.let { "rating:$it" },
+                )
+                val params = mutableMapOf(
+                    "tags" to requestTags.joinToString(" "),
+                    "limit" to minOf(limit + 1, 100).toString(),
+                    "page" to page.toString(),
+                )
                 if (provider.yandere) params["api_version"] = "2"
                 val result = requestPosts(provider, params)
-                posts += result.mapNotNull { parsePost(it, provider) }
+                hasMore = hasMore || result.size > limit
+                posts += result.take(limit).mapNotNull { parsePost(it, provider) }
             }
             val filtered = posts.filter {
                     ratingMatches(it, rating) && (!excludeMale() || acceptableGender(it)) &&
                     (rating != RatingFilter.SFW || safeForSfw(it)) && acceptedPost(it)
             }
-            val count = countMatches(provider, tags, rating)
+            val count = countMatches(
+                provider,
+                tags + listOfNotNull(if (mediaFilter() == "video") "video" else null),
+                rating,
+            )
             if (count != null && knownTotal == null) knownTotal = count
-            if (filtered.isNotEmpty()) return ProviderSearchResult(filtered.distinctBy { it.id }.take(limit), count)
-            if (count != null && count > 0) return ProviderSearchResult(emptyList(), count)
+            if (filtered.isNotEmpty()) return ProviderSearchResult(filtered.distinctBy { it.id }.take(limit), count, hasMore)
+            if (count != null && count > 0) return ProviderSearchResult(emptyList(), count, hasMore)
         }
         return ProviderSearchResult(emptyList(), knownTotal ?: 0)
     }
@@ -628,20 +650,29 @@ class BooruApi(
     }
 
     private fun searchTags(query: String): List<List<String>> {
-        val normalized = query.trim().let { if (' ' in it && '_' !in it) it.replace(' ', '_') else it }
-        if (normalized.isBlank()) return emptyList()
-        val tokens = normalized.split(Regex("\\s+")).toMutableList()
-        if (tokens.size == 1) {
-            val tag = tokens[0]
-            if (tag.none { it in "*~()" } && ':' !in tag && !tag.startsWith('-')) tokens[0] = "$tag*"
+        val tags = mutableListOf<String>()
+        for (chunk in query.split(",")) {
+            var value = chunk.trim()
+            if (value.isBlank()) continue
+            if (' ' in value && '_' !in value) value = value.replace(' ', '_')
+            val chunkTags = value.split(Regex("\\s+")).toMutableList()
+            if (chunkTags.size == 1) {
+                val tag = chunkTags[0]
+                if (tag.isNotEmpty() && tag.none { it in "*~()" } && ':' !in tag && !tag.startsWith("-")) {
+                    chunkTags[0] = "$tag*"
+                }
+            }
+            tags += chunkTags
         }
-        return listOf(tokens)
+        return if (tags.isEmpty()) emptyList() else listOf(tags)
     }
 
     private fun prefixFallback(query: String): List<String>? {
-        val normalized = query.trim()
-        if (normalized.isBlank() || '_' in normalized || normalized.any { it in "*~():" }) return null
-        val first = normalized.substringBefore(' ').lowercase()
+        val value = query.trim().substringBefore(",").trim()
+        if (value.isBlank() || '_' in value || value.any { it in "*~():" }) return null
+        val firstChunk = value.split(Regex("\\s+"))
+        if (firstChunk.size != 1) return null
+        val first = firstChunk[0].lowercase()
         return if (first.length >= 3) listOf("$first*") else null
     }
 }

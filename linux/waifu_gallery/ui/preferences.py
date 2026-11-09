@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 
 import requests
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QSize, Qt, QThreadPool, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -176,6 +176,7 @@ class SettingsTitleBar(QWidget):
 class PreferencesDialog(QDialog):
     ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
     RELEASE_PAGE = "https://github.com/calestinfisalia/WaifuGallery/releases"
+    settings_changed = Signal()
 
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
@@ -218,18 +219,10 @@ class PreferencesDialog(QDialog):
         self._build_display_tab()
         self._build_about_tab()
         self._build_update_tab()
+        self._connect_auto_save()
         # Keep navigation items grouped at the top instead of spreading them
         # across the full height of the dialog.
         self.sidebar_layout.addStretch(1)
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel = QPushButton("Cancel")
-        save = QPushButton("Save")
-        cancel.clicked.connect(self.reject)
-        save.clicked.connect(self.save)
-        buttons.addWidget(cancel)
-        buttons.addWidget(save)
-        root.addLayout(buttons)
         outer.addWidget(surface)
 
     def _build_general_tab(self) -> None:
@@ -276,6 +269,7 @@ class PreferencesDialog(QDialog):
         self.provider = QComboBox()
         self.provider.addItems(["All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"])
         self.provider.setCurrentText(str(self.settings.get("search/provider", "All")))
+        self._last_provider = self.provider.currentText()
         self.default_rating = QComboBox()
         self.default_rating.addItem("Only SFW", "sfw")
         self.default_rating.addItem("Only NSFW", "nsfw")
@@ -407,6 +401,74 @@ class PreferencesDialog(QDialog):
         self.doh_custom_endpoint.setEnabled(custom)
         self.doh_custom_endpoint.setVisible(custom)
         self.doh_custom_label.setVisible(custom)
+
+    def _connect_auto_save(self) -> None:
+        self.provider.currentTextChanged.connect(self._provider_changed)
+        for control in (self.default_rating, self.media_filter, self.video_resolution):
+            control.currentIndexChanged.connect(self._persist_settings)
+        for control in (self.exclude_male, self.allow_nsfw, self.filter_gore, self.ambient_mode):
+            control.toggled.connect(self._persist_settings)
+        self.use_doh.toggled.connect(self._on_doh_toggled)
+        self.doh_provider.currentIndexChanged.connect(self._on_doh_configuration_changed)
+        self.doh_custom_endpoint.editingFinished.connect(self._on_doh_configuration_changed)
+
+    def _doh_endpoint(self) -> str:
+        provider = str(self.doh_provider.currentData())
+        return (
+            self.doh_custom_endpoint.text().strip()
+            if provider == "Custom"
+            else DOH_ENDPOINTS[provider]
+        )
+
+    def _validate_doh_configuration(self) -> bool:
+        try:
+            endpoint = validate_doh_endpoint(self._doh_endpoint())
+        except ValueError as error:
+            QMessageBox.warning(self, "Invalid DoH endpoint", str(error))
+            self._select_page(self.nav_buttons.index(next(
+                button for button in self.nav_buttons if button.text() == "Network"
+            )))
+            return False
+        set_doh_enabled(True, endpoint)
+        return True
+
+    def _on_doh_toggled(self, enabled: bool) -> None:
+        if enabled:
+            if not self._validate_doh_configuration():
+                blocker = QSignalBlocker(self.use_doh)
+                self.use_doh.setChecked(False)
+                del blocker
+                set_doh_enabled(False)
+        else:
+            set_doh_enabled(False)
+        self._persist_settings()
+
+    def _on_doh_configuration_changed(self, *_args) -> None:
+        if self.use_doh.isChecked() and not self._validate_doh_configuration():
+            blocker = QSignalBlocker(self.use_doh)
+            self.use_doh.setChecked(False)
+            del blocker
+            set_doh_enabled(False)
+        self._persist_settings()
+
+    def _provider_changed(self, provider: str) -> None:
+        missing_credentials = (
+            provider == "Gelbooru" and not all(self.settings.gelbooru_credentials)
+        ) or (
+            provider == "Rule34.xxx" and not all(self.settings.rule34_credentials)
+        )
+        if missing_credentials:
+            QMessageBox.warning(
+                self,
+                f"{provider} credentials",
+                f"Use Sign in to add the {provider} credentials first.",
+            )
+            blocker = QSignalBlocker(self.provider)
+            self.provider.setCurrentText(self._last_provider)
+            del blocker
+            return
+        self._last_provider = provider
+        self._persist_settings()
 
     def _build_display_tab(self) -> None:
         page = QWidget()
@@ -650,15 +712,20 @@ class PreferencesDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Select download folder", current)
         if folder:
             self.save_folder.setText(folder)
+            self._persist_settings()
 
     def add_term(self) -> None:
         values = [part.strip() for part in self.new_term.text().split(",") if part.strip()]
         existing = {self.terms.item(i).text().casefold() for i in range(self.terms.count())}
+        changed = False
         for value in values:
             if value.casefold() not in existing:
                 self._add_term_item(value)
                 existing.add(value.casefold())
+                changed = True
         self.new_term.clear()
+        if changed:
+            self._persist_settings()
 
     def _add_term_item(self, value: str) -> None:
         self._add_chip_item(self.terms, value)
@@ -690,8 +757,7 @@ class PreferencesDialog(QDialog):
         row_layout.addWidget(remove)
         target_list.setItemWidget(item, row)
 
-    @staticmethod
-    def _remove_chip_item(target_list: QListWidget, item: QListWidgetItem) -> None:
+    def _remove_chip_item(self, target_list: QListWidget, item: QListWidgetItem) -> None:
         row = target_list.row(item)
         if row < 0:
             return
@@ -699,52 +765,40 @@ class PreferencesDialog(QDialog):
         target_list.takeItem(row)
         if widget is not None:
             widget.deleteLater()
+        if target_list in (self.terms, self.filter_list):
+            self._persist_settings()
 
     def add_filter(self) -> None:
         existing = {self.filter_list.item(i).text().casefold() for i in range(self.filter_list.count())}
+        changed = False
         for tag in self.new_filter.text().replace(",", " ").split():
             normalized = tag.strip().casefold().replace(" ", "_")
             if normalized and normalized not in existing:
                 self._add_chip_item(self.filter_list, normalized)
                 existing.add(normalized)
+                changed = True
         self.new_filter.clear()
+        if changed:
+            self._persist_settings()
 
-    def save(self) -> None:
-        provider = self.provider.currentText()
-        if provider == "Gelbooru" and not all(self.settings.gelbooru_credentials):
-            QMessageBox.warning(self, "Gelbooru credentials", "Use Sign in to add the Gelbooru user ID and API key first.")
-            return
-        if provider == "Rule34.xxx" and not all(self.settings.rule34_credentials):
-            QMessageBox.warning(self, "Rule34.xxx credentials", "Use Sign in to add the Rule34.xxx user ID and API key first.")
-            return
+    def _persist_settings(self, *_: object) -> None:
         doh_provider = str(self.doh_provider.currentData())
-        doh_endpoint = (
-            self.doh_custom_endpoint.text().strip()
-            if doh_provider == "Custom"
-            else DOH_ENDPOINTS[doh_provider]
-        )
-        if self.use_doh.isChecked():
-            try:
-                doh_endpoint = validate_doh_endpoint(doh_endpoint)
-            except ValueError as error:
-                QMessageBox.warning(self, "Invalid DoH endpoint", str(error))
-                self._select_page(self.nav_buttons.index(next(
-                    button for button in self.nav_buttons if button.text() == "Network"
-                )))
-                return
-        self.settings.set("search/provider", provider)
-        self.settings.set("search/rating", self.default_rating.currentData())
-        self.settings.set("downloads/folder", self.save_folder.text())
-        self.settings.set("search/custom_terms", [self.terms.item(i).text() for i in range(self.terms.count())])
-        self.settings.set("search/exclude_male", self.exclude_male.isChecked())
-        self.settings.set("search/allow_nsfw", self.allow_nsfw.isChecked())
-        self.settings.set("search/filter_gore", self.filter_gore.isChecked())
-        self.settings.set("search/custom_block_tags", [self.filter_list.item(i).text() for i in range(self.filter_list.count())])
-        self.settings.set("network/use_doh", self.use_doh.isChecked())
-        self.settings.set("network/doh_provider", doh_provider)
-        self.settings.set("network/doh_custom_endpoint", self.doh_custom_endpoint.text().strip())
-        self.settings.set("view/ambient_mode", self.ambient_mode.isChecked())
-        self.settings.set("search/media_filter", self.media_filter.currentData())
-        self.settings.set("video/max_height", self.video_resolution.currentData())
-        set_doh_enabled(self.use_doh.isChecked(), doh_endpoint)
-        self.accept()
+        self.settings.set_many({
+            "search/provider": self.provider.currentText(),
+            "search/rating": self.default_rating.currentData(),
+            "downloads/folder": self.save_folder.text(),
+            "search/custom_terms": [self.terms.item(i).text() for i in range(self.terms.count())],
+            "search/exclude_male": self.exclude_male.isChecked(),
+            "search/allow_nsfw": self.allow_nsfw.isChecked(),
+            "search/filter_gore": self.filter_gore.isChecked(),
+            "search/custom_block_tags": [
+                self.filter_list.item(i).text() for i in range(self.filter_list.count())
+            ],
+            "network/use_doh": self.use_doh.isChecked(),
+            "network/doh_provider": doh_provider,
+            "network/doh_custom_endpoint": self.doh_custom_endpoint.text().strip(),
+            "view/ambient_mode": self.ambient_mode.isChecked(),
+            "search/media_filter": self.media_filter.currentData(),
+            "video/max_height": self.video_resolution.currentData(),
+        })
+        self.settings_changed.emit()

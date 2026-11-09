@@ -215,6 +215,10 @@ def set_doh_enabled(enabled: bool, endpoint: str | None = None) -> None:
     with _STATE_LOCK:
         if not enabled:
             _ACTIVE_RESOLVER = None
+            if _HOOK_INSTALLED:
+                if socket.getaddrinfo is _doh_getaddrinfo:
+                    socket.getaddrinfo = _SYSTEM_GETADDRINFO
+                _HOOK_INSTALLED = False
             return
         if endpoint is not None:
             normalized_endpoint = validate_doh_endpoint(endpoint)
@@ -222,6 +226,6 @@ def set_doh_enabled(enabled: bool, endpoint: str | None = None) -> None:
                 _ACTIVE_RESOLVER = DoHResolver(normalized_endpoint)
         elif _ACTIVE_RESOLVER is None:
             _ACTIVE_RESOLVER = DoHResolver(DOH_ENDPOINTS["Cloudflare"])
-        if not _HOOK_INSTALLED:
+        if not _HOOK_INSTALLED or socket.getaddrinfo is not _doh_getaddrinfo:
             socket.getaddrinfo = _doh_getaddrinfo
             _HOOK_INSTALLED = True

@@ -16,16 +16,24 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Optional ambient background blur, which can be turned off in Settings.
 - The toolbar download button saves the currently displayed media; the download list, progress, and clearable history are in the app menu.
 - User-defined search terms used by Random.
+- Settings are saved automatically as you change them; close Settings whenever you're done.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
 - Optional process-local DNS over HTTPS, with Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard, and a custom RFC 8484 HTTPS endpoint.
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
+
+## Windows 0.1.5
+
+- Settings changes are saved immediately; close Settings when finished. DoH can be toggled off immediately to restore system DNS.
+- Fixed DoH shutdown and kept Windows feature changes synchronized with the Linux port.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.4
 
 - Made Settings, Media Info, and Favorites non-modal so the main window and multiple dialogs can be used at the same time.
 - Updated Favorites with application-styled window controls, image/video counts, a play indicator on video thumbnails, and removable favorites.
 - Refined Settings controls for removing saved search terms and blocked tags, and removed distracting focus outlines.
+- Settings now save automatically, and disabling DoH immediately restores the system DNS resolver.
 - Added rounded provider error notices with fade-in and fade-out transitions.
 - Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
@@ -71,7 +79,7 @@ Gelbooru is optional. Open Settings, enter your Gelbooru user ID and API key, an
 
 Rule34.xxx is also optional and requires its own API credentials. Sign in to Rule34.xxx, open [Account Options](https://rule34.xxx/index.php?page=account&s=options), and find the API Access Credentials section. If the API key is empty, enable the `Generate New Key?` option and save. Enter that user ID and API key in Waifu Gallery Settings, then choose Rule34.xxx. These are API credentials, not your account password.
 
-DNS-over-HTTPS is optional. Open Settings → Network, enable it, and choose a built-in resolver or enter a custom HTTPS endpoint that supports RFC 8484 DNS wire format. Custom endpoint hostnames are bootstrapped through the system DNS resolver.
+DNS-over-HTTPS is optional. Open Settings → Network, enable or disable it at any time, and choose a built-in resolver or enter a custom HTTPS endpoint that supports RFC 8484 DNS wire format. Settings are saved automatically. Custom endpoint hostnames are bootstrapped through the system DNS resolver.
 
 Credentials are stored for the current Windows user through `QSettings`; they are not encrypted by this application, so do not share or commit them. Rule34.xxx's [API terms](https://rule34.xxx/index.php?page=tos) prohibit ads and paywalls for apps using its API and ask clients not to hammer the service.
 

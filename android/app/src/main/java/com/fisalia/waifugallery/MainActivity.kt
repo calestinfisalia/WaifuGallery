@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -79,6 +80,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -497,7 +499,14 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
                 Icon(Icons.Default.NavigateBefore, contentDescription = null); Text("Previous")
             }
             val pageCount = state.totalPages?.toString() ?: if (state.hasMore) "..." else state.page.toString()
-            Text("${state.page}/$pageCount  |  ${state.gallery.size} images", Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelMedium)
+            val imageCount = state.gallery.count { it.mediaType != "video" }
+            val videoCount = state.gallery.size - imageCount
+            val mediaCount = when (state.mediaFilter) {
+                "video" -> "$videoCount videos"
+                "all" -> "$imageCount images, $videoCount videos"
+                else -> "$imageCount images"
+            }
+            Text("${state.page}/$pageCount  |  $mediaCount", Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelMedium)
             TextButton(onClick = { model.changePage(1) }, enabled = state.hasMore) {
                 Text("Next"); Icon(Icons.Default.NavigateNext, contentDescription = null)
             }
@@ -507,6 +516,7 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
         GalleryFiltersDialog(
             selectedProvider = state.galleryProvider,
             selectedRating = state.rating,
+            allowNsfw = state.allowNsfw,
             onDismiss = { showFilters = false },
             onApply = { provider, rating ->
                 showFilters = false
@@ -520,6 +530,7 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
 private fun GalleryFiltersDialog(
     selectedProvider: String,
     selectedRating: RatingFilter,
+    allowNsfw: Boolean,
     onDismiss: () -> Unit,
     onApply: (String, RatingFilter) -> Unit,
 ) {
@@ -551,13 +562,20 @@ private fun GalleryFiltersDialog(
                 }
 
                 Text("Rating", fontWeight = FontWeight.SemiBold)
+                if (!allowNsfw) {
+                    Text(
+                        "Enable NSFW results in Preferences to use other ratings.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray,
+                    )
+                }
                 Box {
                     OutlinedButton(onClick = { ratingMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(rating.label, Modifier.weight(1f))
                         Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose rating")
                     }
                     DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
-                        RatingFilter.entries.forEach { option ->
+                        RatingFilter.entries.filter { allowNsfw || it == RatingFilter.SFW }.forEach { option ->
                             DropdownMenuItem(
                                 text = { Text(option.label) },
                                 trailingIcon = { if (rating == option) Icon(Icons.Default.Check, contentDescription = "Selected") },
@@ -646,7 +664,8 @@ private fun DetailScreen(
         if (!state.detailPreviousFailed && pagerState.currentPage <= 1 && state.detailFirstPage > 1) onLoadAdjacentPage(-1)
     }
 
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Column(modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
         if (posts.isNotEmpty()) {
             HorizontalPager(
                 state = pagerState,
@@ -681,15 +700,20 @@ private fun DetailScreen(
                 )
             }
         }
+        }
         if (posts.isNotEmpty()) {
             val absoluteIndex = (state.detailFirstPage - 1) * 50 + pagerState.currentPage + 1
             val total = state.totalResults ?: state.totalPages?.times(50)
             Surface(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
-                color = Color(0xAA15151A),
-                shape = RoundedCornerShape(16.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                color = Panel,
+                shape = RoundedCornerShape(12.dp),
             ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
                     if (state.detailOrigin == AppScreen.FAVORITES) {
                         IconButton(
                             onClick = { pagerScope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
@@ -730,6 +754,7 @@ private fun ImageFrame(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = remember(context) { context.findActivity() }
+    val videoControlInset = if (post.mediaType == "video" && !allowThumbnailFallback) 78.dp else 0.dp
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
     val candidates = (if (allowThumbnailFallback) post.thumbnailCandidates else emptyList()).ifEmpty { listOf(url) }
     val displayedUrl = candidates[candidateIndex.coerceAtMost(candidates.lastIndex)]
@@ -745,6 +770,10 @@ private fun ImageFrame(
         canPan = { zoom > 1f },
     ) else Modifier
     var videoPlaying by remember(post.id) { mutableStateOf(false) }
+    var videoStarted by remember(post.id) { mutableStateOf(false) }
+    var videoView by remember(post.id) { mutableStateOf<android.widget.VideoView?>(null) }
+    var videoDuration by remember(post.id) { mutableStateOf(0) }
+    var videoPosition by remember(post.id) { mutableStateOf(0) }
     var videoError by remember(post.id) { mutableStateOf(false) }
     var videoFeedback by remember(post.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(videoFeedback) {
@@ -756,11 +785,20 @@ private fun ImageFrame(
     LaunchedEffect(post.id, playbackAllowed) {
         if (!playbackAllowed) {
             videoPlaying = false
+            videoStarted = false
             videoError = false
         }
     }
     LaunchedEffect(post.id, videoMaxHeight) {
         videoPlaying = false
+        videoStarted = false
+    }
+    LaunchedEffect(videoPlaying, videoView) {
+        while (videoPlaying) {
+            val player = videoView ?: break
+            videoPosition = player.currentPosition.coerceAtLeast(0)
+            delay(500)
+        }
     }
     DisposableEffect(lifecycleOwner, post.id) {
         val observer = LifecycleEventObserver { _, event ->
@@ -777,24 +815,25 @@ private fun ImageFrame(
             modifier = Modifier.fillMaxSize().blur(28.dp).graphicsLayer { scaleX = 1.12f; scaleY = 1.12f },
             contentScale = ContentScale.Crop,
         )
-        if (post.mediaType == "video" && videoPlaying && playbackAllowed && !allowThumbnailFallback) {
+        if (post.mediaType == "video" && videoStarted && playbackAllowed && !allowThumbnailFallback && !videoError) {
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(bottom = videoControlInset),
                 factory = { context ->
                     android.widget.VideoView(context).apply {
-                        val videoView = this
+                        val playerView = this
+                        videoView = playerView
                         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         var volumeDrag = 0f
                         val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
                             override fun onDown(event: MotionEvent): Boolean = true
 
                             override fun onDoubleTap(event: MotionEvent): Boolean {
-                                val duration = videoView.duration
+                                val duration = playerView.duration
                                 if (duration <= 0) return false
-                                val forward = event.x >= videoView.width / 2f
-                                val destination = (videoView.currentPosition + (if (forward) 5_000 else -5_000))
+                                val forward = event.x >= playerView.width / 2f
+                                val destination = (playerView.currentPosition + (if (forward) 5_000 else -5_000))
                                     .coerceIn(0, (duration - 1).coerceAtLeast(0))
-                                videoView.seekTo(destination)
+                                playerView.seekTo(destination)
                                 videoFeedback = if (forward) "+5 seconds" else "-5 seconds"
                                 return true
                             }
@@ -807,7 +846,7 @@ private fun ImageFrame(
                             ): Boolean {
                                 val start = first ?: return false
                                 if (abs(distanceY) <= abs(distanceX)) return false
-                                if (start.x < videoView.width / 2f) {
+                                if (start.x < playerView.width / 2f) {
                                     val currentActivity = activity ?: return false
                                     val window = currentActivity.window
                                     val params = window.attributes
@@ -817,14 +856,14 @@ private fun ImageFrame(
                                         currentActivity.currentScreenBrightness()
                                     }
                                     params.screenBrightness =
-                                        (brightness + distanceY / videoView.height.coerceAtLeast(1).toFloat()).coerceIn(0.01f, 1f)
+                                        (brightness + distanceY / playerView.height.coerceAtLeast(1).toFloat()).coerceIn(0.01f, 1f)
                                     window.attributes = params
                                     videoFeedback = "Brightness ${(params.screenBrightness * 100).toInt()}%"
                                 } else {
                                     val maximum = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                                     if (maximum <= 0) return false
                                     volumeDrag += distanceY
-                                    val pixelsPerStep = (videoView.height.toFloat() / maximum / 2f).coerceAtLeast(8f)
+                                    val pixelsPerStep = (playerView.height.toFloat() / maximum / 2f).coerceAtLeast(8f)
                                     val steps = (volumeDrag / pixelsPerStep).toInt()
                                     if (steps != 0) {
                                         volumeDrag -= steps * pixelsPerStep
@@ -842,7 +881,6 @@ private fun ImageFrame(
                             gestureDetector.onTouchEvent(event)
                             false
                         }
-                        setMediaController(android.widget.MediaController(context).also { it.setAnchorView(this) })
                         val headers = when (post.provider) {
                             "Gelbooru" -> mapOf("Referer" to "https://gelbooru.com/")
                             "Rule34.xxx" -> mapOf("Referer" to "https://rule34.xxx/")
@@ -858,7 +896,11 @@ private fun ImageFrame(
                             post.imageUrl
                         }
                         setVideoURI(Uri.parse(videoUrl), headers)
-                        setOnPreparedListener { player -> player.isLooping = true; start() }
+                        setOnPreparedListener { player ->
+                            player.isLooping = true
+                            videoDuration = player.duration.coerceAtLeast(0)
+                            if (videoPlaying) start() else pause()
+                        }
                         setOnErrorListener { _, _, _ ->
                             videoError = true
                             videoPlaying = false
@@ -866,14 +908,21 @@ private fun ImageFrame(
                         }
                     }
                 },
-                onRelease = { it.stopPlayback() },
+                update = { view ->
+                    if (videoPlaying && !view.isPlaying) view.start()
+                    else if (!videoPlaying && view.isPlaying) view.pause()
+                },
+                onRelease = {
+                    if (videoView === it) videoView = null
+                    it.stopPlayback()
+                },
             )
         } else {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).crossfade(true).build(),
             imageLoader = imageLoader,
             contentDescription = "${post.provider} image, rating ${post.rating}",
-            modifier = Modifier.fillMaxSize().graphicsLayer {
+            modifier = Modifier.fillMaxSize().padding(bottom = videoControlInset).graphicsLayer {
                 scaleX = if (zoomEnabled) zoom else 1f
                 scaleY = if (zoomEnabled) zoom else 1f
                 translationX = if (zoomEnabled) pan.x else 0f
@@ -892,9 +941,13 @@ private fun ImageFrame(
             },
         )
         }
-        if (post.mediaType == "video" && !videoPlaying && !videoError && !allowThumbnailFallback) {
+        if (post.mediaType == "video" && !videoStarted && !videoError && !allowThumbnailFallback) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).size(68.dp).clickable { videoPlaying = true },
+                modifier = Modifier.align(Alignment.Center).padding(bottom = videoControlInset).size(68.dp).clickable {
+                    videoError = false
+                    videoStarted = true
+                    videoPlaying = true
+                },
                 shape = RoundedCornerShape(50.dp), color = Color(0xBB111118),
             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(44.dp)) } }
         }
@@ -910,13 +963,55 @@ private fun ImageFrame(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text("Video could not be played", style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = { videoError = false; videoPlaying = true }) { Text("Try again") }
+                    TextButton(onClick = { videoError = false; videoStarted = true; videoPlaying = true }) { Text("Try again") }
+                }
+            }
+        }
+        if (post.mediaType == "video" && playbackAllowed && !allowThumbnailFallback && !videoError) {
+            Surface(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
+                color = Color(0xEE15151A),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(
+                        onClick = {
+                            if (videoStarted) {
+                                videoPlaying = !videoPlaying
+                                if (videoPlaying) videoView?.start() else videoView?.pause()
+                            } else {
+                                videoStarted = true
+                                videoPlaying = true
+                            }
+                        },
+                        enabled = playbackAllowed,
+                    ) {
+                        Icon(
+                            if (videoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (videoPlaying) "Pause video" else "Play video",
+                        )
+                    }
+                    Slider(
+                        value = videoPosition.toFloat().coerceIn(0f, videoDuration.toFloat().coerceAtLeast(1f)),
+                        onValueChange = { videoPosition = it.toInt() },
+                        onValueChangeFinished = { videoView?.seekTo(videoPosition) },
+                        valueRange = 0f..videoDuration.toFloat().coerceAtLeast(1f),
+                        enabled = videoDuration > 0,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${formatPlaybackTime(videoPosition)}/${formatPlaybackTime(videoDuration)}",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
         }
         videoFeedback?.let { feedback ->
             Surface(
-                Modifier.align(Alignment.Center),
+                Modifier.align(Alignment.Center).padding(bottom = videoControlInset),
                 color = Color(0xCC15151A),
                 shape = RoundedCornerShape(16.dp),
             ) {
@@ -926,7 +1021,7 @@ private fun ImageFrame(
         if (showLoadingIndicator && imageLoading) {
             LinearProgressIndicator(
                 color = Accent,
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = videoControlInset).height(3.dp),
             )
         }
         if (zoomEnabled && zoom > 1f) {
@@ -936,7 +1031,7 @@ private fun ImageFrame(
         }
         if (showMetadata) {
             Surface(
-                Modifier.align(Alignment.BottomStart).padding(8.dp),
+                Modifier.align(Alignment.BottomStart).padding(start = 8.dp, top = 8.dp, bottom = 8.dp + videoControlInset),
                 color = Color(0xAA15151A),
                 shape = RoundedCornerShape(6.dp),
             ) {
@@ -944,6 +1039,11 @@ private fun ImageFrame(
             }
         }
     }
+}
+
+private fun formatPlaybackTime(milliseconds: Int): String {
+    val seconds = milliseconds.coerceAtLeast(0) / 1000
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 @Composable
