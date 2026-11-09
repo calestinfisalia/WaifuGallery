@@ -48,7 +48,7 @@ from ..models import ImagePost, SearchPage
 from ..providers import BooruCatalog, ProviderError
 from ..settings import AppSettings
 from .downloads import DownloadsDialog
-from .credits import ImageCreditsDialog
+from .credits import ImageCreditsDialog, rating_label
 from .favorites import FavoritesDialog, favorite_key
 from .indicators import CircularProgressIndicator
 from .preferences import PreferencesDialog
@@ -241,6 +241,7 @@ class MainWindow(QMainWindow):
         self._icon_cache: dict[tuple[str, str], QIcon] = {}
         self._icon_buttons: list[QPushButton] = []
         self.downloads = DownloadsDialog(self)
+        self.downloads.cancel_requested.connect(self._cancel_download)
         self._fullscreen_idle_timer = QTimer(self)
         self._fullscreen_idle_timer.setSingleShot(True)
         self._fullscreen_idle_timer.setInterval(1000)
@@ -330,6 +331,7 @@ class MainWindow(QMainWindow):
         self.title_bar.add_navigation_action(self.back_button)
         self.search_input = self.title_bar.search_input
         self.search_input.installEventFilter(self)
+        self.search_input.textEdited.connect(self._on_search_query_edited)
         self.selected_provider = str(self.settings.get("search/provider", "All"))
         if self.selected_provider not in ("All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"):
             self.selected_provider = "All"
@@ -567,8 +569,11 @@ class MainWindow(QMainWindow):
         self.detail_previous_button = self._icon_button("chevron-left", "Previous image")
         self.detail_next_button = self._icon_button("chevron-right", "Next image")
         for button in (self.detail_previous_button, self.detail_next_button):
+            button.setParent(self.detail_page)
             button.setObjectName("detailNavigation")
             button.setFixedSize(42, 42)
+            button.setMouseTracking(True)
+            button.installEventFilter(self)
         self.detail_previous_button.clicked.connect(lambda: self._swipe_detail(-1))
         self.detail_next_button.clicked.connect(lambda: self._swipe_detail(1))
         self.detail_video_previous_overlay = self._icon_button(
@@ -592,14 +597,9 @@ class MainWindow(QMainWindow):
         )
         self.detail_video_next_overlay.clicked.connect(lambda: self._swipe_detail(1))
         detail_view_layout = QHBoxLayout()
-        # Keep the video surface edge-to-edge. The side navigation buttons are
-        # only used for still images; reserving their width here made video
-        # playback look cropped inside two large ambient gutters.
         detail_view_layout.setContentsMargins(0, 0, 0, 0)
         detail_view_layout.setSpacing(0)
-        detail_view_layout.addWidget(self.detail_previous_button, 0, Qt.AlignmentFlag.AlignVCenter)
         detail_view_layout.addWidget(self.detail_media_stack, 1)
-        detail_view_layout.addWidget(self.detail_next_button, 0, Qt.AlignmentFlag.AlignVCenter)
         detail_layout.addLayout(detail_view_layout, 1)
         self.detail_previous_button.hide()
         self.detail_next_button.hide()
@@ -695,10 +695,12 @@ class MainWindow(QMainWindow):
 
     def _build_filter_menu(self) -> None:
         menu = QMenu(self)
+        menu.setMinimumWidth(180)
         self.provider_actions = {}
         provider_group = QActionGroup(menu)
         provider_group.setExclusive(True)
         provider_menu = menu.addMenu("Provider")
+        provider_menu.setMinimumWidth(180)
         for name in ("All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"):
             action = provider_menu.addAction(name)
             action.setCheckable(True)
@@ -711,6 +713,7 @@ class MainWindow(QMainWindow):
         rating_group = QActionGroup(menu)
         rating_group.setExclusive(True)
         rating_menu = menu.addMenu("Rating")
+        rating_menu.setMinimumWidth(180)
         for title, value in (("Only SFW", "sfw"), ("Only NSFW", "nsfw"), ("Show All", "all")):
             action = rating_menu.addAction(title)
             action.setCheckable(True)
@@ -723,6 +726,7 @@ class MainWindow(QMainWindow):
         theme_group = QActionGroup(menu)
         theme_group.setExclusive(True)
         theme_menu = menu.addMenu("Theme")
+        theme_menu.setMinimumWidth(180)
         for theme in ("Dark", "Light", "System"):
             action = theme_menu.addAction(theme)
             action.setCheckable(True)
@@ -737,6 +741,7 @@ class MainWindow(QMainWindow):
         media_group = QActionGroup(menu)
         media_group.setExclusive(True)
         media_menu = menu.addMenu("Media Type")
+        media_menu.setMinimumWidth(180)
         for title, value in (("Image Only", "image"), ("Video Only", "video"), ("Show All", "all")):
             action = media_menu.addAction(title)
             action.setCheckable(True)
@@ -832,12 +837,12 @@ class MainWindow(QMainWindow):
             return f"Preview {displayed}"
         return f"Preview {displayed} | Original {original}"
 
-    def _set_search_image_footer(self, post: ImagePost | None, pixmap: QPixmap) -> None:
+    def _set_detail_image_footer(self, post: ImagePost | None, pixmap: QPixmap) -> None:
         if (
             post is None
             or pixmap.isNull()
             or self.pages.currentWidget() is not self.detail_page
-            or self.detail_origin != "search"
+            or self.detail_origin not in {"search", "favorites"}
             or self.detail_post is None
             or self.detail_post.post_id != post.post_id
             or post.media_type != "image"
@@ -845,7 +850,7 @@ class MainWindow(QMainWindow):
             self.footer_meta.clear()
             return
         self.footer_meta.setText(
-            f"{post.provider} | IMAGE | "
+            f"{post.provider} | {rating_label(post.rating)} | "
             f"{self._image_size_text(post, pixmap, full=self._full_image_loaded)}"
         )
 
@@ -862,9 +867,23 @@ class MainWindow(QMainWindow):
             self.footer_meta.clear()
             return
         self.footer_meta.setText(
-            f"{post.provider} | IMAGE | "
+            f"{post.provider} | {rating_label(post.rating)} | "
             f"{self._image_size_text(post, pixmap, full=self._full_image_loaded)}"
         )
+
+    def _set_search_footer_counts(self) -> None:
+        if self.pages.currentWidget() is not self.gallery_page:
+            return
+        image_count = sum(post.media_type != "video" for post in self.posts)
+        video_count = len(self.posts) - image_count
+        if self.posts:
+            image_label = "image" if image_count == 1 else "images"
+            video_label = "video" if video_count == 1 else "videos"
+            self.footer_meta.setText(
+                f"{image_count} {image_label}, {video_count} {video_label}"
+            )
+        else:
+            self.footer_meta.clear()
 
     def _active_post(self) -> ImagePost | None:
         if self.pages.currentWidget() is self.random_page:
@@ -989,7 +1008,6 @@ class MainWindow(QMainWindow):
         dialog = self.favorites_dialog
         if dialog:
             self._favorite_navigation_posts = list(dialog.posts)
-            dialog.accept()
         self._opening_favorite = True
         try:
             self.open_post(post)
@@ -1085,6 +1103,17 @@ class MainWindow(QMainWindow):
             QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
             QDialog#settingsDialog { background: transparent; border: 0; }
             QWidget#settingsSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
+            QDialog#backupFileDialog { background: transparent; border: 0; }
+            QWidget#backupFileSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QDialog#backupPromptDialog { background: transparent; border: 0; }
+            QWidget#backupPromptSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLineEdit#backupPassphrase, QLineEdit#backupPassphraseConfirm { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
+            QLabel#backupPromptError { color: #F7768E; }
+            QPushButton#backupDestructiveButton { color: #F7768E; }
+            QWidget#settingsPage QFrame#backupNotice, QWidget#settingsPage QFrame#backupActionCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QTreeView#backupFileTree { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 10px; outline: 0; }
+            QTreeView#backupFileTree::item { padding: 5px 6px; border-radius: 5px; }
+            QTreeView#backupFileTree::item:selected { background: __ACTIVE__; color: __STRONG__; }
             QDialog#favoritesDialog { background: transparent; border: 0; }
             QWidget#favoritesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QWidget#favoritesTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
@@ -1094,6 +1123,17 @@ class MainWindow(QMainWindow):
             QLabel#downloadsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
             QPushButton#downloadsCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
             QPushButton#downloadsCloseButton:hover { background: #F7768E; }
+            QListWidget#downloadsList { background: transparent; border: 0; outline: 0; }
+            QListWidget#downloadsList::item, QListWidget#downloadsList::item:selected { background: transparent; border: 0; padding: 0; }
+            QWidget#downloadItemCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLabel#downloadItemIcon { background: __PANEL__; border-radius: 8px; }
+            QLabel#downloadFilename { color: __STRONG__; font-size: 10pt; font-weight: 600; }
+            QLabel#downloadStatus { color: __MUTED__; font-size: 9pt; }
+            QProgressBar#downloadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
+            QProgressBar#downloadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
+            QPushButton#downloadCancelButton { background: transparent; border: 0; border-radius: 8px; }
+            QPushButton#downloadCancelButton:hover { background: __ACTIVE__; }
+            QPushButton#downloadCancelButton:disabled { background: transparent; }
             QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 700; }
             QLabel#releaseNotesVersion { color: __MUTED__; }
             QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
@@ -1103,6 +1143,7 @@ class MainWindow(QMainWindow):
             QWidget#mediaInfoSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
             QWidget#mediaInfoTitleBar { background: transparent; }
             QLabel#mediaInfoWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#mediaInfoFieldLabel { color: __MUTED__; min-width: 62px; }
             QPushButton#mediaInfoCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#mediaInfoCloseButton:hover { background: #F7768E; }
             QWidget#settingsTitleBar { background: transparent; }
@@ -1149,10 +1190,11 @@ class MainWindow(QMainWindow):
             QPushButton:disabled { background: __DISABLED__; color: __MUTED__; border-color: __BORDER__; }
             QPushButton[iconAction="true"] { background: transparent; border: 0; padding: 0; }
             QPushButton[iconAction="true"]:hover { background: __HOVER__; }
+            QPushButton#action_menu::menu-indicator { image: none; width: 0; }
             QPushButton#action_search { background: __BLUE__; border-color: __BLUE__; color: __BG__; }
             QPushButton#action_search:hover { background: __ACCENT__; border-color: __ACCENT__; }
             QPushButton#closeWindowButton:hover { background: #F7768E; border-color: #F7768E; }
-            QMenu { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; padding: 5px; }
+            QMenu { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; padding: 5px; min-width: 180px; }
             QMenu::item { padding: 7px 24px 7px 10px; border-radius: 5px; }
             QMenu::item:selected { background: __MENU_SELECTED__; }
             QMenu::separator { height: 1px; background: __BORDER__; margin: 5px 4px; }
@@ -1394,6 +1436,17 @@ class MainWindow(QMainWindow):
             return
         self._start_video_stream(self.detail_video, post)
 
+    def _cancel_download(self, download_key: str) -> None:
+        task = self.tasks.get(f"download:{download_key}")
+        if not isinstance(task, FileDownloadTask):
+            return
+        self.downloads.mark_cancelling(download_key)
+        task.cancel()
+
+    def _task_cancelled(self, download_key: str) -> None:
+        self.tasks.pop(f"download:{download_key}", None)
+        self.downloads.update_download(download_key, "Cancelled")
+
     def _task_succeeded(self, key: str, result) -> None:
         self.tasks.pop(key, None)
         category, _, identifier = key.partition(":")
@@ -1421,7 +1474,7 @@ class MainWindow(QMainWindow):
                 self._set_ambient_image(self.detail_ambient, pixmap, self.detail_page)
                 self.fullscreen_button.setVisible(not self._fullscreen_active)
                 self._sync_favorite_buttons()
-                self._set_search_image_footer(self.detail_post, pixmap)
+                self._set_detail_image_footer(self.detail_post, pixmap)
                 self.full_image_button.setToolTip("Load original-resolution image")
                 self.full_image_button.setEnabled(True)
                 self.full_image_button.show()
@@ -1493,7 +1546,7 @@ class MainWindow(QMainWindow):
             if view == "random":
                 self._set_random_image_footer(post, full_pixmap)
             else:
-                self._set_search_image_footer(post, full_pixmap)
+                self._set_detail_image_footer(post, full_pixmap)
             self._full_image_previous = QPixmap()
             self._full_image_view = None
             self.full_image_button.hide()
@@ -1574,7 +1627,7 @@ class MainWindow(QMainWindow):
                 target_image.set_image(previous)
                 self._set_ambient_image(ambient, previous, page)
                 if view == "detail":
-                    self._set_search_image_footer(self.detail_post, previous)
+                    self._set_detail_image_footer(self.detail_post, previous)
             self._full_image_previous = QPixmap()
             self._full_image_view = None
             self.full_image_button.setEnabled(True)
@@ -1624,11 +1677,7 @@ class MainWindow(QMainWindow):
             self.detail_image if category in {"post-detail"} else None
         )
         if target is not None:
-            if value < 0:
-                target.loading_bar.setRange(0, 0)
-            else:
-                target.loading_bar.setRange(0, 100)
-                target.loading_bar.setValue(max(0, min(100, value)))
+            target.set_loading_progress(value)
 
     def _active_rating(self) -> str:
         return self.selected_rating
@@ -1762,6 +1811,7 @@ class MainWindow(QMainWindow):
         self.random_image._fit_to_viewport()
 
     def start_search(self) -> None:
+        self._open_detail_after_page = None
         if not self._rating_allowed():
             return
         query = self.search_input.text().strip()
@@ -1775,6 +1825,9 @@ class MainWindow(QMainWindow):
         self.title_bar.home_button.show()
         self.current_page = 1
         self.load_page(1)
+
+    def _on_search_query_edited(self, _text: str) -> None:
+        self._open_detail_after_page = None
 
     def load_page(self, page: int, detail_index: int | None = None) -> None:
         if not self.current_query or not self._rating_allowed():
@@ -1828,6 +1881,7 @@ class MainWindow(QMainWindow):
         self._page_has_more = page.has_more
         self.gallery_generation += 1
         self._clear_footer_meta()
+        self._set_search_footer_counts()
         self._clear_gallery()
         for index, post in enumerate(self.posts):
             self._add_card(index, post)
@@ -2000,7 +2054,7 @@ class MainWindow(QMainWindow):
             preview_layout.addWidget(indicator, 0, 0, Qt.AlignmentFlag.AlignCenter)
             self.card_loading_indicators[post.post_id] = indicator
         if post.media_type == "video":
-            play_badge = QLabel()
+            play_badge = QLabel(preview_container)
             play_badge.setPixmap(self._icon("play").pixmap(QSize(22, 22)))
             play_badge.setFixedSize(46, 46)
             play_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2039,7 +2093,7 @@ class MainWindow(QMainWindow):
 
     def _fetch_decoded_preview(self, post: ImagePost, report_progress=None):
         content = self._catalog().fetch_post_preview(post, report_progress)
-        return decode_image_bytes(content)
+        return decode_image_bytes(content, max_dimension=2560)
 
     def _fetch_decoded_candidates(self, candidates: tuple[str, ...]):
         return decode_image_bytes(self._fetch_preview(candidates), max_dimension=560)
@@ -2157,7 +2211,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(self.detail_page)
         self._position_detail_video_navigation()
         self._sync_favorite_buttons()
-        self.back_button.show()
+        self.back_button.setVisible(self.detail_origin != "favorites")
         if post.media_type == "video":
             self.detail_media_stack.setCurrentWidget(self.detail_video)
             self.detail_video.set_poster_alignment(Qt.AlignmentFlag.AlignCenter)
@@ -2288,11 +2342,20 @@ class MainWindow(QMainWindow):
         page = self.detail_page
         button_height = self.detail_video_previous_overlay.height()
         center_y = max(0, (page.height() - button_height) // 2)
+        self.detail_previous_button.move(12, center_y)
+        self.detail_next_button.move(
+            max(12, page.width() - self.detail_next_button.width() - 12),
+            center_y,
+        )
         self.detail_video_previous_overlay.move(12, center_y)
         self.detail_video_next_overlay.move(
             max(12, page.width() - self.detail_video_next_overlay.width() - 12),
             center_y,
         )
+        if self.detail_previous_button.isVisible():
+            self.detail_previous_button.raise_()
+        if self.detail_next_button.isVisible():
+            self.detail_next_button.raise_()
         if self.detail_video_previous_overlay.isVisible():
             self.detail_video_previous_overlay.raise_()
             self.detail_video_next_overlay.raise_()
@@ -2339,7 +2402,7 @@ class MainWindow(QMainWindow):
             self.pages.setCurrentWidget(self.gallery_page)
             self.full_image_button.hide()
             self.title_bar.home_button.show()
-            self._clear_footer_meta()
+            self._set_search_footer_counts()
             self.statusBar().clearMessage()
         else:
             self.go_home()
@@ -2695,6 +2758,7 @@ class MainWindow(QMainWindow):
         task = FileDownloadTask(key, self._catalog(), post, path)
         task.signals.result.connect(lambda download_key, result: self._task_succeeded(f"download:{download_key}", result))
         task.signals.error.connect(lambda download_key, error: self._task_failed(f"download:{download_key}", error))
+        task.signals.cancelled.connect(self._task_cancelled)
         task.signals.progress.connect(lambda download_key, value: self.downloads.update_download(
             download_key, f"Downloading: {path.name}", value))
         self.tasks[f"download:{key}"] = task

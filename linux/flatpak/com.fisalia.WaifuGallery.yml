@@ -1,0 +1,25 @@
+app-id: com.fisalia.WaifuGallery
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: waifu-gallery
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=home
+modules:
+  - name: waifu-gallery
+    buildsystem: simple
+    build-commands:
+      - install -d /app/lib/waifu-gallery
+      - cp -a WaifuGallery/. /app/lib/waifu-gallery/
+      - install -Dm755 waifu-gallery /app/bin/waifu-gallery
+      - install -Dm644 com.fisalia.WaifuGallery.desktop /app/share/applications/com.fisalia.WaifuGallery.desktop
+      - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.fisalia.WaifuGallery.png
+    sources:
+      - type: dir
+        path: ../flatpak-source

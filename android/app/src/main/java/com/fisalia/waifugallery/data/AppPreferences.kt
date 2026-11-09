@@ -103,19 +103,22 @@ class AppPreferences(context: Context) {
         (0 until array.length()).mapNotNull { index ->
             runCatching {
                 val item = array.getJSONObject(index)
+                val imageUrl = item.getString("imageUrl")
+                val thumbnailCandidates = item.optJSONArray("thumbnailCandidates").toStringList()
+                val mediaType = item.optString("mediaType", "image")
                 ImagePost(
                     id = item.getString("id"),
                     dedupeKey = item.optString("dedupeKey"),
                     provider = item.getString("provider"),
-                    imageUrl = item.getString("imageUrl"),
+                    imageUrl = if (mediaType == "video") imageUrl else originalImageUrl(imageUrl, thumbnailCandidates),
                     thumbnailUrl = item.getString("thumbnailUrl"),
-                    thumbnailCandidates = item.optJSONArray("thumbnailCandidates").toStringList(),
+                    thumbnailCandidates = thumbnailCandidates,
                     extension = item.optString("extension", "jpg"),
                     rating = item.optString("rating"),
                     tags = item.optJSONArray("tags").toStringList().toSet(),
                     source = item.optString("source"),
                     artists = item.optJSONArray("artists").toStringList(),
-                    mediaType = item.optString("mediaType", "image"),
+                    mediaType = mediaType,
                     title = item.optString("title", ""),
                     width = item.optInt("width", 0),
                     height = item.optInt("height", 0),

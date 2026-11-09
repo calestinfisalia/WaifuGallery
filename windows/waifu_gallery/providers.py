@@ -23,6 +23,10 @@ class ProviderError(RuntimeError):
     pass
 
 
+class DownloadCancelled(RuntimeError):
+    pass
+
+
 PROVIDERS = ("Danbooru", "yande.re", "Gelbooru", "Rule34.xxx")
 MALE_TAGS = frozenset({"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "male_focus", "male_only"})
 SFW_BLOCK_TAGS = frozenset({
@@ -404,10 +408,11 @@ class BooruCatalog:
         explicit full-resolution action.
         """
         # Provider metadata orders these as preview -> sample -> original.
-        # The main viewer should prefer the larger sample, while search-grid
-        # thumbnails continue using the small preview URLs directly.
+        # Keep the original for the explicit full-resolution action whenever
+        # a smaller preview variant is available, but prefer the sharper sample.
         candidates = [url for url in reversed(post.preview_urls) if url != post.image_url]
-        candidates.append(post.image_url)
+        if not candidates:
+            candidates.append(post.image_url)
         failures = []
         for url in dict.fromkeys(candidates):
             try:
@@ -416,10 +421,18 @@ class BooruCatalog:
                 failures.append(str(error))
         raise ProviderError(failures[-1] if failures else "No image preview URL was supplied.")
 
-    def save_image(self, post: ImagePost, destination: Path, report_progress) -> Path:
+    def save_image(
+        self,
+        post: ImagePost,
+        destination: Path,
+        report_progress,
+        is_cancelled=None,
+    ) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(destination.name + ".part")
         try:
+            if is_cancelled and is_cancelled():
+                raise DownloadCancelled()
             with self._session().get(post.image_url, headers=self._image_headers(post.image_url),
                                      timeout=(8, 40), stream=True) as response:
                 if not response.ok:
@@ -428,10 +441,14 @@ class BooruCatalog:
                 received = 0
                 with temporary.open("wb") as output:
                     for block in response.iter_content(chunk_size=128 * 1024):
+                        if is_cancelled and is_cancelled():
+                            raise DownloadCancelled()
                         if block:
                             output.write(block)
                             received += len(block)
                             report_progress(min(99, int(received * 100 / total)) if total else -1)
+                if is_cancelled and is_cancelled():
+                    raise DownloadCancelled()
                 temporary.replace(destination)
         except Exception:
             temporary.unlink(missing_ok=True)

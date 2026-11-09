@@ -185,7 +185,7 @@ def create_payload(settings) -> dict:
             "filter_gore": bool(settings.get("search/filter_gore", True)),
             "custom_block_tags": settings.get("search/custom_block_tags", []),
             "media_filter": str(settings.get("search/media_filter", "image")),
-            "use_doh": bool(settings.get("network/use_doh", False)),
+            "use_doh": settings.use_doh,
             "doh_provider": str(settings.get("network/doh_provider", "Cloudflare")),
             "doh_custom_endpoint": str(settings.get("network/doh_custom_endpoint", "")),
             "ambient_mode": bool(settings.get("view/ambient_mode", True)),

@@ -5,6 +5,12 @@ from PySide6.QtCore import QSettings
 from .doh import DOH_ENDPOINTS
 
 
+def _setting_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 class AppSettings:
     """Small settings facade; values are stored per-user through QSettings."""
 
@@ -33,7 +39,7 @@ class AppSettings:
 
     @property
     def use_doh(self) -> bool:
-        return bool(self.get("network/use_doh", False))
+        return _setting_bool(self.get("network/use_doh", False))
 
     @property
     def doh_endpoint(self) -> str:

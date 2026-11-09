@@ -515,14 +515,19 @@ class BooruApi(
     private fun hasRule34Credentials(): Boolean = rule34Credentials().let { (userId, apiKey) -> userId.isNotBlank() && apiKey.isNotBlank() }
 
     private fun parsePost(post: JSONObject, provider: Provider): ImagePost? {
-        val rawFile = firstNonEmpty(post, "file_url", "source_url")
+        val fileUrl = firstNonEmpty(post, "file_url")
+        val rawFile = fileUrl ?: firstNonEmpty(post, "source_url")
         val isVideo = post.optString("file_ext").lowercase() in VIDEO_EXTENSIONS ||
             rawFile?.substringBefore('?')?.substringAfterLast('.', "")?.lowercase() in VIDEO_EXTENSIONS
-        val image = (if (isVideo) rawFile else firstNonEmpty(post, "jpeg_url", "large_file_url", "sample_url", "file_url"))
-            ?: gelbooruImageUrl(post)
-            ?: rule34ImageUrl(post)
-            ?: return null
-        val thumbnails = listOf("preview_file_url", "preview_url", "sample_url", "jpeg_url", "large_file_url", "file_url")
+        val image = if (isVideo) {
+            rawFile
+        } else {
+            fileUrl
+                ?: gelbooruImageUrl(post)
+                ?: rule34ImageUrl(post)
+                ?: firstNonEmpty(post, "large_file_url", "jpeg_url", "sample_url", "source_url")
+        } ?: return null
+        val thumbnails = listOf("preview_file_url", "preview_url", "sample_url", "jpeg_url", "large_file_url")
             .mapNotNull { field -> post.optString(field).takeIf { it.isNotBlank() && it != "null" } }
             .filterNot { it.substringBefore('?').substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS }
             .distinct()

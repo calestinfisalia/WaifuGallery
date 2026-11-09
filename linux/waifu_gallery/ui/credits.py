@@ -20,6 +20,12 @@ from ..models import ImagePost
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
 
+def rating_label(rating: str) -> str:
+    labels = {"s": "Safe", "q": "Questionable", "e": "Explicit"}
+    value = rating.strip().casefold()
+    return labels.get(value, value.capitalize() if value else "Unknown")
+
+
 class MediaInfoTitleBar(QWidget):
     def __init__(self, dialog: QDialog) -> None:
         super().__init__(dialog)
@@ -86,6 +92,25 @@ class ImageCreditsDialog(QDialog):
         layout.setContentsMargins(16, 6, 16, 14)
         layout.setSpacing(8)
         layout.addWidget(MediaInfoTitleBar(self))
+
+        media_details = QGridLayout()
+        media_details.setContentsMargins(0, 0, 0, 0)
+        media_details.setHorizontalSpacing(10)
+        media_details.setVerticalSpacing(6)
+        provider_heading = QLabel("Provider")
+        provider_heading.setObjectName("mediaInfoFieldLabel")
+        provider_label = QLabel(post.provider)
+        provider_label.setTextFormat(Qt.TextFormat.PlainText)
+        rating_heading = QLabel("Rating")
+        rating_heading.setObjectName("mediaInfoFieldLabel")
+        rating_label_widget = QLabel(rating_label(post.rating))
+        rating_label_widget.setTextFormat(Qt.TextFormat.PlainText)
+        media_details.addWidget(provider_heading, 0, 0)
+        media_details.addWidget(provider_label, 0, 1)
+        media_details.addWidget(rating_heading, 1, 0)
+        media_details.addWidget(rating_label_widget, 1, 1)
+        media_details.setColumnStretch(1, 1)
+        layout.addLayout(media_details)
 
         artists = ", ".join(post.artists) if post.artists else "Not provided"
         artist_label = QLabel(f"Artist: {artists}")

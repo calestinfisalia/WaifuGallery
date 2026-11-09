@@ -1,15 +1,17 @@
 from collections.abc import Callable
+from threading import Event
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QRunnable, QSize, Signal
 from PySide6.QtGui import QImage, QImageReader
 
-from ..providers import BooruCatalog
+from ..providers import BooruCatalog, DownloadCancelled
 
 
 class TaskSignals(QObject):
     result = Signal(str, object)
     error = Signal(str, str)
     progress = Signal(str, int)
+    cancelled = Signal(str)
 
 
 def decode_image_bytes(content: bytes, max_dimension: int | None = 2560) -> QImage:
@@ -58,6 +60,10 @@ class FileDownloadTask(QRunnable):
         self.post = post
         self.destination = destination
         self.signals = TaskSignals()
+        self._cancel_event = Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
@@ -65,7 +71,10 @@ class FileDownloadTask(QRunnable):
                 self.post,
                 self.destination,
                 lambda percentage: self.signals.progress.emit(self.key, percentage),
+                self._cancel_event.is_set,
             )
             self.signals.result.emit(self.key, result)
+        except DownloadCancelled:
+            self.signals.cancelled.emit(self.key)
         except Exception as error:
             self.signals.error.emit(self.key, str(error))

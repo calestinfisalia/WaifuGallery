@@ -233,7 +233,12 @@ object UserDataBackupCodec {
                 require(variant.length() == 3) { "A favorite has invalid video variants." }
                 VideoVariant(variant.requiredString(0), variant.requiredInt(1), variant.requiredInt(2))
             }
-            val imageUrl = item.requiredString("image_url")
+            val savedImageUrl = item.requiredString("image_url")
+            val imageUrl = if (item.optionalString("media_type", "image") == "video") {
+                savedImageUrl
+            } else {
+                originalImageUrl(savedImageUrl, previewUrls)
+            }
             val thumbnail = item.optionalString("thumbnail_url", "").ifBlank { previewUrls.firstOrNull() ?: imageUrl }
             ImagePost(
                 id = item.requiredString("post_id"),

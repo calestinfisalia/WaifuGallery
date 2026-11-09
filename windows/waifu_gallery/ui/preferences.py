@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -13,12 +13,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
     QStackedWidget,
+    QStackedLayout,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,8 @@ from .. import __version__
 from ..data_backup import create_payload, decrypt_payload, encrypt_payload
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
+from .backup_file_dialog import BackupFileDialog
+from .backup_prompts import BackupMessageDialog, BackupPassphraseDialog
 from .dialog_chrome import FramelessResizableDialog
 from .updates import UpdateCheckTask, version_parts
 
@@ -36,6 +39,35 @@ def _themed_icon(widget: QWidget, name: str) -> QIcon:
     if callable(icon_factory):
         return icon_factory(name)
     return QIcon(str(Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"))
+
+
+class _AboutMascotOverlay(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("aboutMascot")
+        self.setAccessibleName("Iro-chan mascot")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        image_path = Path(__file__).resolve().parents[1] / "assets" / "waifumascot-Iro-chan.png"
+        self._pixmap = QPixmap(str(image_path)).scaled(
+            QSize(320, 480),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def sizeHint(self) -> QSize:
+        return QSize(0, 0)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, 0)
+
+    def paintEvent(self, _event) -> None:
+        if self._pixmap.isNull():
+            return
+        painter = QPainter(self)
+        painter.drawPixmap(self.width() - 190, 26, self._pixmap)
 
 
 def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) -> dict[str, object]:
@@ -540,8 +572,8 @@ class PreferencesDialog(FramelessResizableDialog):
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
         title = QLabel("Export or import your user data")
         title.setStyleSheet("font-size: 16pt; font-weight: 650;")
         layout.addWidget(title)
@@ -552,82 +584,103 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         description.setWordWrap(True)
         layout.addWidget(description)
+        notice = QFrame()
+        notice.setObjectName("backupNotice")
+        notice_layout = QVBoxLayout(notice)
+        notice_layout.setContentsMargins(14, 12, 14, 12)
+        notice_layout.setSpacing(5)
+        notice_title = QLabel("Keep your passphrase safe")
+        notice_title.setStyleSheet("font-weight: 650;")
+        notice_layout.addWidget(notice_title)
         warning = QLabel(
-            "Keep the passphrase safe: it cannot be recovered. Anyone with the backup file "
-            "and its passphrase can access the included provider credentials."
+            "It cannot be recovered. Anyone with the backup file and its passphrase can "
+            "access the included provider credentials."
         )
         warning.setWordWrap(True)
-        warning.setStyleSheet("color: #d8c9ff;")
-        layout.addWidget(warning)
+        notice_layout.addWidget(warning)
+        layout.addWidget(notice)
+
         actions = QHBoxLayout()
+        actions.setSpacing(12)
         export_button = QPushButton("Export encrypted backup")
         export_button.clicked.connect(self.export_user_data)
         import_button = QPushButton("Import backup")
         import_button.clicked.connect(self.import_user_data)
-        actions.addWidget(export_button)
-        actions.addWidget(import_button)
-        actions.addStretch(1)
+        for heading, description_text, button in (
+            ("Export", "Create an encrypted backup file.", export_button),
+            ("Import", "Restore or merge a saved backup.", import_button),
+        ):
+            card = QFrame()
+            card.setObjectName("backupActionCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(14, 12, 14, 12)
+            card_layout.setSpacing(7)
+            card_title = QLabel(heading)
+            card_title.setStyleSheet("font-weight: 650;")
+            card_layout.addWidget(card_title)
+            card_description = QLabel(description_text)
+            card_description.setWordWrap(True)
+            card_layout.addWidget(card_description)
+            button.setMinimumHeight(38)
+            card_layout.addWidget(button)
+            actions.addWidget(card, 1)
         layout.addLayout(actions)
         layout.addStretch(1)
         self._add_page(page, "Backup & Data", "download")
 
     def export_user_data(self) -> None:
-        passphrase, accepted = QInputDialog.getText(
-            self, "Encrypt backup", "Create a passphrase (at least 8 characters):",
-            QLineEdit.EchoMode.Password,
+        passphrase_dialog = BackupPassphraseDialog(
+            title="Encrypt backup",
+            description="Create a passphrase with at least 8 characters to protect your backup.",
+            confirm_passphrase=True,
+            parent=self,
         )
-        if not accepted:
+        if passphrase_dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        confirmation, accepted = QInputDialog.getText(
-            self, "Confirm passphrase", "Enter the passphrase again:",
-            QLineEdit.EchoMode.Password,
-        )
-        if not accepted:
-            return
-        if passphrase != confirmation:
-            QMessageBox.warning(self, "Passphrases do not match", "The backup was not created.")
-            return
+        passphrase = passphrase_dialog.passphrase
         try:
             contents = encrypt_payload(create_payload(self.settings), passphrase)
         except (TypeError, ValueError, OSError) as error:
-            QMessageBox.warning(self, "Could not create backup", str(error))
+            BackupMessageDialog.ask(self, "Could not create backup", str(error), ("OK",))
             return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save encrypted backup", "waifu-gallery-backup.wgbak",
-            "Waifu Gallery backup (*.wgbak);;JSON files (*.json)",
+        file_dialog = BackupFileDialog(
+            save_mode=True,
+            suggested_name="waifu-gallery-backup.wgbak",
+            parent=self,
         )
-        if not path:
+        if file_dialog.exec() != QDialog.DialogCode.Accepted or file_dialog.selected_path is None:
             return
         try:
-            with open(path, "w", encoding="utf-8") as backup_file:
+            with open(file_dialog.selected_path, "w", encoding="utf-8") as backup_file:
                 backup_file.write(contents)
         except OSError as error:
-            QMessageBox.critical(self, "Could not save backup", str(error))
+            BackupMessageDialog.ask(self, "Could not save backup", str(error), ("OK",))
             return
-        QMessageBox.information(self, "Backup created", "Your encrypted backup was saved.")
+        BackupMessageDialog.ask(
+            self, "Backup created", "Your encrypted backup was saved.", ("OK",)
+        )
 
     def import_user_data(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import encrypted backup", "",
-            "Waifu Gallery backup (*.wgbak *.json);;All files (*)",
-        )
-        if not path:
+        file_dialog = BackupFileDialog(save_mode=False, parent=self)
+        if file_dialog.exec() != QDialog.DialogCode.Accepted or file_dialog.selected_path is None:
             return
-        passphrase, accepted = QInputDialog.getText(
-            self, "Decrypt backup", "Enter the backup passphrase:",
-            QLineEdit.EchoMode.Password,
+        passphrase_dialog = BackupPassphraseDialog(
+            title="Decrypt backup",
+            description="Enter the passphrase used when this backup was created.",
+            parent=self,
         )
-        if not accepted:
+        if passphrase_dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        passphrase = passphrase_dialog.passphrase
         try:
-            with open(path, "rb") as backup_file:
+            with open(file_dialog.selected_path, "rb") as backup_file:
                 raw_contents = backup_file.read(32 * 1024 * 1024 + 1)
             if len(raw_contents) > 32 * 1024 * 1024:
                 raise ValueError("The backup file is too large.")
             contents = raw_contents.decode("utf-8")
             payload = decrypt_payload(contents, passphrase)
         except (OSError, UnicodeError, ValueError) as error:
-            QMessageBox.warning(self, "Could not import backup", str(error))
+            BackupMessageDialog.ask(self, "Could not import backup", str(error), ("OK",))
             return
 
         summary = (
@@ -635,20 +688,17 @@ class PreferencesDialog(FramelessResizableDialog):
             f"{sum(bool(item['user_id']) for item in payload['providers'].values())} provider accounts, "
             "and portable preferences."
         )
-        choice = QMessageBox(self)
-        choice.setWindowTitle("Import user data")
-        choice.setText(f"Import {summary}")
-        choice.setInformativeText(
+        choice = BackupMessageDialog.ask(
+            self,
+            "Import user data",
+            f"Import {summary}\n\n"
             "Merge keeps current favorites and existing provider credentials when present. "
             "Replace uses the backup's favorites and provider credentials. Both options import "
-            "the backup's portable preferences; device-specific download locations are kept."
+            "the backup's portable preferences; device-specific download locations are kept.",
+            ("Merge", "Replace", "Cancel"),
+            default_button="Merge",
         )
-        merge_button = choice.addButton("Merge", QMessageBox.ButtonRole.AcceptRole)
-        replace_button = choice.addButton("Replace", QMessageBox.ButtonRole.DestructiveRole)
-        choice.addButton(QMessageBox.StandardButton.Cancel)
-        choice.exec()
-        clicked = choice.clickedButton()
-        if clicked not in (merge_button, replace_button):
+        if choice not in ("Merge", "Replace"):
             return
 
         settings = payload["settings"]
@@ -657,72 +707,87 @@ class PreferencesDialog(FramelessResizableDialog):
             if settings["use_doh"]:
                 endpoint = validate_doh_endpoint(endpoint)
             set_doh_enabled(settings["use_doh"], endpoint if settings["use_doh"] else None)
-            values = _settings_from_backup(payload, self.settings, merge=clicked is merge_button)
+            values = _settings_from_backup(payload, self.settings, merge=choice == "Merge")
             self.settings.set_many(values)
         except (OSError, TypeError, ValueError) as error:
-            QMessageBox.warning(self, "Could not import backup", str(error))
+            BackupMessageDialog.ask(self, "Could not import backup", str(error), ("OK",))
             return
         self.settings_changed.emit()
-        QMessageBox.information(self, "Backup imported", "Your user data was imported.")
+        BackupMessageDialog.ask(
+            self, "Backup imported", "Your user data was imported.", ("OK",)
+        )
         self.accept()
 
     def _build_about_tab(self) -> None:
         page = QWidget()
         page.setObjectName("settingsPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.addStretch(1)
-        panel = QWidget()
-        panel.setMaximumWidth(520)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(16, 8, 16, 8)
-        panel_layout.setSpacing(6)
+        overlay = QStackedLayout(page)
+        overlay.setContentsMargins(0, 0, 0, 0)
+        overlay.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 20, 16, 20)
+        content_layout.addStretch(1)
+        app_info = QWidget()
+        app_info.setMaximumWidth(420)
+        app_layout = QVBoxLayout(app_info)
+        app_layout.setContentsMargins(0, 0, 0, 0)
+        app_layout.setSpacing(4)
         logo = QLabel()
         pixmap = QPixmap(str(self.ASSET_DIR / "waifugallery.png"))
         if not pixmap.isNull():
             logo.setPixmap(pixmap.scaled(
-                QSize(68, 68),
+                QSize(42, 42),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
-        logo.setFixedHeight(70)
+        logo.setFixedSize(48, 48)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        panel_layout.addWidget(logo)
+        app_layout.addWidget(logo, 0, Qt.AlignmentFlag.AlignHCenter)
         title = QLabel("Waifu Gallery")
-        title.setStyleSheet("font-size: 20pt; font-weight: 700;")
+        title.setStyleSheet("font-size: 16pt; font-weight: 700;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        panel_layout.addWidget(title)
+        app_layout.addWidget(title)
         version = QLabel(f"Version {__version__}")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version.setStyleSheet(
             "QLabel { color: #d8c9ff; background: #24283b; border: 1px solid #45415f; "
             "border-radius: 10px; padding: 4px 12px; }"
         )
-        panel_layout.addWidget(version, 0, Qt.AlignmentFlag.AlignHCenter)
+        app_layout.addWidget(version, 0, Qt.AlignmentFlag.AlignHCenter)
         subtitle = QLabel(
             "An independent Python media gallery for discovering, viewing, and downloading "
             "images and videos.\nCreated by calestinfisalia"
         )
         subtitle.setWordWrap(True)
-        subtitle.setMinimumHeight(58)
+        subtitle.setMaximumWidth(270)
+        subtitle.setMinimumHeight(68)
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #a9b1d6;")
-        panel_layout.addWidget(subtitle)
+        app_layout.addWidget(subtitle, 0, Qt.AlignmentFlag.AlignHCenter)
+        content_layout.addWidget(app_info, 0, Qt.AlignmentFlag.AlignHCenter)
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setMaximumWidth(360)
         separator.setStyleSheet("color: #303449;")
-        panel_layout.addWidget(separator)
+        content_layout.addWidget(separator, 0, Qt.AlignmentFlag.AlignHCenter)
         license_note = QLabel(
             "Source code: MIT License.\n"
             "Bundled icons and artwork retain their own licenses and creator rights."
         )
         license_note.setWordWrap(True)
+        license_note.setMaximumWidth(340)
         license_note.setMinimumHeight(64)
         license_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         license_note.setStyleSheet("color: #a9b1d6;")
-        panel_layout.addWidget(license_note)
-        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch(1)
+        content_layout.addWidget(license_note, 0, Qt.AlignmentFlag.AlignHCenter)
+        content_layout.addStretch(2)
+        overlay.addWidget(content)
+
+        mascot = _AboutMascotOverlay(page)
+        overlay.addWidget(mascot)
+        overlay.setCurrentWidget(mascot)
         self._add_page(page, "About", "info")
 
     def _build_update_tab(self) -> None:

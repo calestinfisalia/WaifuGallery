@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The Android release version is aligned with the desktop projects (`0.1.7`). Android's `versionCode` is `5` and continues to increase independently for each Android update.
+The Android release version is aligned with the desktop projects (`0.1.8`). Android's `versionCode` is `6` and continues to increase independently for each Android update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -12,10 +12,11 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key.
 - Paged search results, full-size image viewing, swipe navigation, and pinch-to-zoom.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
+- Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
 - Download queue with progress and retry states.
-- Local favorites, custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
+- Local favorites with image/video badges and separate totals, custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
 - Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions.
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
@@ -29,6 +30,12 @@ The preferred video resolution selects the largest listed provider rendition at 
 In Preferences, scroll to **Backup & Data** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
 
 The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps provider credentials already present on the device; Replace uses the backup's favorites and credentials. Both import portable preferences. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+
+## Android 0.1.8
+
+- Fullscreen media now follows the media orientation and restores the previous device orientation on exit.
+- Favorites distinguish video thumbnails and show separate image and video totals.
+- Release artifact: `app-release.apk`.
 
 ## Android 0.1.7
 

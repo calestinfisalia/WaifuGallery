@@ -21,6 +21,13 @@ data class ImagePost(
 
 data class VideoVariant(val url: String, val width: Int, val height: Int)
 
+fun originalImageUrl(imageUrl: String, thumbnailCandidates: List<String>): String =
+    if (imageUrl in thumbnailCandidates) {
+        thumbnailCandidates.lastOrNull { it != imageUrl } ?: imageUrl
+    } else {
+        imageUrl
+    }
+
 data class SearchPage(
     val posts: List<ImagePost>,
     val hasMore: Boolean,

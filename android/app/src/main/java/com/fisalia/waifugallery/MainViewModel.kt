@@ -175,6 +175,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadGallery()
     }
 
+    fun searchTag(tag: String) {
+        val normalizedTag = tag.trim()
+        if (normalizedTag.isBlank()) return
+        _state.update { it.copy(queryInput = normalizedTag) }
+        search()
+    }
+
     fun refresh() {
         if (_state.value.screen == AppScreen.GALLERY) loadGallery()
         else refreshRandom()
@@ -430,23 +437,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshCurrentResults()
     }
 
-    fun setAllowNsfw(value: Boolean) {
-        preferences.allowNsfw = value
-        val resetRating = !value && _state.value.rating != RatingFilter.SFW
-        if (resetRating) preferences.ratingFilter = "sfw"
+    fun setRatingPreference(rating: RatingFilter) {
+        val allowNsfw = rating != RatingFilter.SFW
+        if (rating == _state.value.rating && allowNsfw == _state.value.allowNsfw) return
+        preferences.allowNsfw = allowNsfw
+        preferences.ratingFilter = rating.name.lowercase()
         _state.update {
             it.copy(
-                allowNsfw = value,
-                rating = if (resetRating) RatingFilter.SFW else it.rating,
-                page = if (resetRating) 1 else it.page,
-                totalPages = if (resetRating) null else it.totalPages,
-                hasMore = if (resetRating) false else it.hasMore,
+                allowNsfw = allowNsfw,
+                rating = rating,
+                page = 1,
+                totalPages = null,
+                hasMore = false,
             )
         }
-        when (_state.value.screen) {
+        val current = _state.value
+        when (current.screen) {
             AppScreen.RANDOM -> refreshRandom()
-            AppScreen.GALLERY -> if (resetRating) loadGallery()
-            else -> Unit
+            AppScreen.GALLERY -> loadGallery()
+            AppScreen.DETAIL -> when (current.detailOrigin) {
+                AppScreen.RANDOM -> refreshRandom()
+                AppScreen.GALLERY -> loadGallery()
+                else -> Unit
+            }
+            AppScreen.FAVORITES -> Unit
         }
     }
     fun setUseDoh(value: Boolean) {

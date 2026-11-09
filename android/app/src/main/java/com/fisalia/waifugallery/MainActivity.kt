@@ -3,6 +3,7 @@
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.media.AudioManager
@@ -15,12 +16,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -67,12 +72,14 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -95,7 +102,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -104,6 +114,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -113,6 +124,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
@@ -180,11 +192,25 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     var confirmFavoriteRemoval by remember { mutableStateOf<ImagePost?>(null) }
     var mediaFullscreen by remember { mutableStateOf(false) }
     val activity = remember(context) { context.findActivity() }
+    val fullscreenPost = when (state.screen) {
+        AppScreen.RANDOM -> state.image
+        AppScreen.DETAIL -> state.detailImage
+        else -> null
+    }
+    var previousOrientation by rememberSaveable {
+        mutableIntStateOf(activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+    }
+    var orientationLocked by rememberSaveable { mutableStateOf(false) }
+    val latestPreviousOrientation by rememberUpdatedState(previousOrientation)
+    val latestOrientationLocked by rememberUpdatedState(orientationLocked)
     DisposableEffect(activity) {
         onDispose {
             activity?.window?.let {
                 WindowCompat.getInsetsController(it, it.decorView)
                     .show(WindowInsetsCompat.Type.systemBars())
+            }
+            if (latestOrientationLocked) {
+                activity?.requestedOrientation = latestPreviousOrientation
             }
         }
     }
@@ -198,6 +224,32 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             controller?.hide(WindowInsetsCompat.Type.systemBars())
         } else {
             controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    LaunchedEffect(mediaFullscreen, fullscreenPost?.id) {
+        val currentActivity = activity ?: return@LaunchedEffect
+        if (mediaFullscreen && fullscreenPost != null) {
+            if (!orientationLocked) {
+                previousOrientation = currentActivity.requestedOrientation
+                orientationLocked = true
+            }
+            val dimensions = if (fullscreenPost.mediaType == "video") {
+                fullscreenPost.videoVariants
+                    .firstOrNull { it.width > 0 && it.height > 0 }
+                    ?.let { it.width to it.height }
+            } else {
+                null
+            }
+            val width = dimensions?.first ?: fullscreenPost.width
+            val height = dimensions?.second ?: fullscreenPost.height
+            currentActivity.requestedOrientation = if (width > height) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+        } else if (orientationLocked) {
+            currentActivity.requestedOrientation = previousOrientation
+            orientationLocked = false
         }
     }
     LaunchedEffect(state.screen) {
@@ -354,7 +406,16 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             dismissButton = { TextButton(onClick = { confirmFavoriteRemoval = null }) { Text("Cancel") } },
         )
     }
-    aboutPost?.let { post -> AboutDialog(post = post, onDismiss = { aboutPost = null }) }
+    aboutPost?.let { post ->
+        AboutDialog(
+            post = post,
+            onDismiss = { aboutPost = null },
+            onTagClick = { tag ->
+                aboutPost = null
+                model.searchTag(tag)
+            },
+        )
+    }
     if (showAppAbout) AppAboutDialog(onDismiss = { showAppAbout = false })
     state.releaseUpdate?.let { update ->
         AlertDialog(
@@ -396,8 +457,16 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             model.dismissNotice()
         }
         Box(Modifier.fillMaxSize().padding(bottom = 24.dp), contentAlignment = Alignment.BottomCenter) {
-            Surface(shape = RoundedCornerShape(24.dp), color = Color(0xFF35323E)) {
-                Text(message, Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = Color(0xFF35323E),
+                contentColor = Color.White,
+            ) {
+                Text(
+                    message,
+                    Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    color = Color.White,
+                )
             }
         }
     }
@@ -687,8 +756,14 @@ private fun FavoritesScreen(
     modifier: Modifier = Modifier,
     onRequestRemoval: (ImagePost) -> Unit,
 ) {
+    val imageCount = state.favorites.count { it.mediaType != "video" }
+    val videoCount = state.favorites.size - imageCount
     Column(modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-        Text("Favorites - ${state.favorites.size} images", Modifier.padding(vertical = 10.dp), style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Favorites $imageCount images, $videoCount videos",
+            Modifier.padding(vertical = 10.dp),
+            style = MaterialTheme.typography.titleSmall,
+        )
         if (state.favorites.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("No favorites yet")
@@ -710,6 +785,30 @@ private fun FavoritesScreen(
                             allowThumbnailFallback = true,
                             showMetadata = false,
                         )
+                        if (post.mediaType == "video") {
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center),
+                                shape = RoundedCornerShape(50.dp),
+                                color = Color(0xCC15151A),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color.White,
+                                    )
+                                    Text(
+                                        "VIDEO",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                    )
+                                }
+                            }
+                        }
                         IconButton(
                             onClick = { onRequestRemoval(post) },
                             modifier = Modifier.align(Alignment.TopEnd),
@@ -832,6 +931,7 @@ private fun DetailScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun ImageFrame(
     url: String,
     post: ImagePost,
@@ -854,8 +954,19 @@ private fun ImageFrame(
         post.mediaType == "video" && !allowThumbnailFallback && !mediaFullscreen
     ) 78.dp else 0.dp
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
-    val candidates = (if (allowThumbnailFallback) post.thumbnailCandidates else emptyList()).ifEmpty { listOf(url) }
+    var showOriginal by remember(post.id) { mutableStateOf(false) }
+    val candidates = when {
+        allowThumbnailFallback -> post.thumbnailCandidates
+        post.mediaType != "video" && zoomEnabled && !showOriginal ->
+            post.thumbnailCandidates.filterNot { it == post.imageUrl }
+        else -> emptyList()
+    }.ifEmpty { listOf(if (showOriginal) post.imageUrl else url) }
     val displayedUrl = candidates[candidateIndex.coerceAtMost(candidates.lastIndex)]
+    val canLoadOriginal = post.mediaType != "video" &&
+        zoomEnabled &&
+        !allowThumbnailFallback &&
+        !showOriginal &&
+        post.thumbnailCandidates.any { it != post.imageUrl }
     var imageLoading by remember(post.id, url) { mutableStateOf(true) }
     var zoom by remember(post.id) { mutableFloatStateOf(1f) }
     var pan by remember(post.id) { mutableStateOf(Offset.Zero) }
@@ -1087,7 +1198,6 @@ private fun ImageFrame(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
                 color = Color(0xEE1C1E28),
                 shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
             ) {
                 Row(
                     Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -1118,6 +1228,39 @@ private fun ImageFrame(
                         valueRange = 0f..videoDuration.toFloat().coerceAtLeast(1f),
                         enabled = videoDuration > 0,
                         modifier = Modifier.weight(1f),
+                        thumb = {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .background(Color(0xFFE5E7EB), RoundedCornerShape(50)),
+                            )
+                        },
+                        track = { sliderState ->
+                            Canvas(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp),
+                            ) {
+                                val centerY = size.height / 2
+                                val progressX = size.width * sliderState.coercedValueAsFraction
+                                drawLine(
+                                    color = Color(0xFF55565E),
+                                    start = Offset(0f, centerY),
+                                    end = Offset(size.width, centerY),
+                                    strokeWidth = size.height,
+                                    cap = StrokeCap.Round,
+                                )
+                                if (progressX > 0f) {
+                                    drawLine(
+                                        color = Color(0xFFB8BBC2),
+                                        start = Offset(0f, centerY),
+                                        end = Offset(progressX, centerY),
+                                        strokeWidth = size.height,
+                                        cap = StrokeCap.Round,
+                                    )
+                                }
+                            }
+                        },
                     )
                     Text(
                         "${formatPlaybackTime(videoPosition)}/${formatPlaybackTime(videoDuration)}",
@@ -1132,19 +1275,32 @@ private fun ImageFrame(
                 }
             }
         }
-        if (videoBuffering && videoPlaying && playbackAllowed && !allowThumbnailFallback) {
+        if (
+            post.mediaType != "video" &&
+            !allowThumbnailFallback &&
+            playbackAllowed
+        ) {
             Surface(
-                Modifier.align(Alignment.Center).padding(bottom = videoControlInset),
-                color = Color(0xEE1C1E28),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                shape = RoundedCornerShape(50.dp),
+                color = Color(0xCC15151A),
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(14.dp).size(30.dp),
-                    color = Color(0xFFD1D5DB),
-                    strokeWidth = 3.dp,
-                )
+                IconButton(onClick = { onFullscreenChanged(!mediaFullscreen) }) {
+                    Icon(
+                        if (mediaFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (mediaFullscreen) "Exit fullscreen" else "Enter fullscreen",
+                    )
+                }
             }
+        }
+        if (videoBuffering && videoPlaying && playbackAllowed && !allowThumbnailFallback) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center)
+                    .padding(bottom = videoControlInset)
+                    .size(30.dp),
+                color = Color(0xFFD1D5DB),
+                strokeWidth = 3.dp,
+            )
         }
         videoFeedback?.let { feedback ->
             Surface(
@@ -1157,6 +1313,22 @@ private fun ImageFrame(
         }
         if (showLoadingIndicator && imageLoading) {
             LoadingSpinner(Modifier.align(Alignment.Center).padding(bottom = videoControlInset))
+        }
+        if (canLoadOriginal) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).clickable {
+                    showOriginal = true
+                    imageLoading = true
+                },
+                color = Color(0xCC15151A),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(
+                    "View original",
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
         }
         if (zoomEnabled && zoom > 1f) {
             TextButton(onClick = { zoom = 1f; pan = Offset.Zero }, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) {
@@ -1177,18 +1349,11 @@ private fun ImageFrame(
 
 @Composable
 private fun LoadingSpinner(modifier: Modifier = Modifier) {
-    Surface(
-        modifier,
-        color = Color(0xEE1C1E28),
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667B61B8)),
-    ) {
-        CircularProgressIndicator(
-            modifier = Modifier.padding(14.dp).size(30.dp),
-            color = Color(0xFFD1D5DB),
-            strokeWidth = 3.dp,
-        )
-    }
+    CircularProgressIndicator(
+        modifier = modifier.size(30.dp),
+        color = Color(0xFFD1D5DB),
+        strokeWidth = 3.dp,
+    )
 }
 
 private fun formatPlaybackTime(milliseconds: Int): String {
@@ -1206,6 +1371,7 @@ private fun PreferencesDialog(
     var customTerm by remember { mutableStateOf("") }
     var providerMenu by remember { mutableStateOf(false) }
     var dohMenu by remember { mutableStateOf(false) }
+    var ratingMenu by remember { mutableStateOf(false) }
     var mediaMenu by remember { mutableStateOf(false) }
     var videoResolutionMenu by remember { mutableStateOf(false) }
     AlertDialog(
@@ -1213,8 +1379,29 @@ private fun PreferencesDialog(
         title = { Text("Preferences") },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Images", fontWeight = FontWeight.SemiBold)
-                SettingSwitch("Allow NSFW images", state.allowNsfw, "Include questionable and explicit ratings", model::setAllowNsfw)
+                Text("Media", fontWeight = FontWeight.SemiBold)
+                Box {
+                    OutlinedButton(onClick = { ratingMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Rating: ${state.rating.label}", Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose media rating")
+                    }
+                    DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
+                        RatingFilter.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                trailingIcon = {
+                                    if (state.rating == option) {
+                                        Icon(Icons.Default.Check, contentDescription = "Selected")
+                                    }
+                                },
+                                onClick = {
+                                    model.setRatingPreference(option)
+                                    ratingMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
 
                 Text("Provider", fontWeight = FontWeight.SemiBold)
                 Box {
@@ -1271,7 +1458,7 @@ private fun PreferencesDialog(
                     minLines = 2,
                 )
 
-                Text("Media", fontWeight = FontWeight.SemiBold)
+                Text("Media type", fontWeight = FontWeight.SemiBold)
                 SettingSwitch("Ambient background", state.ambientMode, "Use a blurred version of the current media behind it", model::setAmbientMode)
                 Box {
                     OutlinedButton(onClick = { mediaMenu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -1696,7 +1883,8 @@ private fun GelbooruCredentialsDialog(
 }
 
 @Composable
-private fun AboutDialog(post: ImagePost, onDismiss: () -> Unit) {
+@OptIn(ExperimentalLayoutApi::class)
+private fun AboutDialog(post: ImagePost, onDismiss: () -> Unit, onTagClick: (String) -> Unit) {
     val uriHandler = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1717,7 +1905,30 @@ private fun AboutDialog(post: ImagePost, onDismiss: () -> Unit) {
                     Text(post.source.ifBlank { "No source link provided" })
                 }
                 Text("Tags", fontWeight = FontWeight.SemiBold)
-                Text(post.tags.sorted().joinToString().ifBlank { "No tags provided" }, style = MaterialTheme.typography.bodySmall)
+                if (post.tags.isEmpty()) {
+                    Text("No tags provided", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        post.tags.sorted().forEach { tag ->
+                            AssistChip(
+                                onClick = { onTagClick(tag) },
+                                label = {
+                                    Text(
+                                        tag,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                modifier = Modifier.widthIn(max = 280.dp),
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

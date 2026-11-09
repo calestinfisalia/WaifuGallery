@@ -29,6 +29,7 @@ The application only filters results using metadata provided by each image servi
 Open Settings → Backup & Data to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
 
 The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Set a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials, while Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
+Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
 
 ## UI behavior and troubleshooting
 
@@ -36,10 +37,20 @@ The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600
 - Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
 - Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
 - Video buffering shows a centered spinner without a surrounding card. Player controls and progress use gray accents without the purple outline.
-- The bottom media footer is blank except for a loaded image in Random or Search detail, where it shows provider, image type, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it.
+- The bottom media footer shows `16 images, 4 videos`-style counts on Search results; for a loaded image in Random or a Search/Favorites detail, it shows provider, rating, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
+- Download history entries retain a readable row height and show the full status in a tooltip when it does not fit.
 - Provider notices use a gray capsule background without the purple outline.
 
 For a reproducible bug report, include Windows version, image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../linux/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
+
+On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
+
+## Windows 0.1.8
+
+- Added application-styled backup dialogs and an in-app file browser for exporting and importing encrypted user data.
+- Refined desktop downloads, Favorites, Settings, About, and update interfaces; the update and About views include the Iro-chan mascot.
+- Added Windows window-event diagnostics for investigating brief popup windows.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.7
 
