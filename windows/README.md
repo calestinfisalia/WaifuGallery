@@ -47,9 +47,13 @@ On Windows, the app records its own top-level window and small centered Qt widge
 
 ## Windows 0.1.8
 
-- Added application-styled backup dialogs and an in-app file browser for exporting and importing encrypted user data.
-- Refined desktop downloads, Favorites, Settings, About, and update interfaces; the update and About views include the Iro-chan mascot.
-- Added Windows window-event diagnostics for investigating brief popup windows.
+- **Search fix:** editing a query now cancels a pending automatic open from the previous results, preventing a media viewer from opening unexpectedly after a refresh.
+- **Video thumbnail fix:** the play badge is now attached to its thumbnail instead of appearing as a separate popup window.
+- **Downloads:** added a cancel button for active downloads and clearer filename, status, and progress rows.
+- **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
+- **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
+- **Update and About:** added the Iro-chan mascot and refined the application-styled layouts.
+- Added local Windows window-event diagnostics to help investigate transient popups.
 - Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.7

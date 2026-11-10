@@ -33,8 +33,8 @@ The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMA
 
 ## Android 0.1.8
 
-- Fullscreen media now follows the media orientation and restores the previous device orientation on exit.
-- Favorites distinguish video thumbnails and show separate image and video totals.
+- **Fullscreen fix:** fullscreen media now rotates to match the media's orientation and restores the device's previous orientation when fullscreen closes.
+- **Favorites:** video thumbnails have a visible play badge, and image/video totals are shown separately so video posts are easier to distinguish.
 - Release artifact: `app-release.apk`.
 
 ## Android 0.1.7

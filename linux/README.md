@@ -41,8 +41,11 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 
 ## Linux 0.1.8
 
-- Added application-styled backup dialogs and an in-app file browser for encrypted user-data export and import.
-- Refined the Downloads, Favorites, and Settings interfaces to stay aligned with the Windows desktop app.
+- **Search fix:** editing a query now cancels a pending automatic open from previous results, preventing a media viewer from opening unexpectedly after a refresh.
+- **Video thumbnail fix:** the play badge is attached to its thumbnail rather than shown as a separate popup.
+- **Downloads:** added a cancel button for active downloads and clearer filename, status, and progress rows.
+- **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
+- **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
 ## Run from source
