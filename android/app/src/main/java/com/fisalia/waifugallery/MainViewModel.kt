@@ -89,6 +89,9 @@ data class UiState(
     val customTerms: List<String> = emptyList(),
     val saveFolderLabel: String? = null,
     val releaseUpdate: ReleaseUpdate? = null,
+    val releaseDownloadProgress: Int? = null,
+    val downloadedUpdateApk: String? = null,
+    val releaseDownloadError: String? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -131,6 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var downloadJob: Job? = null
+    private var releaseDownloadJob: Job? = null
     private var pendingGalleryFilters: Pair<String, RatingFilter>? = null
 
     init {
@@ -142,7 +146,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun dismissReleaseUpdate() = _state.update { it.copy(releaseUpdate = null) }
+    fun dismissReleaseUpdate() = _state.update {
+        it.copy(
+            releaseUpdate = null,
+            releaseDownloadProgress = null,
+            downloadedUpdateApk = null,
+            releaseDownloadError = null,
+        )
+    }
+    fun downloadReleaseUpdate() {
+        val update = _state.value.releaseUpdate ?: return
+        if (releaseDownloadJob?.isActive == true) return
+        _state.update {
+            it.copy(
+                releaseDownloadProgress = 0,
+                downloadedUpdateApk = null,
+                releaseDownloadError = null,
+            )
+        }
+        releaseDownloadJob = viewModelScope.launch {
+            try {
+                val apk = ReleaseUpdateChecker.downloadApk(getApplication(), update) { progress ->
+                    _state.update { state ->
+                        state.copy(releaseDownloadProgress = progress)
+                    }
+                }
+                _state.update {
+                    it.copy(
+                        releaseDownloadProgress = null,
+                        downloadedUpdateApk = apk.absolutePath,
+                        releaseDownloadError = null,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(
+                        releaseDownloadProgress = null,
+                        releaseDownloadError = error.message ?: "APK download failed.",
+                    )
+                }
+            } finally {
+                releaseDownloadJob = null
+            }
+        }
+    }
+
+    fun reportReleaseInstallError(message: String) {
+        _state.update { it.copy(releaseDownloadError = message) }
+    }
     fun updateQuery(value: String) = _state.update { it.copy(queryInput = value) }
     fun toggleSearch() {
         _state.update { it.copy(searchVisible = !it.searchVisible, queryInput = if (it.searchVisible) "" else it.queryInput) }

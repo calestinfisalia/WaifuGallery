@@ -1,8 +1,10 @@
 ﻿package com.fisalia.waifugallery
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
@@ -132,6 +134,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.content.FileProvider
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.disk.DiskCache
@@ -145,6 +148,7 @@ import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.UserDataBackup
 import com.fisalia.waifugallery.data.UserDataBackupCodec
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
 import kotlinx.coroutines.CancellationException
@@ -174,6 +178,28 @@ private fun Activity.currentScreenBrightness(): Float {
     }
 }
 
+private fun openUpdateInstaller(context: Context, apk: File): String? {
+    return try {
+        val apkUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            apk,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        null
+    } catch (error: ActivityNotFoundException) {
+        "No Android package installer is available."
+    } catch (error: IllegalArgumentException) {
+        "The downloaded APK could not be opened safely."
+    } catch (error: SecurityException) {
+        "Android blocked access to the downloaded APK."
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,8 +211,46 @@ class MainActivity : ComponentActivity() {
 private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     val state by model.state.collectAsState()
     val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
+    val unknownSourcesSettings = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val apk = pendingUpdateApk
+        pendingUpdateApk = null
+        if (apk != null) {
+            if (context.packageManager.canRequestPackageInstalls()) {
+                openUpdateInstaller(context, apk)?.let(model::reportReleaseInstallError)
+            } else {
+                model.reportReleaseInstallError(
+                    "Allow installs from Waifu Gallery in Android Settings, then try again.",
+                )
+            }
+        }
+    }
+    val installUpdate: (String) -> Unit = { apkPath ->
+        val apk = File(apkPath)
+        if (!apk.isFile || apk.parentFile != File(context.cacheDir, "updates")) {
+            model.reportReleaseInstallError("The downloaded APK could not be found.")
+        } else if (!context.packageManager.canRequestPackageInstalls()) {
+            pendingUpdateApk = apk
+            try {
+                unknownSourcesSettings.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            } catch (error: ActivityNotFoundException) {
+                pendingUpdateApk = null
+                model.reportReleaseInstallError(
+                    "Could not open Android's install-permission settings.",
+                )
+            }
+        } else {
+            openUpdateInstaller(context, apk)?.let(model::reportReleaseInstallError)
+        }
+    }
     var aboutPost by remember { mutableStateOf<ImagePost?>(null) }
     var showAppAbout by remember { mutableStateOf(false) }
     var confirmFavoriteRemoval by remember { mutableStateOf<ImagePost?>(null) }
@@ -418,8 +482,13 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     }
     if (showAppAbout) AppAboutDialog(onDismiss = { showAppAbout = false })
     state.releaseUpdate?.let { update ->
+        val downloadedUpdateApk = state.downloadedUpdateApk
         AlertDialog(
-            onDismissRequest = model::dismissReleaseUpdate,
+            onDismissRequest = {
+                if (state.releaseDownloadProgress == null) {
+                    model.dismissReleaseUpdate()
+                }
+            },
             title = { Text("Update available") },
             text = {
                 Column(
@@ -430,16 +499,42 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                 ) {
                     Text("Waifu Gallery ${update.version}", fontWeight = FontWeight.SemiBold)
                     Text(update.notes.ifBlank { "A newer stable release is available." })
+                    state.releaseDownloadProgress?.let { progress ->
+                        Text("Downloading APK... $progress%")
+                        LinearProgressIndicator(
+                            progress = { progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Accent,
+                        )
+                    }
+                    state.releaseDownloadError?.let { error ->
+                        Text(error, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    model.dismissReleaseUpdate()
-                    uriHandler.openUri(update.url)
-                }) { Text("Download update") }
+                when {
+                    downloadedUpdateApk != null -> TextButton(
+                        onClick = { installUpdate(downloadedUpdateApk) },
+                    ) {
+                        Text("Install update")
+                    }
+                    state.releaseDownloadProgress != null -> TextButton(
+                        onClick = {},
+                        enabled = false,
+                    ) {
+                        Text("Downloading...")
+                    }
+                    else -> TextButton(onClick = model::downloadReleaseUpdate) {
+                        Text(if (state.releaseDownloadError == null) "Download APK" else "Retry download")
+                    }
+                }
             },
             dismissButton = {
-                TextButton(onClick = model::dismissReleaseUpdate) { Text("Later") }
+                TextButton(
+                    onClick = model::dismissReleaseUpdate,
+                    enabled = state.releaseDownloadProgress == null,
+                ) { Text("Later") }
             },
         )
     }

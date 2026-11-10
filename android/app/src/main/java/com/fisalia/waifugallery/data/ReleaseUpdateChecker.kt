@@ -1,9 +1,17 @@
 package com.fisalia.waifugallery.data
 
 import android.content.Context
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -12,7 +20,8 @@ import java.util.concurrent.TimeUnit
 data class ReleaseUpdate(
     val version: String,
     val notes: String,
-    val url: String,
+    val apkUrl: String,
+    val apkSha256: String,
 )
 
 object ReleaseUpdateChecker {
@@ -24,6 +33,12 @@ object ReleaseUpdateChecker {
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(10, TimeUnit.SECONDS)
         .build()
+    private val downloadClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.SECONDS)
+        .build()
+    private const val MAX_APK_SIZE = 512L * 1024 * 1024
 
     suspend fun checkForUpdate(context: Context): ReleaseUpdate? = withContext(Dispatchers.IO) {
         try {
@@ -50,32 +65,120 @@ object ReleaseUpdateChecker {
                 val releaseVersion = parseVersion(tag) ?: return@withContext null
                 if (compareVersions(releaseVersion, currentVersion) <= 0) return@withContext null
 
-                val releasePage = release.optString("html_url")
                 val apkUrl = release.optJSONArray("assets")
                     ?.let { assets ->
                         (0 until assets.length())
                             .asSequence()
                             .mapNotNull { assets.optJSONObject(it) }
-                            .firstOrNull {
-                                it.optString("name").endsWith(".apk", ignoreCase = true)
-                            }
-                            ?.optString("browser_download_url")
+                            .firstOrNull { it.optString("name") == "app-release.apk" }
                     }
-                    .orEmpty()
-                val url = apkUrl.takeIf(::isHttpsUrl)
-                    ?: releasePage.takeIf(::isHttpsUrl)
                     ?: return@withContext null
+                val url = apkUrl.optString("browser_download_url")
+                val digest = apkUrl.optString("digest")
+                val checksum = digest.removePrefix("sha256:")
+                if (!isTrustedReleaseUrl(url) || !checksum.matches(Regex("[a-fA-F0-9]{64}"))) {
+                    return@withContext null
+                }
 
                 ReleaseUpdate(
                     version = tag,
                     notes = release.optString("body").trim(),
-                    url = url,
+                    apkUrl = url,
+                    apkSha256 = checksum,
                 )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             null
+        }
+    }
+
+    suspend fun downloadApk(
+        context: Context,
+        update: ReleaseUpdate,
+        onProgress: (Int) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        val version = update.version.removePrefix("v")
+        if (!versionPattern.matches(version)) {
+            throw IOException("The update version is invalid.")
+        }
+        if (!update.apkSha256.matches(Regex("[a-fA-F0-9]{64}"))) {
+            throw IOException("The APK checksum is invalid.")
+        }
+        if (!isTrustedReleaseUrl(update.apkUrl)) {
+            throw IOException("The APK URL is not a trusted GitHub release URL.")
+        }
+
+        val updatesDirectory = File(context.cacheDir, "updates")
+        if (!updatesDirectory.exists() && !updatesDirectory.mkdirs()) {
+            throw IOException("Could not create the APK download folder.")
+        }
+        val destination = File(updatesDirectory, "waifu-gallery-$version.apk")
+        val partialFile = File(updatesDirectory, ".${UUID.randomUUID()}.part")
+        try {
+            val request = Request.Builder()
+                .url(update.apkUrl)
+                .header("Accept", "application/octet-stream")
+                .header("User-Agent", "Waifu-Gallery-Android/$version")
+                .build()
+            downloadClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("APK download failed with HTTP ${response.code}.")
+                }
+                if (response.request.url.scheme != "https" ||
+                    response.request.url.host !in setOf(
+                        "github.com",
+                        "release-assets.githubusercontent.com",
+                        "objects.githubusercontent.com",
+                    )
+                ) {
+                    throw IOException("The APK download left the trusted HTTPS hosts.")
+                }
+                val body = response.body ?: throw IOException("The APK download was empty.")
+                val contentLength = body.contentLength()
+                if (contentLength < 0 || contentLength > MAX_APK_SIZE) {
+                    throw IOException("The APK is larger than the allowed download size.")
+                }
+                val digest = MessageDigest.getInstance("SHA-256")
+                var downloaded = 0L
+                body.byteStream().use { input ->
+                    FileOutputStream(partialFile).use { output ->
+                        val buffer = ByteArray(256 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            downloaded += count
+                            if (downloaded > MAX_APK_SIZE) {
+                                throw IOException("The APK is larger than the allowed download size.")
+                            }
+                            digest.update(buffer, 0, count)
+                            output.write(buffer, 0, count)
+                            if (contentLength > 0) {
+                                onProgress((downloaded * 100 / contentLength).toInt().coerceIn(0, 100))
+                            }
+                        }
+                        output.fd.sync()
+                    }
+                }
+                if (downloaded == 0L) throw IOException("The APK download was empty.")
+                val actualDigest = digest.digest().joinToString("") { "%02x".format(it) }
+                if (!actualDigest.equals(update.apkSha256, ignoreCase = true)) {
+                    throw IOException("The downloaded APK failed its SHA-256 integrity check.")
+                }
+            }
+            Files.move(
+                partialFile.toPath(),
+                destination.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+            onProgress(100)
+            destination
+        } finally {
+            if (partialFile.exists() && !partialFile.delete()) {
+                throw IOException("Could not remove the incomplete APK download.")
+            }
         }
     }
 
@@ -92,6 +195,13 @@ object ReleaseUpdateChecker {
         return 0
     }
 
-    private fun isHttpsUrl(value: String): Boolean =
-        value.startsWith("https://", ignoreCase = true)
+    private fun isTrustedReleaseUrl(value: String): Boolean {
+        val url = value.toHttpUrlOrNull() ?: return false
+        return url.scheme == "https" &&
+            url.host == "github.com" &&
+            url.encodedPath.startsWith(
+                "/calestinfisalia/WaifuGallery/releases/download/",
+            ) &&
+            url.encodedPath.endsWith("/app-release.apk")
+    }
 }

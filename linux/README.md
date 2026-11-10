@@ -1,10 +1,10 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.8 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.9 while Linux launch and packaging files remain separate.
 
 ## Status
 
-The source includes the Windows 0.1.3–0.1.8 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, encrypted cross-platform user-data backups, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
+The source includes the Windows 0.1.3–0.1.9 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, encrypted cross-platform user-data backups, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 
@@ -46,6 +46,13 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Downloads:** added a cancel button for active downloads and clearer filename, status, and progress rows.
 - **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
+- Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
+
+## Linux 0.1.9
+
+- **Search:** prevent a full-text auto-selection when the search field receives focus, while keeping Ctrl+A available.
+- **Media Type menu:** reduce the submenu width.
+- The Linux updater still provides release notes only; Linux packages are not downloaded or installed automatically.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
 ## Run from source

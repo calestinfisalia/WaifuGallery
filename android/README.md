@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The Android release version is aligned with the desktop projects (`0.1.8`). Android's `versionCode` is `6` and continues to increase independently for each Android update.
+The Android release version is aligned with the desktop projects (`0.1.9`). Android's `versionCode` is `7` and continues to increase independently for each Android update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -36,6 +36,14 @@ The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMA
 - **Fullscreen fix:** fullscreen media now rotates to match the media's orientation and restores the device's previous orientation when fullscreen closes.
 - **Favorites:** video thumbnails have a visible play badge, and image/video totals are shown separately so video posts are easier to distinguish.
 - Release artifact: `app-release.apk`.
+
+## Android 0.1.9
+
+- **Download and install updates:** download the APK from the GitHub release, verify its SHA-256 digest, and open Android's package installer after the user chooses **Install update**.
+- Android requires the user to allow installs from this app (if not already allowed) and confirm the installation.
+- Release artifact: `app-release.apk` (`versionCode` 7).
+
+Every APK update must use the same signing certificate as the installed app. This project currently uses the local Android debug key for release builds; preserve that key and build releases on the same machine, or configure a persistent release key before switching build machines.
 
 ## Android 0.1.7
 

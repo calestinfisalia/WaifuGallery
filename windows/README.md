@@ -56,6 +56,13 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Added local Windows window-event diagnostics to help investigate transient popups.
 - Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
+## Windows 0.1.9
+
+- **Update installer:** download the Windows Setup directly from the verified GitHub release, check its SHA-256 digest, then choose **Install now** to open it.
+- **Search:** prevent a full-text auto-selection when the search field receives focus, while keeping Ctrl+A available.
+- **Media Type menu:** reduce the submenu width.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
+
 ## Windows 0.1.7
 
 - Added encrypted, interoperable user-data export/import for favorites, provider credentials, and portable preferences.

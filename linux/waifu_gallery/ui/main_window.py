@@ -64,6 +64,16 @@ from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 from .workers import BackgroundTask, FileDownloadTask, decode_image_bytes
 
 
+class SearchLineEdit(QLineEdit):
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self._clear_automatic_selection)
+
+    def _clear_automatic_selection(self) -> None:
+        if self.text() and self.selectedText() == self.text():
+            self.deselect()
+
+
 class GalleryTitleBar(QWidget):
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
@@ -96,7 +106,7 @@ class GalleryTitleBar(QWidget):
         layout.addWidget(left_container)
         layout.addStretch(1)
 
-        self.search_input = QLineEdit()
+        self.search_input = SearchLineEdit()
         self.search_input.setObjectName("mainSearchInput")
         self.search_input.setPlaceholderText("Search...")
         self.search_input.setMinimumWidth(280)
@@ -745,7 +755,9 @@ class MainWindow(QMainWindow):
         media_group = QActionGroup(menu)
         media_group.setExclusive(True)
         media_menu = menu.addMenu("Media Type")
-        media_menu.setMinimumWidth(180)
+        media_menu.setObjectName("mediaTypeMenu")
+        media_menu.setMinimumWidth(132)
+        media_menu.setMaximumWidth(150)
         for title, value in (("Image Only", "image"), ("Video Only", "video"), ("Show All", "all")):
             action = media_menu.addAction(title)
             action.setCheckable(True)
@@ -1198,7 +1210,8 @@ class MainWindow(QMainWindow):
             QPushButton#action_search { background: __BLUE__; border-color: __BLUE__; color: __BG__; }
             QPushButton#action_search:hover { background: __ACCENT__; border-color: __ACCENT__; }
             QPushButton#closeWindowButton:hover { background: #F7768E; border-color: #F7768E; }
-            QMenu { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; padding: 5px; min-width: 180px; }
+            QMenu { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; padding: 5px; }
+            QMenu#mediaTypeMenu { min-width: 132px; }
             QMenu::item { padding: 7px 24px 7px 10px; border-radius: 5px; }
             QMenu::item:selected { background: __MENU_SELECTED__; }
             QMenu::separator { height: 1px; background: __BORDER__; margin: 5px 4px; }
