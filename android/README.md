@@ -2,23 +2,23 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The Android release version is aligned with the desktop projects (`0.1.9`). Android's `versionCode` is `7` and continues to increase independently for each Android update.
+The Android release version is aligned with the desktop projects (`0.1.10`). Android's `versionCode` is `8` and continues to increase independently for each Android update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
 ## Features
 
-- Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Search follows the selected default provider and applies image/video filters at the provider.
+- Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key.
-- Paged search results, full-size image viewing, swipe navigation, and pinch-to-zoom.
+- Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
 - Download queue with progress and retry states.
-- Local favorites with image/video badges and separate totals, custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
+- Local favorites with image/video badges and separate totals; search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
-- Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions.
+- Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. About and update dialogs feature the Iro-chan mascot.
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
@@ -27,21 +27,32 @@ The preferred video resolution selects the largest listed provider rendition at 
 
 ## Encrypted user data backup
 
-In Preferences, scroll to **Backup & Data** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
+In Preferences, scroll to **Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
 
 The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps provider credentials already present on the device; Replace uses the backup's favorites and credentials. Both import portable preferences. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
 
-## Android 0.1.8
+## Android 0.1.10
 
-- **Fullscreen fix:** fullscreen media now rotates to match the media's orientation and restores the device's previous orientation when fullscreen closes.
-- **Favorites:** video thumbnails have a visible play badge, and image/video totals are shown separately so video posts are easier to distinguish.
-- Release artifact: `app-release.apk`.
+- **Video playback:** start playback as soon as the player is prepared, without requiring an extra play/pause interaction.
+- **Image viewing:** keep focal zoom and pinch/pan movement within the displayed image bounds.
+- **Random video fallback:** request the video tag and skip providers that do not support video-only results.
+- **Player UI:** center the video and buffering indicator, and align the seekbar thumb with its track.
+- **Gallery:** show play badges on video thumbnails and clarify separate image/video totals.
+- **About and update dialogs:** add the mascot accent and align About text with desktop.
+- **Settings:** rename **Backup & Data** to **Backup & Restore**.
+- Release artifact: `app-release.apk` (`versionCode` 8).
 
 ## Android 0.1.9
 
 - **Download and install updates:** download the APK from the GitHub release, verify its SHA-256 digest, and open Android's package installer after the user chooses **Install update**.
 - Android requires the user to allow installs from this app (if not already allowed) and confirm the installation.
 - Release artifact: `app-release.apk` (`versionCode` 7).
+
+## Android 0.1.8
+
+- **Fullscreen fix:** fullscreen media now rotates to match the media's orientation and restores the device's previous orientation when fullscreen closes.
+- **Favorites:** video thumbnails have a visible play badge, and image/video totals are shown separately so video posts are easier to distinguish.
+- Release artifact: `app-release.apk`.
 
 Every APK update must use the same signing certificate as the installed app. This project currently uses the local Android debug key for release builds; preserve that key and build releases on the same machine, or configure a persistent release key before switching build machines.
 

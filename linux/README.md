@@ -1,10 +1,10 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.9 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.10 while Linux launch and packaging files remain separate.
 
 ## Status
 
-The source includes the Windows 0.1.3–0.1.9 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, encrypted cross-platform user-data backups, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
+The source includes the Windows 0.1.3–0.1.10 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, encrypted cross-platform user-data backups, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 
@@ -22,7 +22,7 @@ The application filters content only by provider metadata and tags. Follow each 
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Data to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are excluded.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are excluded.
 
 The version 1 format is shared with Windows and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials; Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, while the current download folder is retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
@@ -46,6 +46,11 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Downloads:** added a cancel button for active downloads and clearer filename, status, and progress rows.
 - **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
+- Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
+
+## Linux 0.1.10
+
+- **Settings:** renamed **Backup & Data** to **Backup & Restore**.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
 ## Linux 0.1.9

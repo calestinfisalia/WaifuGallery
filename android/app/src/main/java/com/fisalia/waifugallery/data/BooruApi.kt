@@ -103,13 +103,14 @@ class BooruApi(
 
     suspend fun randomImage(nsfw: Boolean, searchTerm: String, selectedProvider: String): ImagePost =
         withContext(Dispatchers.IO) {
+            val videoOnly = mediaFilter() == "video"
             val providers = when (selectedProvider) {
                 "Danbooru" -> listOf(danbooru)
-                "yande.re" -> listOf(yandere)
+                "yande.re" -> if (videoOnly) emptyList() else listOf(yandere)
                 "Gelbooru" -> listOf(gelbooru)
                 "Rule34.xxx" -> listOf(rule34)
                 else -> buildList {
-                    add(yandere)
+                    if (!videoOnly) add(yandere)
                     if (hasGelbooruCredentials()) add(gelbooru)
                     if (hasRule34Credentials()) add(rule34)
                     add(danbooru)
@@ -332,7 +333,11 @@ class BooruApi(
             val posts = mutableListOf<ImagePost>()
             val wantedRatings = if (nsfw) listOf("e") else listOf("s")
             for (rating in wantedRatings) {
-                val params = mutableMapOf("tags" to (tags + "rating:${providerRatingTag(provider, rating)}").joinToString(" "), "limit" to "100")
+                val requestTags = tags + listOfNotNull(
+                    if (mediaFilter() == "video") "video" else null,
+                    "rating:${providerRatingTag(provider, rating)}",
+                )
+                val params = mutableMapOf("tags" to requestTags.joinToString(" "), "limit" to "100")
                 if (provider.yandere) {
                     params["api_version"] = "2"
                     params["page"] = Random.nextInt(1, 121).toString()

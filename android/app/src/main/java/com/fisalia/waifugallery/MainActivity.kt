@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -118,8 +120,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.viewinterop.AndroidView
@@ -128,6 +133,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -142,6 +148,7 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.RatingFilter
@@ -491,24 +498,33 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             },
             title = { Text("Update available") },
             text = {
-                Column(
-                    Modifier
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("Waifu Gallery ${update.version}", fontWeight = FontWeight.SemiBold)
-                    Text(update.notes.ifBlank { "A newer stable release is available." })
-                    state.releaseDownloadProgress?.let { progress ->
-                        Text("Downloading APK... $progress%")
-                        LinearProgressIndicator(
-                            progress = { progress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Accent,
-                        )
-                    }
-                    state.releaseDownloadError?.let { error ->
-                        Text(error, color = MaterialTheme.colorScheme.error)
+                Box(Modifier.heightIn(max = 320.dp)) {
+                    DialogMascot(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(width = 112.dp, height = 168.dp),
+                    )
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(end = 88.dp)
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Waifu Gallery ${update.version}", fontWeight = FontWeight.SemiBold)
+                        Text(update.notes.ifBlank { "A newer stable release is available." })
+                        state.releaseDownloadProgress?.let { progress ->
+                            Text("Downloading APK... $progress%")
+                            LinearProgressIndicator(
+                                progress = { progress / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Accent,
+                            )
+                        }
+                        state.releaseDownloadError?.let { error ->
+                            Text(error, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             },
@@ -662,15 +678,44 @@ private fun AppAboutDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("About") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Waifu Gallery", fontWeight = FontWeight.SemiBold)
-                if (version.isNotBlank()) Text("Version $version")
-                Text("Android edition by Fisalia Cantarella.")
-                Text("Inspired by NyarchLinux/WaifuDownloader.")
-                Text("MIT License - provided without warranty.")
+            Box(Modifier.heightIn(max = 360.dp)) {
+                DialogMascot(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                    .size(width = 112.dp, height = 168.dp),
+                )
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = 88.dp)
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Waifu Gallery", fontWeight = FontWeight.SemiBold)
+                    if (version.isNotBlank()) Text("Version $version")
+                    Text(
+                        "An independent Android media gallery for discovering, viewing, and " +
+                            "downloading images and videos.\nCreated by calestinfisalia",
+                    )
+                    Text(
+                        "Source code: MIT License.\n" +
+                            "Bundled icons and artwork retain their own licenses and creator rights.",
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun DialogMascot(modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.waifu_mascot_iro),
+        contentDescription = null,
+        modifier = modifier.graphicsLayer { alpha = 0.5f },
+        contentScale = ContentScale.Fit,
     )
 }
 
@@ -734,7 +779,18 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = Panel),
                         ) {
-                            ImageFrame(post.thumbnailUrl, post, imageLoader, Modifier.fillMaxSize(), allowThumbnailFallback = true)
+                            Box(Modifier.fillMaxSize()) {
+                                ImageFrame(
+                                    post.thumbnailUrl,
+                                    post,
+                                    imageLoader,
+                                    Modifier.fillMaxSize(),
+                                    allowThumbnailFallback = true,
+                                )
+                                if (post.mediaType == "video") {
+                                    VideoPlayBadge(Modifier.align(Alignment.Center))
+                                }
+                            }
                         }
                     }
                 }
@@ -775,6 +831,40 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
                 model.setGalleryFilters(provider, rating)
             },
         )
+    }
+}
+
+@Composable
+private fun VideoPlayBadge(
+    modifier: Modifier = Modifier,
+    label: String? = null,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50.dp),
+        color = Color(0xCC15151A),
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = if (label == null) 8.dp else 10.dp,
+                vertical = 6.dp,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = if (label == null) "Video" else null,
+                modifier = Modifier.size(22.dp),
+                tint = Color.White,
+            )
+            if (label != null) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
     }
 }
 
@@ -881,28 +971,10 @@ private fun FavoritesScreen(
                             showMetadata = false,
                         )
                         if (post.mediaType == "video") {
-                            Surface(
+                            VideoPlayBadge(
                                 modifier = Modifier.align(Alignment.Center),
-                                shape = RoundedCornerShape(50.dp),
-                                color = Color(0xCC15151A),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Default.PlayArrow,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = Color.White,
-                                    )
-                                    Text(
-                                        "VIDEO",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White,
-                                    )
-                                }
-                            }
+                                label = "VIDEO",
+                            )
                         }
                         IconButton(
                             onClick = { onRequestRemoval(post) },
@@ -1045,7 +1117,7 @@ private fun ImageFrame(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = remember(context) { context.findActivity() }
-    val videoControlInset = if (
+    val metadataControlInset = if (
         post.mediaType == "video" && !allowThumbnailFallback && !mediaFullscreen
     ) 78.dp else 0.dp
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
@@ -1065,17 +1137,61 @@ private fun ImageFrame(
     var imageLoading by remember(post.id, url) { mutableStateOf(true) }
     var zoom by remember(post.id) { mutableFloatStateOf(1f) }
     var pan by remember(post.id) { mutableStateOf(Offset.Zero) }
-    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        zoom = (zoom * zoomChange).coerceIn(1f, 6f)
-        pan = if (zoom <= 1f) Offset.Zero else pan + panChange
+    var viewportSize by remember(post.id) { mutableStateOf(IntSize.Zero) }
+    fun constrainPan(offset: Offset, scale: Float): Offset {
+        val viewportWidth = viewportSize.width.toFloat()
+        val viewportHeight = viewportSize.height.toFloat()
+        if (viewportWidth <= 0f || viewportHeight <= 0f) return Offset.Zero
+        val imageWidth = post.width.takeIf { it > 0 }?.toFloat() ?: viewportWidth
+        val imageHeight = post.height.takeIf { it > 0 }?.toFloat() ?: viewportHeight
+        val fitScale = min(viewportWidth / imageWidth, viewportHeight / imageHeight)
+        val maxPanX = ((imageWidth * fitScale * scale - viewportWidth) / 2f).coerceAtLeast(0f)
+        val maxPanY = ((imageHeight * fitScale * scale - viewportHeight) / 2f).coerceAtLeast(0f)
+        return Offset(
+            offset.x.coerceIn(-maxPanX, maxPanX),
+            offset.y.coerceIn(-maxPanY, maxPanY),
+        )
     }
-    val zoomGesture = if (zoomEnabled) Modifier.transformable(
-        state = transformState,
-        canPan = { zoom > 1f },
-    ) else Modifier
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newZoom = (zoom * zoomChange).coerceIn(1f, 6f)
+        zoom = newZoom
+        pan = if (newZoom <= 1f) Offset.Zero else constrainPan(pan + panChange, newZoom)
+    }
+    val currentZoom by rememberUpdatedState(zoom)
+    val currentPan by rememberUpdatedState(pan)
+    val zoomGesture = if (zoomEnabled) {
+        Modifier
+            .pointerInput(post.id) {
+                detectTapGestures(
+                    onDoubleTap = { tap ->
+                        val oldZoom = currentZoom
+                        if (oldZoom > 1f) {
+                            zoom = 1f
+                            pan = Offset.Zero
+                        } else {
+                            val newZoom = 2.5f
+                            val ratio = newZoom / oldZoom
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            pan = Offset(
+                                (tap.x - centerX) * (1f - ratio) + currentPan.x * ratio,
+                                (tap.y - centerY) * (1f - ratio) + currentPan.y * ratio,
+                            ).let { constrainPan(it, newZoom) }
+                            zoom = newZoom
+                        }
+                    },
+                )
+            }
+            .transformable(
+                state = transformState,
+                canPan = { zoom > 1f },
+            )
+    } else Modifier
     var videoPlaying by remember(post.id) { mutableStateOf(false) }
     var videoStarted by remember(post.id) { mutableStateOf(false) }
+    var videoPrepared by remember(post.id) { mutableStateOf(false) }
     var videoView by remember(post.id) { mutableStateOf<android.widget.VideoView?>(null) }
+    val currentVideoPlaying by rememberUpdatedState(videoPlaying)
     var videoDuration by remember(post.id) { mutableStateOf(0) }
     var videoPosition by remember(post.id) { mutableStateOf(0) }
     var videoError by remember(post.id) { mutableStateOf(false) }
@@ -1091,6 +1207,7 @@ private fun ImageFrame(
         if (!playbackAllowed) {
             videoPlaying = false
             videoStarted = false
+            videoPrepared = false
             videoError = false
             videoBuffering = false
         }
@@ -1098,6 +1215,7 @@ private fun ImageFrame(
     LaunchedEffect(post.id, videoMaxHeight) {
         videoPlaying = false
         videoStarted = false
+        videoPrepared = false
     }
     LaunchedEffect(videoPlaying, videoView) {
         while (videoPlaying) {
@@ -1113,7 +1231,13 @@ private fun ImageFrame(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    Box(modifier.background(Color.Transparent).then(if (post.mediaType == "video") Modifier else zoomGesture), contentAlignment = Alignment.Center) {
+    Box(
+        modifier
+            .background(Color.Transparent)
+            .onSizeChanged { viewportSize = IntSize(it.width, it.height) }
+            .then(if (post.mediaType == "video") Modifier else zoomGesture),
+        contentAlignment = Alignment.Center,
+    ) {
         if (ambientMode) AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).build(),
             imageLoader = imageLoader,
@@ -1123,7 +1247,7 @@ private fun ImageFrame(
         )
         if (post.mediaType == "video" && videoStarted && playbackAllowed && !allowThumbnailFallback && !videoError) {
             AndroidView(
-                modifier = Modifier.fillMaxSize().padding(bottom = videoControlInset),
+                modifier = Modifier.fillMaxSize(),
                 factory = { context ->
                     android.widget.VideoView(context).apply {
                         val playerView = this
@@ -1201,12 +1325,12 @@ private fun ImageFrame(
                         } else {
                             post.imageUrl
                         }
-                        setVideoURI(Uri.parse(videoUrl), headers)
                         setOnPreparedListener { player ->
                             player.isLooping = true
                             videoDuration = player.duration.coerceAtLeast(0)
                             videoBuffering = false
-                            if (videoPlaying) start() else pause()
+                            videoPrepared = true
+                            if (currentVideoPlaying) playerView.start() else playerView.pause()
                         }
                         setOnInfoListener { _, what, _ ->
                             when (what) {
@@ -1222,16 +1346,20 @@ private fun ImageFrame(
                             }
                         }
                         setOnErrorListener { _, _, _ ->
+                            videoPrepared = false
                             videoError = true
                             videoPlaying = false
                             videoBuffering = false
                             true
                         }
+                        setVideoURI(Uri.parse(videoUrl), headers)
                     }
                 },
                 update = { view ->
-                    if (videoPlaying && !view.isPlaying) view.start()
-                    else if (!videoPlaying && view.isPlaying) view.pause()
+                    if (videoPrepared) {
+                        if (videoPlaying && !view.isPlaying) view.start()
+                        else if (!videoPlaying && view.isPlaying) view.pause()
+                    }
                 },
                 onRelease = {
                     if (videoView === it) videoView = null
@@ -1243,7 +1371,7 @@ private fun ImageFrame(
             model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).crossfade(true).build(),
             imageLoader = imageLoader,
             contentDescription = "${post.provider} image, rating ${post.rating}",
-            modifier = Modifier.fillMaxSize().padding(bottom = videoControlInset).graphicsLayer {
+            modifier = Modifier.fillMaxSize().graphicsLayer {
                 scaleX = if (zoomEnabled) zoom else 1f
                 scaleY = if (zoomEnabled) zoom else 1f
                 translationX = if (zoomEnabled) pan.x else 0f
@@ -1264,7 +1392,7 @@ private fun ImageFrame(
         }
         if (post.mediaType == "video" && !videoStarted && !videoError && !allowThumbnailFallback) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).padding(bottom = videoControlInset).size(68.dp).clickable {
+                modifier = Modifier.align(Alignment.Center).size(68.dp).clickable {
                     videoError = false
                     videoStarted = true
                     videoPlaying = true
@@ -1303,7 +1431,6 @@ private fun ImageFrame(
                             if (videoStarted) {
                                 videoPlaying = !videoPlaying
                                 if (!videoPlaying) videoBuffering = false
-                                if (videoPlaying) videoView?.start() else videoView?.pause()
                             } else {
                                 videoStarted = true
                                 videoPlaying = true
@@ -1326,6 +1453,7 @@ private fun ImageFrame(
                         thumb = {
                             Box(
                                 Modifier
+                                    .graphicsLayer { translationY = 4.dp.toPx() }
                                     .size(8.dp)
                                     .background(Color(0xFFE5E7EB), RoundedCornerShape(50)),
                             )
@@ -1334,15 +1462,16 @@ private fun ImageFrame(
                             Canvas(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(2.dp),
+                                    .height(24.dp),
                             ) {
                                 val centerY = size.height / 2
+                                val trackHeight = 2.dp.toPx()
                                 val progressX = size.width * sliderState.coercedValueAsFraction
                                 drawLine(
                                     color = Color(0xFF55565E),
                                     start = Offset(0f, centerY),
                                     end = Offset(size.width, centerY),
-                                    strokeWidth = size.height,
+                                    strokeWidth = trackHeight,
                                     cap = StrokeCap.Round,
                                 )
                                 if (progressX > 0f) {
@@ -1350,7 +1479,7 @@ private fun ImageFrame(
                                         color = Color(0xFFB8BBC2),
                                         start = Offset(0f, centerY),
                                         end = Offset(progressX, centerY),
-                                        strokeWidth = size.height,
+                                        strokeWidth = trackHeight,
                                         cap = StrokeCap.Round,
                                     )
                                 }
@@ -1391,7 +1520,6 @@ private fun ImageFrame(
         if (videoBuffering && videoPlaying && playbackAllowed && !allowThumbnailFallback) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center)
-                    .padding(bottom = videoControlInset)
                     .size(30.dp),
                 color = Color(0xFFD1D5DB),
                 strokeWidth = 3.dp,
@@ -1399,7 +1527,7 @@ private fun ImageFrame(
         }
         videoFeedback?.let { feedback ->
             Surface(
-                Modifier.align(Alignment.Center).padding(bottom = videoControlInset),
+                Modifier.align(Alignment.Center),
                 color = Color(0xCC15151A),
                 shape = RoundedCornerShape(16.dp),
             ) {
@@ -1407,7 +1535,7 @@ private fun ImageFrame(
             }
         }
         if (showLoadingIndicator && imageLoading) {
-            LoadingSpinner(Modifier.align(Alignment.Center).padding(bottom = videoControlInset))
+            LoadingSpinner(Modifier.align(Alignment.Center))
         }
         if (canLoadOriginal) {
             Surface(
@@ -1425,14 +1553,9 @@ private fun ImageFrame(
                 )
             }
         }
-        if (zoomEnabled && zoom > 1f) {
-            TextButton(onClick = { zoom = 1f; pan = Offset.Zero }, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) {
-                Text("Reset zoom")
-            }
-        }
         if (showMetadata) {
             Surface(
-                Modifier.align(Alignment.BottomStart).padding(start = 8.dp, top = 8.dp, bottom = 8.dp + videoControlInset),
+                Modifier.align(Alignment.BottomStart).padding(start = 8.dp, top = 8.dp, bottom = 8.dp + metadataControlInset),
                 color = Color(0xAA15151A),
                 shape = RoundedCornerShape(6.dp),
             ) {
@@ -1687,7 +1810,7 @@ private fun UserDataBackupSection(model: MainViewModel) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Backup & Data", fontWeight = FontWeight.SemiBold)
+        Text("Backup & Restore", fontWeight = FontWeight.SemiBold)
         Text(
             "Encrypted backups include favorites, provider credentials, and portable preferences. " +
                 "Download locations stay on this device. The passphrase cannot be recovered.",

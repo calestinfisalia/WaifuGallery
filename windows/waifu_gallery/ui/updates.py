@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import requests
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QPainter, QPixmap, QTransform
+from PySide6.QtGui import QDesktopServices, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -44,7 +44,7 @@ class _UpdateMascotOverlay(QWidget):
             QSize(320, 480),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
-        ).transformed(QTransform().scale(-1, 1))
+        )
 
     def sizeHint(self) -> QSize:
         return QSize(0, 0)

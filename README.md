@@ -6,15 +6,15 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.9).
-- [Linux](linux/README.md) — Linux port aligned with the Windows 0.1.9 desktop feature set; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.9).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.10).
+- [Linux](linux/README.md) — Linux port aligned with the Windows 0.1.10 desktop feature set; platform runtime and packaging still need Linux verification.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.10).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Feature availability and platform requirements are documented in each project README.
 
 ## Encrypted user data backups
 
-Windows, Linux, and Android provide **Settings → Backup & Data** (on Android, in Preferences). Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
+Windows, Linux, and Android provide **Settings → Backup & Restore** (on Android, in Preferences). Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
 
 The shared version 1 format uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces favorites and provider credentials. Both options import the backup's portable preferences. The local download location is retained.
 

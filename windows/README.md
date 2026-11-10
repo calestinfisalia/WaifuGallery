@@ -26,7 +26,7 @@ The application only filters results using metadata provided by each image servi
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Data to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
 
 The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Set a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials, while Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
@@ -54,6 +54,12 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - **Update and About:** added the Iro-chan mascot and refined the application-styled layouts.
 - Added local Windows window-event diagnostics to help investigate transient popups.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
+
+## Windows 0.1.10
+
+- **Settings:** renamed **Backup & Data** to **Backup & Restore**.
+- **Update prompt:** corrected the mascot orientation.
 - Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.9

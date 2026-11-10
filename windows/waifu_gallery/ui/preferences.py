@@ -626,7 +626,7 @@ class PreferencesDialog(FramelessResizableDialog):
             actions.addWidget(card, 1)
         layout.addLayout(actions)
         layout.addStretch(1)
-        self._add_page(page, "Backup & Data", "download")
+        self._add_page(page, "Backup & Restore", "download")
 
     def export_user_data(self) -> None:
         passphrase_dialog = BackupPassphraseDialog(
