@@ -501,7 +501,7 @@ class BooruApi(
         if (provider.name != "Gelbooru") return
         val (userId, apiKey) = gelbooruCredentials()
         if (userId.isBlank() || apiKey.isBlank()) {
-            throw IOException("Gelbooru is locked. Add your Gelbooru user ID and API key in Preferences.")
+            throw IOException("Gelbooru is locked. Add your Gelbooru user ID and API key in Settings.")
         }
         builder.addQueryParameter("user_id", userId)
             .addQueryParameter("api_key", apiKey)
@@ -510,7 +510,7 @@ class BooruApi(
     private fun addRule34Credentials(provider: Provider, builder: okhttp3.HttpUrl.Builder) {
         if (provider.name != "Rule34.xxx") return
         val (userId, apiKey) = rule34Credentials()
-        if (userId.isBlank() || apiKey.isBlank()) throw IOException("Rule34.xxx is locked. Add your user ID and API key in Preferences.")
+        if (userId.isBlank() || apiKey.isBlank()) throw IOException("Rule34.xxx is locked. Add your user ID and API key in Settings.")
         builder.addQueryParameter("user_id", userId).addQueryParameter("api_key", apiKey)
     }
 

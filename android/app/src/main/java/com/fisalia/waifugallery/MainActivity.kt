@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -51,9 +53,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowBack
@@ -69,10 +74,9 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.AlertDialog
@@ -120,6 +124,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -259,8 +264,8 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         }
     }
     var aboutPost by remember { mutableStateOf<ImagePost?>(null) }
-    var showAppAbout by remember { mutableStateOf(false) }
     var confirmFavoriteRemoval by remember { mutableStateOf<ImagePost?>(null) }
+    var showGalleryFilters by remember { mutableStateOf(false) }
     var mediaFullscreen by remember { mutableStateOf(false) }
     val activity = remember(context) { context.findActivity() }
     val fullscreenPost = when (state.screen) {
@@ -324,6 +329,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         }
     }
     LaunchedEffect(state.screen) {
+        if (state.screen != AppScreen.GALLERY) showGalleryFilters = false
         if (state.screen != AppScreen.RANDOM && state.screen != AppScreen.DETAIL) {
             mediaFullscreen = false
         }
@@ -376,60 +382,79 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         onSurface = Color(0xFFF2F0F7),
     )) {
         Surface(Modifier.fillMaxSize(), color = AppBackground) {
-            Scaffold(containerColor = AppBackground, topBar = {
-                if (!mediaFullscreen) HeaderBar(
-                    isDetail = state.screen == AppScreen.DETAIL,
-                    showHome = state.screen == AppScreen.FAVORITES || (state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM),
-                    searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
-                    query = state.queryInput,
-                    onQueryChanged = model::updateQuery,
-                    onSearchSubmit = {
-                        keyboardController?.hide()
-                        model.search()
-                    },
-                    onBack = model::backToGallery,
-                    onHome = model::goHome,
-                    onRefresh = model::refresh,
-                    onSearch = model::toggleSearch,
-                    onSave = model::saveCurrentImage,
-                    isFavorite = model.isFavorite(if (state.screen == AppScreen.DETAIL) state.detailImage else state.image),
-                    onFavorite = {
-                        val post = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
-                        if (post != null) {
-                            if (model.isFavorite(post)) confirmFavoriteRemoval = post else model.toggleFavorite(post)
-                        }
-                    },
-                    onPreferences = model::openPreferences,
-                    onDownloads = model::openDownloadQueue,
-                    onFavorites = model::openFavorites,
-                    onAbout = { aboutPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image },
-                    onAppAbout = { showAppAbout = true },
-                    canSave = when (state.screen) {
-                        AppScreen.RANDOM -> state.image != null && !state.isLoading
-                        AppScreen.DETAIL -> state.detailImage != null && !state.isLoading
-                        AppScreen.GALLERY, AppScreen.FAVORITES -> false
-                    },
+            if (state.screen == AppScreen.FAVORITES) {
+                FavoritesScreen(
+                    state = state,
+                    imageLoader = imageLoader,
+                    model = model,
+                    modifier = Modifier.fillMaxSize(),
+                    onRequestRemoval = { confirmFavoriteRemoval = it },
+                    onClose = model::goHome,
                 )
-            }) { padding ->
-                when (state.screen) {
-                    AppScreen.RANDOM -> RandomScreen(
-                        state,
-                        imageLoader,
-                        Modifier.padding(padding),
-                        mediaFullscreen,
-                        onFullscreenChanged = { mediaFullscreen = it },
+            } else {
+                Scaffold(containerColor = AppBackground, topBar = {
+                    if (!mediaFullscreen) HeaderBar(
+                        isDetail = state.screen == AppScreen.DETAIL,
+                        isGallery = state.screen == AppScreen.GALLERY,
+                        showHome = state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM,
+                        searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
+                        query = state.queryInput,
+                        onQueryChanged = model::updateQuery,
+                        onSearchSubmit = {
+                            keyboardController?.hide()
+                            model.search()
+                        },
+                        onBack = model::backToGallery,
+                        onHome = model::goHome,
+                        onRefresh = model::refresh,
+                        onSearch = model::toggleSearch,
+                        onSave = model::saveCurrentImage,
+                        isFavorite = model.isFavorite(if (state.screen == AppScreen.DETAIL) state.detailImage else state.image),
+                        onFavorite = {
+                            val post = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
+                            if (post != null) {
+                                if (model.isFavorite(post)) confirmFavoriteRemoval = post else model.toggleFavorite(post)
+                            }
+                        },
+                        onSettings = model::openSettings,
+                        onOpenFilters = { showGalleryFilters = true },
+                        onDownloads = model::openDownloadQueue,
+                        onFavorites = model::openFavorites,
+                        onAbout = { aboutPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image },
+                        canSave = when (state.screen) {
+                            AppScreen.RANDOM -> state.image != null && !state.isLoading
+                            AppScreen.DETAIL -> state.detailImage != null && !state.isLoading
+                            AppScreen.GALLERY, AppScreen.FAVORITES -> false
+                        },
                     )
-                    AppScreen.GALLERY -> GalleryScreen(state, imageLoader, model, Modifier.padding(padding))
-                    AppScreen.FAVORITES -> FavoritesScreen(state, imageLoader, model, Modifier.padding(padding), onRequestRemoval = { confirmFavoriteRemoval = it })
-                    AppScreen.DETAIL -> DetailScreen(
-                        state,
-                        imageLoader,
-                        onPageSelected = model::selectDetail,
-                        onLoadAdjacentPage = model::loadAdjacentDetailPage,
-                        modifier = Modifier.padding(padding),
-                        mediaFullscreen = mediaFullscreen,
-                        onFullscreenChanged = { mediaFullscreen = it },
-                    )
+                }) { padding ->
+                    when (state.screen) {
+                        AppScreen.RANDOM -> RandomScreen(
+                            state,
+                            imageLoader,
+                            Modifier.padding(padding),
+                            mediaFullscreen,
+                            onFullscreenChanged = { mediaFullscreen = it },
+                        )
+                        AppScreen.GALLERY -> GalleryScreen(
+                            state,
+                            imageLoader,
+                            model,
+                            Modifier.padding(padding),
+                            showFilters = showGalleryFilters,
+                            onCloseFilters = { showGalleryFilters = false },
+                        )
+                        AppScreen.FAVORITES -> Unit
+                        AppScreen.DETAIL -> DetailScreen(
+                            state,
+                            imageLoader,
+                            onPageSelected = model::selectDetail,
+                            onLoadAdjacentPage = model::loadAdjacentDetailPage,
+                            modifier = Modifier.padding(padding),
+                            mediaFullscreen = mediaFullscreen,
+                            onFullscreenChanged = { mediaFullscreen = it },
+                        )
+                    }
                 }
             }
         }
@@ -441,12 +466,12 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             confirmButton = { TextButton(onClick = model::dismissError) { Text("Close") } },
         )
     }
-    state.showPreferences.let { visible ->
-        if (visible) PreferencesDialog(
+    state.showSettings.let { visible ->
+        if (visible) SettingsScreen(
             state = state,
             model = model,
             onChooseFolder = { folderPicker.launch(null) },
-            onClose = model::closePreferences,
+            onClose = model::closeSettings,
         )
     }
     if (state.requestGelbooruCredentials) {
@@ -487,12 +512,11 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             },
         )
     }
-    if (showAppAbout) AppAboutDialog(onDismiss = { showAppAbout = false })
     state.releaseUpdate?.let { update ->
         val downloadedUpdateApk = state.downloadedUpdateApk
         AlertDialog(
             onDismissRequest = {
-                if (state.releaseDownloadProgress == null) {
+                if (!state.isDownloadingReleaseUpdate) {
                     model.dismissReleaseUpdate()
                 }
             },
@@ -514,13 +538,21 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                     ) {
                         Text("Waifu Gallery ${update.version}", fontWeight = FontWeight.SemiBold)
                         Text(update.notes.ifBlank { "A newer stable release is available." })
-                        state.releaseDownloadProgress?.let { progress ->
-                            Text("Downloading APK... $progress%")
-                            LinearProgressIndicator(
-                                progress = { progress / 100f },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = Accent,
-                            )
+                        if (state.isDownloadingReleaseUpdate) {
+                            val progress = state.releaseDownloadProgress
+                            Text(if (progress == null) "Downloading APK..." else "Downloading APK... $progress%")
+                            if (progress == null) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Accent,
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    progress = { progress / 100f },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Accent,
+                                )
+                            }
                         }
                         state.releaseDownloadError?.let { error ->
                             Text(error, color = MaterialTheme.colorScheme.error)
@@ -535,7 +567,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                     ) {
                         Text("Install update")
                     }
-                    state.releaseDownloadProgress != null -> TextButton(
+                    state.isDownloadingReleaseUpdate -> TextButton(
                         onClick = {},
                         enabled = false,
                     ) {
@@ -549,14 +581,15 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             dismissButton = {
                 TextButton(
                     onClick = model::dismissReleaseUpdate,
-                    enabled = state.releaseDownloadProgress == null,
+                    enabled = !state.isDownloadingReleaseUpdate,
                 ) { Text("Later") }
             },
         )
     }
     if (state.showDownloadQueue) {
-        DownloadQueueDialog(
+        DownloadQueueScreen(
             downloads = state.downloads,
+            onOpen = model::openSavedDownload,
             onRetry = model::retryDownload,
             onClearFinished = model::clearFinishedDownloads,
             onDismiss = model::closeDownloadQueue,
@@ -587,6 +620,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
 @Composable
 private fun HeaderBar(
     isDetail: Boolean,
+    isGallery: Boolean,
     showHome: Boolean,
     searchVisible: Boolean,
     query: String,
@@ -599,11 +633,11 @@ private fun HeaderBar(
     onSave: () -> Unit,
     isFavorite: Boolean,
     onFavorite: () -> Unit,
-    onPreferences: () -> Unit,
+    onSettings: () -> Unit,
+    onOpenFilters: () -> Unit,
     onDownloads: () -> Unit,
     onFavorites: () -> Unit,
     onAbout: () -> Unit,
-    onAppAbout: () -> Unit,
     canSave: Boolean,
 ) {
     var settingsMenuExpanded by remember { mutableStateOf(false) }
@@ -616,16 +650,38 @@ private fun HeaderBar(
             }
             if (showHome) IconButton(onClick = onHome) { Icon(Icons.Default.Home, "Home") }
             if (searchVisible) {
-                OutlinedTextField(
+                BasicTextField(
                     value = query,
                     onValueChange = onQueryChanged,
-                    modifier = Modifier.weight(1f).height(54.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .offset(y = 3.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF303038))
+                        .padding(horizontal = 10.dp),
                     singleLine = true,
-                    placeholder = { Text("Search name or tags", maxLines = 1) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) IconButton(onClick = { onQueryChanged("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    decorationBox = { innerTextField ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray)
+                            Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                                if (query.isEmpty()) {
+                                    Text("Search name or tags", maxLines = 1, color = Color.LightGray, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                innerTextField()
+                            }
+                            if (query.isNotEmpty()) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear search",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clickable { onQueryChanged("") }
+                                        .padding(6.dp),
+                                )
+                            }
                         }
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -642,11 +698,17 @@ private fun HeaderBar(
                 Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (isFavorite) "Remove favorite" else "Add favorite", tint = if (isFavorite) Accent else MaterialTheme.colorScheme.onSurface)
             }
             Box {
-                IconButton(onClick = { settingsMenuExpanded = true }) { Icon(Icons.Default.Settings, "Settings menu") }
+                IconButton(onClick = { settingsMenuExpanded = true }) { Icon(Icons.Default.MoreVert, "More options") }
                 DropdownMenu(expanded = settingsMenuExpanded, onDismissRequest = { settingsMenuExpanded = false }) {
+                    if (isGallery) {
+                        DropdownMenuItem(
+                            text = { Text("Filters") },
+                            onClick = { settingsMenuExpanded = false; onOpenFilters() },
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text("Preferences") },
-                        onClick = { settingsMenuExpanded = false; onPreferences() },
+                        text = { Text("Settings") },
+                        onClick = { settingsMenuExpanded = false; onSettings() },
                     )
                     DropdownMenuItem(
                         text = { Text("Downloads") },
@@ -656,57 +718,10 @@ private fun HeaderBar(
                         text = { Text("Favorites") },
                         onClick = { settingsMenuExpanded = false; onFavorites() },
                     )
-                    DropdownMenuItem(
-                        text = { Text("About") },
-                        onClick = { settingsMenuExpanded = false; onAppAbout() },
-                    )
                 }
             }
         }
     }
-}
-
-@Composable
-private fun AppAboutDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val version = remember {
-        runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull().orEmpty()
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("About") },
-        text = {
-            Box(Modifier.heightIn(max = 360.dp)) {
-                DialogMascot(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                    .size(width = 112.dp, height = 168.dp),
-                )
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(end = 88.dp)
-                        .heightIn(max = 360.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("Waifu Gallery", fontWeight = FontWeight.SemiBold)
-                    if (version.isNotBlank()) Text("Version $version")
-                    Text(
-                        "An independent Android media gallery for discovering, viewing, and " +
-                            "downloading images and videos.\nCreated by calestinfisalia",
-                    )
-                    Text(
-                        "Source code: MIT License.\n" +
-                            "Bundled icons and artwork retain their own licenses and creator rights.",
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }
 
 @Composable
@@ -748,21 +763,19 @@ private fun RandomScreen(
 }
 
 @Composable
-private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainViewModel, modifier: Modifier = Modifier) {
-    var showFilters by remember { mutableStateOf(false) }
+private fun GalleryScreen(
+    state: UiState,
+    imageLoader: ImageLoader,
+    model: MainViewModel,
+    modifier: Modifier = Modifier,
+    showFilters: Boolean,
+    onCloseFilters: () -> Unit,
+) {
     val gridState = rememberLazyGridState()
     LaunchedEffect(state.page, state.galleryQuery, state.galleryProvider, state.rating) {
         gridState.scrollToItem(0)
     }
     Column(modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Results for \"${state.galleryQuery}\"", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, maxLines = 1)
-            OutlinedButton(onClick = { showFilters = true }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
-                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Filter")
-            }
-        }
         Text("${state.galleryProvider}  |  ${state.rating.label}", Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (state.gallery.isNotEmpty()) {
@@ -799,7 +812,23 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
                 LoadingSpinner()
             }
             if (!state.isLoading && state.gallery.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No images found")
+                if (state.galleryProviderErrors.isEmpty()) {
+                    Text("No images found")
+                } else {
+                    Column(
+                        Modifier.padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("No results from available providers")
+                        Text(
+                            state.galleryProviderErrors.joinToString("\n"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = model::refresh) { Text("Try again") }
+                    }
+                }
             }
         }
         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -825,9 +854,9 @@ private fun GalleryScreen(state: UiState, imageLoader: ImageLoader, model: MainV
             selectedProvider = state.galleryProvider,
             selectedRating = state.rating,
             allowNsfw = state.allowNsfw,
-            onDismiss = { showFilters = false },
+            onDismiss = onCloseFilters,
             onApply = { provider, rating ->
-                showFilters = false
+                onCloseFilters()
                 model.setGalleryFilters(provider, rating)
             },
         )
@@ -906,7 +935,7 @@ private fun GalleryFiltersDialog(
                 Text("Rating", fontWeight = FontWeight.SemiBold)
                 if (!allowNsfw) {
                     Text(
-                        "Enable NSFW results in Preferences to use other ratings.",
+                        "Enable NSFW results in Settings to use other ratings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.LightGray,
                     )
@@ -940,47 +969,65 @@ private fun FavoritesScreen(
     model: MainViewModel,
     modifier: Modifier = Modifier,
     onRequestRemoval: (ImagePost) -> Unit,
+    onClose: () -> Unit,
 ) {
     val imageCount = state.favorites.count { it.mediaType != "video" }
     val videoCount = state.favorites.size - imageCount
-    Column(modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-        Text(
-            "Favorites $imageCount images, $videoCount videos",
-            Modifier.padding(vertical = 10.dp),
-            style = MaterialTheme.typography.titleSmall,
-        )
-        if (state.favorites.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No favorites yet")
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 145.dp),
-                contentPadding = PaddingValues(bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+    Surface(modifier.fillMaxSize(), color = AppBackground) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                items(state.favorites, key = { it.id }) { post ->
-                    Box(Modifier.fillMaxWidth().aspectRatio(0.95f)) {
-                        ImageFrame(
-                            post.thumbnailUrl,
-                            post,
-                            imageLoader,
-                            Modifier.fillMaxSize().clickable { model.openDetail(post) },
-                            allowThumbnailFallback = true,
-                            showMetadata = false,
-                        )
-                        if (post.mediaType == "video") {
-                            VideoPlayBadge(
-                                modifier = Modifier.align(Alignment.Center),
-                                label = "VIDEO",
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to gallery")
+                }
+                Column {
+                    Text("Favorites", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "$imageCount images, $videoCount videos",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (state.favorites.isEmpty()) {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("No favorites yet")
+                }
+            } else {
+                LazyVerticalGrid(
+                    modifier = Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(),
+                    columns = GridCells.Adaptive(minSize = 145.dp),
+                    contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.favorites, key = { it.id }) { post ->
+                        Box(Modifier.fillMaxWidth().aspectRatio(0.95f)) {
+                            ImageFrame(
+                                post.thumbnailUrl,
+                                post,
+                                imageLoader,
+                                Modifier.fillMaxSize().clickable { model.openDetail(post) },
+                                allowThumbnailFallback = true,
+                                showMetadata = false,
                             )
-                        }
-                        IconButton(
-                            onClick = { onRequestRemoval(post) },
-                            modifier = Modifier.align(Alignment.TopEnd),
-                        ) {
-                            Icon(Icons.Default.Favorite, "Remove from favorites", tint = Accent)
+                            if (post.mediaType == "video") {
+                                VideoPlayBadge(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    label = "VIDEO",
+                                )
+                            }
+                            IconButton(
+                                onClick = { onRequestRemoval(post) },
+                                modifier = Modifier.align(Alignment.TopEnd),
+                            ) {
+                                Icon(Icons.Default.Favorite, "Remove from favorites", tint = Accent)
+                            }
                         }
                     }
                 }
@@ -1580,173 +1627,509 @@ private fun formatPlaybackTime(milliseconds: Int): String {
 }
 
 @Composable
-private fun PreferencesDialog(
+@OptIn(ExperimentalLayoutApi::class)
+private fun SettingsScreen(
     state: UiState,
     model: MainViewModel,
     onChooseFolder: () -> Unit,
     onClose: () -> Unit,
 ) {
-    var customTerm by remember { mutableStateOf("") }
+    var selectedPage by rememberSaveable { mutableStateOf("") }
+    var customTerm by rememberSaveable { mutableStateOf("") }
+    var showCustomTermsDialog by rememberSaveable { mutableStateOf(false) }
+    var newBlockedTags by rememberSaveable { mutableStateOf("") }
+    var showBlockedTagsDialog by rememberSaveable { mutableStateOf(false) }
     var providerMenu by remember { mutableStateOf(false) }
     var dohMenu by remember { mutableStateOf(false) }
     var ratingMenu by remember { mutableStateOf(false) }
     var mediaMenu by remember { mutableStateOf(false) }
     var videoResolutionMenu by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Preferences") },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Media", fontWeight = FontWeight.SemiBold)
-                Box {
-                    OutlinedButton(onClick = { ratingMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Rating: ${state.rating.label}", Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose media rating")
-                    }
-                    DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
-                        RatingFilter.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label) },
-                                trailingIcon = {
-                                    if (state.rating == option) {
-                                        Icon(Icons.Default.Check, contentDescription = "Selected")
-                                    }
-                                },
-                                onClick = {
-                                    model.setRatingPreference(option)
-                                    ratingMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
+    BackHandler {
+        if (selectedPage.isNotEmpty()) selectedPage = "" else onClose()
+    }
 
-                Text("Provider", fontWeight = FontWeight.SemiBold)
-                Box {
-                    OutlinedButton(onClick = { providerMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(state.provider)
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose provider")
-                    }
-                    DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                        listOf("Auto", "yande.re", "Gelbooru", "Rule34.xxx", "Danbooru").forEach { provider ->
-                            DropdownMenuItem(text = { Text(provider) }, onClick = {
-                                providerMenu = false
-                                model.setProvider(provider)
-                            })
-                        }
-                    }
-                }
+    val pageTitle = when (selectedPage) {
+        "browsing" -> "Browsing"
+        "providers" -> "Providers"
+        "network" -> "Network"
+        "filters" -> "Filters"
+        "display" -> "Display"
+        "downloads" -> "Downloads"
+        "backup" -> "Backup & restore"
+        "updates" -> "Updates"
+        "about" -> "About"
+        else -> "Settings"
+    }
 
-                Text("Network", fontWeight = FontWeight.SemiBold)
-                SettingSwitch("Use DNS over HTTPS", state.useDoh, "Resolve provider and image hosts through the selected DNS resolver", model::setUseDoh)
-                Box {
-                    OutlinedButton(onClick = { dohMenu = true }, modifier = Modifier.fillMaxWidth(), enabled = state.useDoh) {
-                        Text("DNS provider: ${state.dohProvider}", Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose DNS provider")
-                    }
-                    DropdownMenu(expanded = dohMenu, onDismissRequest = { dohMenu = false }) {
-                        listOf("Cloudflare", "Cloudflare Security", "Cloudflare Family", "Google Public DNS", "AdGuard DNS", "Custom").forEach { name ->
-                            DropdownMenuItem(text = { Text(name) }, onClick = { model.setDohProvider(name); dohMenu = false })
-                        }
-                    }
-                }
-                if (state.dohProvider == "Custom") OutlinedTextField(
-                    value = state.customDohEndpoint,
-                    onValueChange = model::setCustomDohEndpoint,
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("DNS-over-HTTPS URL") },
-                    placeholder = { Text("https://resolver.example/dns-query") },
-                    enabled = state.useDoh,
-                )
-
-                Text("Provider accounts", fontWeight = FontWeight.SemiBold)
-                ProviderAccountRow("Gelbooru", model.hasGelbooruCredentials(), model::openGelbooruCredentials, { model.logoutProvider("Gelbooru") })
-                ProviderAccountRow("Rule34.xxx", model.hasRule34Credentials(), model::openRule34Credentials, { model.logoutProvider("Rule34.xxx") })
-
-                Text("Content filters", fontWeight = FontWeight.SemiBold)
-                SettingSwitch("Filter gore", state.filterGore, "Hide posts tagged with gore-related terms", model::setFilterGore)
-                SettingSwitch("Exclude male-only posts", state.excludeMale, "Hide posts tagged as male-only", model::setExcludeMale)
-                OutlinedTextField(
-                    value = state.customBlockTags,
-                    onValueChange = model::setCustomBlockTags,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Additional blocked tags") },
-                    placeholder = { Text("blood, guro, tag_name") },
-                    minLines = 2,
-                )
-
-                Text("Media type", fontWeight = FontWeight.SemiBold)
-                SettingSwitch("Ambient background", state.ambientMode, "Use a blurred version of the current media behind it", model::setAmbientMode)
-                Box {
-                    OutlinedButton(onClick = { mediaMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Show: ${state.mediaFilter.replaceFirstChar { it.uppercase() }}", Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose media type")
-                    }
-                    DropdownMenu(expanded = mediaMenu, onDismissRequest = { mediaMenu = false }) {
-                        listOf("image" to "Images only", "video" to "Videos only", "all" to "Images and videos").forEach { (value, label) ->
-                            DropdownMenuItem(text = { Text(label) }, onClick = { model.setMediaFilter(value); mediaMenu = false })
-                        }
-                    }
-                }
-                Box {
-                    OutlinedButton(onClick = { videoResolutionMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            "Video resolution: ${if (state.videoMaxHeight == 0) "Auto" else "Up to ${state.videoMaxHeight}p"}",
-                            Modifier.weight(1f),
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose video resolution")
-                    }
-                    DropdownMenu(
-                        expanded = videoResolutionMenu,
-                        onDismissRequest = { videoResolutionMenu = false },
-                    ) {
-                        listOf(
-                            0 to "Auto",
-                            2160 to "Up to 2160p",
-                            1080 to "Up to 1080p",
-                            720 to "Up to 720p",
-                            480 to "Up to 480p",
-                        ).forEach { (height, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    model.setVideoMaxHeight(height)
-                                    videoResolutionMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
-
-                Text("Save location", fontWeight = FontWeight.SemiBold)
-                Text("${state.saveFolderLabel ?: "Default: Pictures/Waifu Gallery"}", style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = onChooseFolder, modifier = Modifier.fillMaxWidth()) { Text("Choose save folder") }
-
-                Text("Custom search terms", fontWeight = FontWeight.SemiBold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = customTerm,
-                        onValueChange = { customTerm = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        placeholder = { Text("Add a character or tag") },
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { if (selectedPage.isNotEmpty()) selectedPage = "" else onClose() },
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = if (selectedPage.isNotEmpty()) "Back to settings" else "Back to gallery",
                     )
-                    IconButton(onClick = { model.addCustomTerm(customTerm); customTerm = "" }, enabled = customTerm.isNotBlank()) {
-                        Icon(Icons.Default.Add, "Add search term")
-                    }
                 }
-                state.customTerms.forEach { term ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(term, Modifier.weight(1f))
-                        IconButton(onClick = { model.removeCustomTerm(term) }) { Icon(Icons.Default.Delete, "Remove $term") }
-                    }
-                }
-                UserDataBackupSection(model)
+                Text(pageTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
-    )
+
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (selectedPage.isEmpty()) {
+                    SettingsCategoryRow("Browsing", "Default provider and search terms", Icons.Default.Search) {
+                        selectedPage = "browsing"
+                    }
+                    SettingsCategoryRow("Providers", "Provider account credentials", Icons.Default.Info) { selectedPage = "providers" }
+                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Refresh) { selectedPage = "network" }
+                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.Check) { selectedPage = "filters" }
+                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen) { selectedPage = "display" }
+                    SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download) { selectedPage = "downloads" }
+                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Check) { selectedPage = "backup" }
+                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.Refresh) { selectedPage = "updates" }
+                    SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info) { selectedPage = "about" }
+                } else {
+                    when (selectedPage) {
+                        "browsing" -> {
+                            Box {
+                                SettingsValueRow("Default provider", state.provider) { providerMenu = true }
+                                DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
+                                    listOf("Auto", "yande.re", "Gelbooru", "Rule34.xxx", "Danbooru").forEach { provider ->
+                                        DropdownMenuItem(
+                                            text = { Text(provider) },
+                                            onClick = { providerMenu = false; model.setProvider(provider) },
+                                        )
+                                    }
+                                }
+                            }
+                            SettingsValueRow(
+                                "Custom search terms",
+                                "${state.customTerms.size} saved",
+                            ) { showCustomTermsDialog = true }
+                            if (showCustomTermsDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showCustomTermsDialog = false },
+                                    title = { Text("Custom search terms") },
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                OutlinedTextField(
+                                                    value = customTerm,
+                                                    onValueChange = { customTerm = it },
+                                                    modifier = Modifier.weight(1f),
+                                                    singleLine = true,
+                                                    placeholder = { Text("Add a character or tag") },
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        model.addCustomTerm(customTerm)
+                                                        customTerm = ""
+                                                    },
+                                                    enabled = customTerm.isNotBlank(),
+                                                ) { Icon(Icons.Default.Add, "Add search term") }
+                                            }
+                                            Column(
+                                                Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                                            ) {
+                                                state.customTerms.forEach { term ->
+                                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(term, Modifier.weight(1f))
+                                                        IconButton(onClick = { model.removeCustomTerm(term) }) {
+                                                            Icon(Icons.Default.Delete, "Remove $term")
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = { showCustomTermsDialog = false }) { Text("Done") }
+                                    },
+                                )
+                            }
+                        }
+                        "providers" -> {
+                            Text("Provider accounts", fontWeight = FontWeight.SemiBold)
+                            ProviderAccountRow(
+                                "Gelbooru",
+                                model.hasGelbooruCredentials(),
+                                model::openGelbooruCredentials,
+                                { model.logoutProvider("Gelbooru") },
+                            )
+                            ProviderAccountRow(
+                                "Rule34.xxx",
+                                model.hasRule34Credentials(),
+                                model::openRule34Credentials,
+                                { model.logoutProvider("Rule34.xxx") },
+                            )
+                        }
+                        "network" -> {
+                            SettingSwitch(
+                                "Use DNS over HTTPS",
+                                state.useDoh,
+                                "Resolve provider and image hosts through the selected DNS resolver",
+                                model::setUseDoh,
+                            )
+                            Box {
+                                SettingsValueRow(
+                                    "DNS provider",
+                                    state.dohProvider,
+                                    enabled = state.useDoh,
+                                ) { dohMenu = true }
+                                DropdownMenu(expanded = dohMenu, onDismissRequest = { dohMenu = false }) {
+                                    listOf("Cloudflare", "Cloudflare Security", "Cloudflare Family", "Google Public DNS", "AdGuard DNS", "Custom").forEach { name ->
+                                        DropdownMenuItem(
+                                            text = { Text(name) },
+                                            onClick = { model.setDohProvider(name); dohMenu = false },
+                                        )
+                                    }
+                                }
+                            }
+                            if (state.dohProvider == "Custom") {
+                                OutlinedTextField(
+                                    value = state.customDohEndpoint,
+                                    onValueChange = model::setCustomDohEndpoint,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = { Text("DNS-over-HTTPS URL") },
+                                    placeholder = { Text("https://resolver.example/dns-query") },
+                                    enabled = state.useDoh,
+                                )
+                            }
+                        }
+                        "filters" -> {
+                            Box {
+                                SettingsValueRow(
+                                    "Media type",
+                                    when (state.mediaFilter) {
+                                        "image" -> "Images only"
+                                        "video" -> "Videos only"
+                                        else -> "Images and videos"
+                                    },
+                                ) { mediaMenu = true }
+                                DropdownMenu(expanded = mediaMenu, onDismissRequest = { mediaMenu = false }) {
+                                    listOf(
+                                        "image" to "Images only",
+                                        "video" to "Videos only",
+                                        "all" to "Images and videos",
+                                    ).forEach { (value, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = { model.setMediaFilter(value); mediaMenu = false },
+                                        )
+                                    }
+                                }
+                            }
+                            Box {
+                                SettingsValueRow("Default rating", state.rating.label) { ratingMenu = true }
+                                DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
+                                    RatingFilter.entries.forEach { option ->
+                                        DropdownMenuItem(
+                                            text = { Text(option.label) },
+                                            trailingIcon = {
+                                                if (state.rating == option) Icon(Icons.Default.Check, contentDescription = "Selected")
+                                            },
+                                            onClick = {
+                                                model.setRatingPreference(option)
+                                                ratingMenu = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            SettingSwitch(
+                                "Filter gore",
+                                state.filterGore,
+                                "Hide posts tagged with gore-related terms",
+                                model::setFilterGore,
+                            )
+                            SettingSwitch(
+                                "Exclude male-only posts",
+                                state.excludeMale,
+                                "Hide posts tagged as male-only",
+                                model::setExcludeMale,
+                            )
+                            val blockedTags = state.customBlockTags
+                                .replace(",", " ")
+                                .split(Regex("\\s+"))
+                                .filter(String::isNotBlank)
+                                .distinctBy(String::lowercase)
+                            SettingsValueRow(
+                                "Custom blocked tags",
+                                "${blockedTags.size} tags",
+                            ) { showBlockedTagsDialog = true }
+                            if (showBlockedTagsDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showBlockedTagsDialog = false },
+                                    title = { Text("Custom blocked tags") },
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                OutlinedTextField(
+                                                    value = newBlockedTags,
+                                                    onValueChange = { newBlockedTags = it },
+                                                    modifier = Modifier.weight(1f),
+                                                    singleLine = true,
+                                                    placeholder = { Text("Add blocked tags") },
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val existing = blockedTags.map(String::lowercase).toSet()
+                                                        val additions = newBlockedTags
+                                                            .replace(",", " ")
+                                                            .split(Regex("\\s+"))
+                                                            .map { it.trim().lowercase().replace(Regex("\\s+"), "_") }
+                                                            .filter { it.isNotBlank() && it !in existing }
+                                                        if (additions.isNotEmpty()) {
+                                                            model.setCustomBlockTags((blockedTags + additions).joinToString(", "))
+                                                        }
+                                                        newBlockedTags = ""
+                                                    },
+                                                    enabled = newBlockedTags.isNotBlank(),
+                                                ) {
+                                                    Icon(Icons.Default.Add, contentDescription = "Add blocked tags")
+                                                }
+                                            }
+                                            Column(
+                                                Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
+                                            ) {
+                                                if (blockedTags.isNotEmpty()) {
+                                                    FlowRow(
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                    ) {
+                                                        blockedTags.forEach { tag ->
+                                                            Surface(
+                                                                shape = RoundedCornerShape(50),
+                                                                color = Panel,
+                                                            ) {
+                                                                Row(
+                                                                    Modifier.padding(start = 12.dp),
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                ) {
+                                                                    Text(tag, style = MaterialTheme.typography.labelLarge)
+                                                                    IconButton(
+                                                                        onClick = {
+                                                                            model.setCustomBlockTags(
+                                                                                blockedTags.filterNot { it.equals(tag, ignoreCase = true) }
+                                                                                    .joinToString(", "),
+                                                                            )
+                                                                        },
+                                                                        modifier = Modifier.size(36.dp),
+                                                                    ) {
+                                                                        Icon(
+                                                                            Icons.Default.Close,
+                                                                            contentDescription = "Remove $tag",
+                                                                            modifier = Modifier.size(16.dp),
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    Text(
+                                                        "No custom blocked tags",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = { showBlockedTagsDialog = false }) { Text("Done") }
+                                    },
+                                )
+                            }
+                        }
+                        "display" -> {
+                            SettingSwitch(
+                                "Ambient background",
+                                state.ambientMode,
+                                "Use a blurred version of the current media behind it",
+                                model::setAmbientMode,
+                            )
+                            Box {
+                                SettingsValueRow(
+                                    "Video resolution",
+                                    if (state.videoMaxHeight == 0) "Auto" else "Up to ${state.videoMaxHeight}p",
+                                ) { videoResolutionMenu = true }
+                                DropdownMenu(
+                                    expanded = videoResolutionMenu,
+                                    onDismissRequest = { videoResolutionMenu = false },
+                                ) {
+                                    listOf(
+                                        0 to "Auto",
+                                        2160 to "Up to 2160p",
+                                        1080 to "Up to 1080p",
+                                        720 to "Up to 720p",
+                                        480 to "Up to 480p",
+                                    ).forEach { (height, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = { model.setVideoMaxHeight(height); videoResolutionMenu = false },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        "downloads" -> {
+                            SettingsValueRow(
+                                "Save location",
+                                state.saveFolderLabel ?: "Default: Pictures/Waifu Gallery",
+                            ) { onChooseFolder() }
+                        }
+                        "backup" -> UserDataBackupSection(model)
+                        "updates" -> {
+                            Text(
+                                state.releaseUpdateCheckMessage ?: "Check GitHub Releases for the latest version.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Button(
+                                onClick = model::checkForReleaseUpdate,
+                                enabled = !state.isCheckingReleaseUpdate,
+                            ) {
+                                if (state.isCheckingReleaseUpdate) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(if (state.isCheckingReleaseUpdate) "Checking..." else "Check for updates")
+                            }
+                            if (state.isDownloadingReleaseUpdate) {
+                                val progress = state.releaseDownloadProgress
+                                Text(
+                                    if (progress == null) "Downloading update..."
+                                    else "Downloading update... $progress%",
+                                )
+                                if (progress == null) {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = Accent,
+                                    )
+                                } else {
+                                    LinearProgressIndicator(
+                                        progress = { progress / 100f },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = Accent,
+                                    )
+                                }
+                            }
+                            state.releaseDownloadError?.let { error ->
+                                Text(error, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        "about" -> {
+                            val context = LocalContext.current
+                            val version = remember {
+                                runCatching {
+                                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                                }.getOrNull().orEmpty()
+                            }
+                            Column(
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Image(
+                                    painter = painterResource(R.drawable.waifu_mascot_iro),
+                                    contentDescription = "Waifu Gallery mascot",
+                                    modifier = Modifier.size(width = 112.dp, height = 168.dp),
+                                    contentScale = ContentScale.Fit,
+                                )
+                                Text("Waifu Gallery", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                                if (version.isNotBlank()) {
+                                    Text("Version $version", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Text(
+                                    "An independent Android media gallery for discovering, viewing, and " +
+                                        "downloading images and videos.\nCreated by calestinfisalia",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    "Source code: MIT License.\n" +
+                                        "Bundled icons and artwork retain their own licenses and creator rights.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCategoryRow(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        color = Panel,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun SettingsValueRow(
+    title: String,
+    summary: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = Panel,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.NavigateNext,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1810,7 +2193,6 @@ private fun UserDataBackupSection(model: MainViewModel) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Backup & Restore", fontWeight = FontWeight.SemiBold)
         Text(
             "Encrypted backups include favorites, provider credentials, and portable preferences. " +
                 "Download locations stay on this device. The passphrase cannot be recovered.",
@@ -2154,66 +2536,122 @@ private fun AboutDialog(post: ImagePost, onDismiss: () -> Unit, onTagClick: (Str
 }
 
 @Composable
-private fun DownloadQueueDialog(
+private fun DownloadQueueScreen(
     downloads: List<DownloadItem>,
+    onOpen: (String) -> Unit,
     onRetry: (String) -> Unit,
     onClearFinished: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val activeCount = downloads.count { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.DOWNLOADING }
     val hasFinished = downloads.any { it.status == DownloadStatus.SAVED || it.status == DownloadStatus.FAILED }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Downloads") },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+    BackHandler(onBack = onDismiss)
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$activeCount active - downloads run one at a time")
-                if (downloads.isEmpty()) Text("No downloads yet")
-                downloads.forEach { item ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text("waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}", fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Text("${item.post.provider} - ${item.post.artists.joinToString().ifBlank { "Artist info unavailable" }}", style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                when (item.status) {
-                                    DownloadStatus.QUEUED -> "Queued"
-                                    DownloadStatus.DOWNLOADING -> if (item.progress != null) "Downloading ${(item.progress * 100).toInt()}%" else "Downloading"
-                                    DownloadStatus.SAVED -> "Completed"
-                                    DownloadStatus.FAILED -> "Failed: ${item.error ?: "Unknown error"}"
-                                },
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            if (item.status == DownloadStatus.FAILED) TextButton(onClick = { onRetry(item.id) }) { Text("Retry") }
-                        }
-                        if (item.status == DownloadStatus.DOWNLOADING) {
-                            if (item.progress == null) {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Accent)
-                            } else {
-                                LinearProgressIndicator(progress = { item.progress }, modifier = Modifier.fillMaxWidth(), color = Accent)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to gallery")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Downloads run one at a time",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onClearFinished, enabled = hasFinished) {
+                    Text("Clear history")
+                }
+            }
+            if (downloads.isEmpty()) {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("No downloads yet")
+                }
+            } else {
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                        .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    downloads.forEach { item ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = item.status == DownloadStatus.SAVED) {
+                                onOpen(item.id)
+                            },
+                            colors = CardDefaults.cardColors(containerColor = Panel),
+                        ) {
+                            Column(
+                                Modifier.fillMaxWidth().padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Text(
+                                    "waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    "${item.post.provider} - ${item.post.artists.joinToString().ifBlank { "Artist info unavailable" }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        when (item.status) {
+                                            DownloadStatus.QUEUED -> "Queued"
+                                            DownloadStatus.DOWNLOADING ->
+                                                if (item.progress != null) "Downloading ${(item.progress * 100).toInt()}%" else "Downloading"
+                                            DownloadStatus.SAVED -> "Completed"
+                                            DownloadStatus.FAILED -> "Failed: ${item.error ?: "Unknown error"}"
+                                        },
+                                        Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    if (item.status == DownloadStatus.FAILED) {
+                                        TextButton(onClick = { onRetry(item.id) }) { Text("Retry") }
+                                    }
+                                }
+                                if (item.status == DownloadStatus.DOWNLOADING) {
+                                    if (item.progress == null) {
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Accent)
+                                    } else {
+                                        LinearProgressIndicator(
+                                            progress = { item.progress },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = Accent,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        dismissButton = {
-            TextButton(onClick = onClearFinished, enabled = hasFinished) { Text("Clear history") }
-        },
-    )
+        }
+    }
 }
 
 @Composable
 private fun SettingSwitch(title: String, checked: Boolean, description: String, onChecked: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable { onChecked(!checked) },
+        shape = RoundedCornerShape(18.dp),
+        color = Panel,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = checked, onCheckedChange = onChecked)
         }
-        Switch(checked = checked, onCheckedChange = onChecked)
     }
 }

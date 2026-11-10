@@ -42,6 +42,10 @@ class AppSettings:
         return _setting_bool(self.get("network/use_doh", False))
 
     @property
+    def ambient_mode(self) -> bool:
+        return _setting_bool(self.get("view/ambient_mode", True))
+
+    @property
     def doh_endpoint(self) -> str:
         provider = str(self.get("network/doh_provider", "Cloudflare"))
         if provider == "Custom":

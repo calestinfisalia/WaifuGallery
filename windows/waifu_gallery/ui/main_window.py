@@ -1,4 +1,4 @@
-﻿import ctypes
+import ctypes
 from ctypes import wintypes
 import re
 from pathlib import Path
@@ -15,7 +15,6 @@ from PySide6.QtCore import (
     QThreadPool,
     QSize,
     QTimer,
-    Slot,
 )
 from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -1123,17 +1122,12 @@ class MainWindow(QMainWindow):
             QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
             QDialog#settingsDialog { background: transparent; border: 0; }
             QWidget#settingsSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
-            QDialog#backupFileDialog { background: transparent; border: 0; }
-            QWidget#backupFileSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QDialog#backupPromptDialog { background: transparent; border: 0; }
             QWidget#backupPromptSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QLineEdit#backupPassphrase, QLineEdit#backupPassphraseConfirm { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
             QLabel#backupPromptError { color: #F7768E; }
             QPushButton#backupDestructiveButton { color: #F7768E; }
             QWidget#settingsPage QFrame#backupNotice, QWidget#settingsPage QFrame#backupActionCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
-            QTreeView#backupFileTree { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 10px; outline: 0; }
-            QTreeView#backupFileTree::item { padding: 5px 6px; border-radius: 5px; }
-            QTreeView#backupFileTree::item:selected { background: __ACTIVE__; color: __STRONG__; }
             QDialog#favoritesDialog { background: transparent; border: 0; }
             QWidget#favoritesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QWidget#favoritesTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
@@ -1149,8 +1143,8 @@ class MainWindow(QMainWindow):
             QLabel#downloadItemIcon { background: __PANEL__; border-radius: 8px; }
             QLabel#downloadFilename { color: __STRONG__; font-size: 10pt; font-weight: 600; }
             QLabel#downloadStatus { color: __MUTED__; font-size: 9pt; }
-            QProgressBar#downloadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
-            QProgressBar#downloadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
+            QProgressBar#downloadProgress, QProgressBar#releaseDownloadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
+            QProgressBar#downloadProgress::chunk, QProgressBar#releaseDownloadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
             QPushButton#downloadCancelButton { background: transparent; border: 0; border-radius: 8px; }
             QPushButton#downloadCancelButton:hover { background: __ACTIVE__; }
             QPushButton#downloadCancelButton:disabled { background: transparent; }
@@ -1175,6 +1169,9 @@ class MainWindow(QMainWindow):
             QWidget#settingsPage { background: __PANEL__; color: __TEXT__; border-radius: 18px; }
             QWidget#settingsPage QLabel { background: transparent; }
             QWidget#settingsPage QFrame { background: transparent; border-color: __BORDER__; }
+            QWidget#settingsPage QFrame#settingsSection { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLabel#settingsSectionTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#settingsHelpText { color: __MUTED__; }
             QWidget#customTermRow { background: transparent; border: 0; }
             QPushButton#removeCustomTermButton { background: transparent; border: 0; border-radius: 14px; padding: 0; }
             QPushButton#removeCustomTermButton:hover { background: #4A3042; }
@@ -1315,10 +1312,7 @@ class MainWindow(QMainWindow):
         label.lower()
 
     def _ambient_mode_enabled(self) -> bool:
-        value = self.settings.get("view/ambient_mode", True)
-        if isinstance(value, str):
-            return value.strip().casefold() in {"1", "true", "yes", "on"}
-        return bool(value)
+        return self.settings.ambient_mode
 
     def _apply_ambient_mode(self) -> None:
         enabled = self._ambient_mode_enabled()

@@ -16,8 +16,8 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Optional ambient background blur, which can be turned off in Settings.
 - The toolbar download button saves the currently displayed media; the download list, progress, and clearable history are in the app menu.
 - User-defined search terms used by Random.
-- Settings are saved automatically as you change them; close Settings whenever you're done.
-- Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available.
+- Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms and the download folder are under General; the default rating is under Filters.
+- Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available. You can also check manually in Settings → Updates.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
 - Optional process-local DNS over HTTPS, with Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard, and a custom RFC 8484 HTTPS endpoint.
 - Encrypted, cross-platform user data export/import for favorites, provider credentials, and portable preferences.
@@ -29,7 +29,7 @@ The application only filters results using metadata provided by each image servi
 Open Settings → Backup & Restore to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
 
 The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Set a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials, while Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
-Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
+Export and import use the native Windows file picker to open or save backup files, with app-styled passphrase and confirmation dialogs.
 
 ## UI behavior and troubleshooting
 
@@ -40,8 +40,60 @@ Export and import use app-styled passphrase/confirmation dialogs and the applica
 - The bottom media footer shows `16 images, 4 videos`-style counts on Search results; for a loaded image in Random or a Search/Favorites detail, it shows provider, rating, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
 - Download history entries retain a readable row height and show the full status in a tooltip when it does not fit.
 - Provider notices use a gray capsule background without the purple outline.
+- The update dialog uses the full `assets/Iro-chan-update-pose.png` artwork in a clear right-side column; the release notes and download status stay readable beside/below it. Download percentage is a separate label beside a thin progress bar.
 
 For a reproducible bug report, include Windows version, image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../linux/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
+
+### Update dialog UI work in progress
+
+The update-dialog layout and Iro-chan pose are being refined in `waifu_gallery/ui/updates.py`; the supplied artwork is `waifu_gallery/assets/Iro-chan-update-pose.png`. Current local changes place the update heading inside the card, reserve top clearance so Iro-chan's head and magical gift box pop out above the card, keep release notes and download progress on the left half, position action buttons centered at the bottom, and place the installed version label on the bottom right. The dialog's minimum size is 800×540 and its default size is 1024×730.
+
+These UI refinements are local work in progress, not part of the published 0.1.10 release. Preserve the existing download, SHA-256 verification, and install behavior when continuing this work.
+
+To preview the dialog without downloading or installing anything, run this from PowerShell in `windows/` while the virtual environment is available:
+
+```powershell
+@'
+import sys
+from PySide6.QtWidgets import QApplication, QStyleFactory
+from waifu_gallery.ui.main_window import MainWindow
+from waifu_gallery.ui.updates import ReleaseNotesDialog
+
+class PreviewMainWindow(MainWindow):
+    def show_random(self):
+        pass
+
+    def _check_for_startup_update(self):
+        pass
+
+app = QApplication(sys.argv)
+app.setApplicationName("Waifu Gallery - Update Preview")
+app.setOrganizationName("Fisalia Cantarella")
+app.setStyle(QStyleFactory.create("Fusion"))
+owner = PreviewMainWindow()
+owner.hide()
+dialog = ReleaseNotesDialog(
+    "v0.1.11 (preview)",
+    "https://github.com/calestinfisalia/WaifuGallery/releases",
+    "- Preview note one.\n- Preview note two.",
+    "",
+    "",
+)
+dialog.setStyleSheet(owner.styleSheet())
+dialog.begin_download()
+dialog.download_status.setText("Preview only - no update is being downloaded.")
+dialog.set_download_progress(57)
+dialog.download_button.setText("Preview only")
+dialog.download_button.setEnabled(False)
+dialog.finished.connect(app.quit)
+dialog.show()
+dialog.raise_()
+dialog.activateWindow()
+raise SystemExit(app.exec())
+'@ | .\.venv\Scripts\python.exe -
+```
+
+The preview displays a mock 57% progress value; its disabled button cannot start a real download or installer.
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
 

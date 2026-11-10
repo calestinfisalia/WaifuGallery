@@ -15,19 +15,19 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
-- Download queue with progress and retry states.
+- Download queue with progress and retry states; tap a completed item to open the saved media in an installed gallery or video app.
 - Local favorites with image/video badges and separate totals; search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
-- Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. About and update dialogs feature the Iro-chan mascot.
+- Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. You can also check manually in **Settings → Updates**. Update downloads show determinate or indeterminate progress and verify the APK checksum before installation. About and update dialogs feature the Iro-chan mascot.
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
-Gelbooru and Rule34.xxx require your own user ID and API key. Enter them under Provider accounts in Preferences; credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state. The Media setting controls whether random browsing and search include images, videos, or both.
+Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Backup & Restore, Updates, and About. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
 The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL.
 
 ## Encrypted user data backup
 
-In Preferences, scroll to **Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
+Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
 
 The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps provider credentials already present on the device; Replace uses the backup's favorites and credentials. Both import portable preferences. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
 

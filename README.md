@@ -14,7 +14,7 @@ The desktop and Android applications provide random browsing, tag search, provid
 
 ## Encrypted user data backups
 
-Windows, Linux, and Android provide **Settings → Backup & Restore** (on Android, in Preferences). Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
+Windows, Linux, and Android provide **Settings → Backup & Restore**. Android Settings opens full-screen with separate category pages. Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
 
 The shared version 1 format uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces favorites and provider credentials. Both options import the backup's portable preferences. The local download location is retained.
 

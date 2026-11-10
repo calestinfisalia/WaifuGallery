@@ -28,7 +28,6 @@ from .. import __version__
 from ..data_backup import create_payload, decrypt_payload, encrypt_payload
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
-from .backup_file_dialog import BackupFileDialog
 from .backup_prompts import BackupMessageDialog, BackupPassphraseDialog
 from .dialog_chrome import FramelessResizableDialog
 from .updates import UpdateCheckTask, version_parts
@@ -272,7 +271,6 @@ class PreferencesDialog(FramelessResizableDialog):
         self.nav_buttons = []
         self._build_general_tab()
         self._build_provider_tab()
-        self._build_storage_tab()
         self._build_filter_tab()
         self._build_network_tab()
         self._build_display_tab()
@@ -285,13 +283,27 @@ class PreferencesDialog(FramelessResizableDialog):
         self.sidebar_layout.addStretch(1)
         outer.addWidget(surface)
 
+    @staticmethod
+    def _settings_section(title: str) -> tuple[QFrame, QVBoxLayout]:
+        section = QFrame()
+        section.setObjectName("settingsSection")
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(14, 12, 14, 12)
+        section_layout.setSpacing(8)
+        heading = QLabel(title)
+        heading.setObjectName("settingsSectionTitle")
+        section_layout.addWidget(heading)
+        return section, section_layout
+
     def _build_general_tab(self) -> None:
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
-        layout.addWidget(QLabel("Saved search terms used by Random"))
+
+        search_section, search_layout = self._settings_section("Search terms")
+        search_layout.addWidget(QLabel("Saved terms are used by Random when no search is entered."))
         self.terms = QListWidget()
         self.terms.setObjectName("customTermsList")
         self.terms.setFrameShape(QFrame.Shape.NoFrame)
@@ -303,7 +315,7 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         for term in self._saved_terms():
             self._add_term_item(term)
-        layout.addWidget(self.terms, 1)
+        search_layout.addWidget(self.terms, 1)
         row = QHBoxLayout()
         row.setSpacing(8)
         self.new_term = QLineEdit()
@@ -314,72 +326,77 @@ class PreferencesDialog(FramelessResizableDialog):
         self.new_term.returnPressed.connect(self.add_term)
         row.addWidget(self.new_term, 1)
         row.addWidget(add)
-        layout.addLayout(row)
+        search_layout.addLayout(row)
+        layout.addWidget(search_section, 1)
+
+        download_section, download_layout = self._settings_section("Downloads")
+        download_layout.addWidget(QLabel("Choose where downloaded media is saved."))
+        download_layout.addWidget(QLabel("Save folder"))
+        self.save_folder = QLineEdit(str(self.settings.get("downloads/folder", "")))
+        self.save_folder.setReadOnly(True)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self.choose_save_folder)
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        folder_row.addWidget(self.save_folder, 1)
+        folder_row.addWidget(browse)
+        download_layout.addLayout(folder_row)
+        layout.addWidget(download_section)
         self._add_page(page, "General", "dices")
 
     def _build_provider_tab(self) -> None:
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
-        form = QFormLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
+
+        default_section, default_layout = self._settings_section("Default provider")
         self.provider = QComboBox()
         self.provider.addItems(["All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"])
         self.provider.setCurrentText(str(self.settings.get("search/provider", "All")))
         self._last_provider = self.provider.currentText()
+        default_layout.addWidget(QLabel("Search provider"))
+        default_layout.addWidget(self.provider)
+        layout.addWidget(default_section)
+
+        account_section, account_layout = self._settings_section("Provider accounts")
+        account_layout.addWidget(QLabel("Sign in to use providers that require an API account."))
+        self.provider_buttons = {}
+        for name in ("Gelbooru", "Rule34.xxx"):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 3, 0, 3)
+            row.addWidget(QLabel(name), 1)
+            button = QPushButton()
+            button.setMinimumWidth(96)
+            button.clicked.connect(lambda checked=False, provider=name: self.manage_provider(provider))
+            self.provider_buttons[name] = button
+            row.addWidget(button)
+            account_layout.addLayout(row)
+            self._update_provider_button(name)
+        layout.addWidget(account_section)
+        layout.addStretch(1)
+        self._add_page(page, "Providers", "images")
+
+    def _build_filter_tab(self) -> None:
+        page = QWidget()
+        page.setObjectName("settingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        rating_section, rating_layout = self._settings_section("Default rating")
         self.default_rating = QComboBox()
         self.default_rating.addItem("Only SFW", "sfw")
         self.default_rating.addItem("Only NSFW", "nsfw")
         self.default_rating.addItem("Show All", "all")
         rating = str(self.settings.get("search/rating", "sfw"))
         self.default_rating.setCurrentIndex(max(0, self.default_rating.findData(rating)))
-        form.addRow("Default provider", self.provider)
-        form.addRow("Default rating", self.default_rating)
-        layout.addLayout(form)
-        layout.addWidget(QLabel("Provider accounts"))
-        self.provider_buttons = {}
-        for name in ("Gelbooru", "Rule34.xxx"):
-            row = QHBoxLayout()
-            row.addWidget(QLabel(name), 1)
-            button = QPushButton()
-            button.clicked.connect(lambda checked=False, provider=name: self.manage_provider(provider))
-            self.provider_buttons[name] = button
-            row.addWidget(button)
-            layout.addLayout(row)
-            self._update_provider_button(name)
-        layout.addStretch(1)
-        self._add_page(page, "Providers", "images")
+        rating_layout.addWidget(QLabel("Search results"))
+        rating_layout.addWidget(self.default_rating)
+        layout.addWidget(rating_section)
 
-    def _build_storage_tab(self) -> None:
-        page = QWidget()
-        page.setObjectName("settingsPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
-        form = QFormLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
-        self.save_folder = QLineEdit(str(self.settings.get("downloads/folder", "")))
-        self.save_folder.setReadOnly(True)
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self.choose_save_folder)
-        folder_row = QHBoxLayout()
-        folder_row.addWidget(self.save_folder, 1)
-        folder_row.addWidget(browse)
-        form.addRow("Download folder", folder_row)
-        layout.addLayout(form)
-        layout.addStretch(1)
-        self._add_page(page, "Storage", "download")
-
-    def _build_filter_tab(self) -> None:
-        page = QWidget()
-        page.setObjectName("settingsPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        rules_section, rules_layout = self._settings_section("Content rules")
         self.exclude_male = QCheckBox("Exclude posts tagged as male-only")
         self.exclude_male.setChecked(bool(self.settings.get("search/exclude_male", True)))
         self.allow_nsfw = QCheckBox("Allow NSFW results")
@@ -387,9 +404,11 @@ class PreferencesDialog(FramelessResizableDialog):
         self.filter_gore = QCheckBox("Filter posts tagged as gore")
         self.filter_gore.setChecked(bool(self.settings.get("search/filter_gore", True)))
         for control in (self.exclude_male, self.allow_nsfw, self.filter_gore):
-            layout.addWidget(control)
+            rules_layout.addWidget(control)
+        layout.addWidget(rules_section)
 
-        layout.addWidget(QLabel("Custom blocked tags"))
+        tags_section, tags_layout = self._settings_section("Custom blocked tags")
+        tags_layout.addWidget(QLabel("Posts containing these provider tags are hidden."))
         self.filter_list = QListWidget()
         self.filter_list.setObjectName("customFilterList")
         self.filter_list.setFrameShape(QFrame.Shape.NoFrame)
@@ -404,7 +423,7 @@ class PreferencesDialog(FramelessResizableDialog):
             saved_tags = saved_tags.replace(",", " ").split()
         for tag in saved_tags:
             self._add_chip_item(self.filter_list, str(tag))
-        layout.addWidget(self.filter_list, 1)
+        tags_layout.addWidget(self.filter_list, 1)
         add_row = QHBoxLayout()
         add_row.setSpacing(8)
         self.new_filter = QLineEdit()
@@ -415,22 +434,21 @@ class PreferencesDialog(FramelessResizableDialog):
         self.new_filter.returnPressed.connect(self.add_filter)
         add_row.addWidget(self.new_filter, 1)
         add_row.addWidget(add_button)
-        layout.addLayout(add_row)
-        layout.addWidget(QLabel("Built-in tag filters only match posts tagged by their provider."))
+        tags_layout.addLayout(add_row)
+        layout.addWidget(tags_section, 1)
         self._add_page(page, "Filters", "settings-2")
 
     def _build_network_tab(self) -> None:
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
+        section, section_layout = self._settings_section("DNS over HTTPS")
         self.use_doh = QCheckBox("Use DNS over HTTPS")
         self.use_doh.setChecked(self.settings.use_doh)
-        layout.addWidget(self.use_doh)
-        form = QFormLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
+        section_layout.addWidget(self.use_doh)
+        section_layout.addWidget(QLabel("DNS provider"))
         self.doh_provider = QComboBox()
         for name in (*DOH_ENDPOINTS.keys(), "Custom"):
             self.doh_provider.addItem(name, name)
@@ -442,9 +460,9 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         self.doh_custom_endpoint.setPlaceholderText("https://resolver.example/dns-query")
         self.doh_custom_label = QLabel("Custom HTTPS endpoint")
-        form.addRow("DNS provider", self.doh_provider)
-        form.addRow(self.doh_custom_label, self.doh_custom_endpoint)
-        layout.addLayout(form)
+        section_layout.addWidget(self.doh_provider)
+        section_layout.addWidget(self.doh_custom_label)
+        section_layout.addWidget(self.doh_custom_endpoint)
         self.doh_provider.currentIndexChanged.connect(self._update_doh_controls)
         self._update_doh_controls()
         note = QLabel(
@@ -452,9 +470,11 @@ class PreferencesDialog(FramelessResizableDialog):
             "DNS-over-HTTPS (RFC 8484). The endpoint hostname itself is bootstrapped through system DNS."
         )
         note.setWordWrap(True)
-        layout.addWidget(note)
+        note.setObjectName("settingsHelpText")
+        section_layout.addWidget(note)
+        layout.addWidget(section)
         layout.addStretch(1)
-        self._add_page(page, "Network", "info")
+        self._add_page(page, "Network", "network")
 
     def _update_doh_controls(self, *_args) -> None:
         custom = self.doh_provider.currentData() == "Custom"
@@ -539,14 +559,13 @@ class PreferencesDialog(FramelessResizableDialog):
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
+        section, section_layout = self._settings_section("Display and playback")
         self.ambient_mode = QCheckBox("Ambient mode (blur the current image behind the viewer)")
-        self.ambient_mode.setChecked(bool(self.settings.get("view/ambient_mode", True)))
-        layout.addWidget(self.ambient_mode)
-        form = QFormLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
+        self.ambient_mode.setChecked(self.settings.ambient_mode)
+        section_layout.addWidget(self.ambient_mode)
+        section_layout.addWidget(QLabel("Video stream resolution"))
         self.video_resolution = QComboBox()
         self.video_resolution.addItem("Auto (provider source)", 0)
         self.video_resolution.addItem("Up to 2160p", 2160)
@@ -556,15 +575,16 @@ class PreferencesDialog(FramelessResizableDialog):
         resolution = int(self.settings.get("video/max_height", 0) or 0)
         resolution_index = self.video_resolution.findData(resolution)
         self.video_resolution.setCurrentIndex(max(0, resolution_index))
-        form.addRow("Video stream resolution", self.video_resolution)
-        layout.addLayout(form)
+        section_layout.addWidget(self.video_resolution)
         note = QLabel(
             "Resolution selects the closest provider video variant at or below this limit. "
             "If a provider supplies only one file, that source is used. Playback also depends "
             "on installed codecs."
         )
         note.setWordWrap(True)
-        layout.addWidget(note)
+        note.setObjectName("settingsHelpText")
+        section_layout.addWidget(note)
+        layout.addWidget(section)
         layout.addStretch(1)
         self._add_page(page, "Display", "expand")
 
@@ -626,7 +646,7 @@ class PreferencesDialog(FramelessResizableDialog):
             actions.addWidget(card, 1)
         layout.addLayout(actions)
         layout.addStretch(1)
-        self._add_page(page, "Backup & Restore", "download")
+        self._add_page(page, "Backup & Restore", "archive")
 
     def export_user_data(self) -> None:
         passphrase_dialog = BackupPassphraseDialog(
@@ -643,15 +663,19 @@ class PreferencesDialog(FramelessResizableDialog):
         except (TypeError, ValueError, OSError) as error:
             BackupMessageDialog.ask(self, "Could not create backup", str(error), ("OK",))
             return
-        file_dialog = BackupFileDialog(
-            save_mode=True,
-            suggested_name="waifu-gallery-backup.wgbak",
-            parent=self,
-        )
-        if file_dialog.exec() != QDialog.DialogCode.Accepted or file_dialog.selected_path is None:
+        save_path = QFileDialog.getSaveFileName(
+            self,
+            "Save encrypted backup",
+            str(Path.home() / "Documents" / "waifu-gallery-backup.wgbak"),
+            "Waifu Gallery backups (*.wgbak *.json)",
+        )[0]
+        if not save_path:
             return
+        backup_path = Path(save_path)
+        if backup_path.suffix.lower() not in {".wgbak", ".json"}:
+            backup_path = backup_path.with_suffix(".wgbak")
         try:
-            with open(file_dialog.selected_path, "w", encoding="utf-8") as backup_file:
+            with backup_path.open("w", encoding="utf-8") as backup_file:
                 backup_file.write(contents)
         except OSError as error:
             BackupMessageDialog.ask(self, "Could not save backup", str(error), ("OK",))
@@ -661,8 +685,13 @@ class PreferencesDialog(FramelessResizableDialog):
         )
 
     def import_user_data(self) -> None:
-        file_dialog = BackupFileDialog(save_mode=False, parent=self)
-        if file_dialog.exec() != QDialog.DialogCode.Accepted or file_dialog.selected_path is None:
+        selected_path = QFileDialog.getOpenFileName(
+            self,
+            "Import encrypted backup",
+            str(Path.home() / "Documents"),
+            "Waifu Gallery backups (*.wgbak *.json)",
+        )[0]
+        if not selected_path:
             return
         passphrase_dialog = BackupPassphraseDialog(
             title="Decrypt backup",
@@ -673,7 +702,7 @@ class PreferencesDialog(FramelessResizableDialog):
             return
         passphrase = passphrase_dialog.passphrase
         try:
-            with open(file_dialog.selected_path, "rb") as backup_file:
+            with open(selected_path, "rb") as backup_file:
                 raw_contents = backup_file.read(32 * 1024 * 1024 + 1)
             if len(raw_contents) > 32 * 1024 * 1024:
                 raise ValueError("The backup file is too large.")
@@ -794,26 +823,24 @@ class PreferencesDialog(FramelessResizableDialog):
         page = QWidget()
         page.setObjectName("settingsPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
-        title = QLabel("Application updates")
-        title.setStyleSheet("font-size: 16pt; font-weight: 650;")
-        layout.addWidget(title)
+        section, section_layout = self._settings_section("Application updates")
         description = QLabel(
             "Check the latest stable version published on GitHub Releases. "
             "The check runs in the background."
         )
         description.setWordWrap(True)
-        layout.addWidget(description)
+        section_layout.addWidget(description)
         current = QLabel(f"Installed version: {__version__}")
         current.setObjectName("currentAppVersion")
-        layout.addWidget(current)
+        section_layout.addWidget(current)
         self.update_status = QLabel("Check GitHub Releases for the latest version.")
         self.update_status.setWordWrap(True)
-        self.update_status.setMinimumHeight(54)
-        self.update_status.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.update_status)
+        self.update_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        section_layout.addWidget(self.update_status)
         actions = QHBoxLayout()
+        actions.setSpacing(8)
         self.check_update_button = QPushButton("Check for updates")
         self.check_update_button.clicked.connect(self.check_for_updates)
         actions.addWidget(self.check_update_button)
@@ -822,7 +849,8 @@ class PreferencesDialog(FramelessResizableDialog):
         self.open_release_button.clicked.connect(self._open_release_page)
         actions.addWidget(self.open_release_button)
         actions.addStretch(1)
-        layout.addLayout(actions)
+        section_layout.addLayout(actions)
+        layout.addWidget(section)
         update_note = QLabel(
             "Setup users: download and run the new setup to update the existing installation. "
             "Your settings and download folder are preserved. Portable users: replace the old "
@@ -830,7 +858,7 @@ class PreferencesDialog(FramelessResizableDialog):
             "not as individual .py files."
         )
         update_note.setWordWrap(True)
-        update_note.setStyleSheet("color: #a9b1d6;")
+        update_note.setObjectName("settingsHelpText")
         layout.addWidget(update_note)
         layout.addStretch(1)
         self._release_url = self.RELEASE_PAGE
@@ -847,7 +875,15 @@ class PreferencesDialog(FramelessResizableDialog):
         task.signals.finished.connect(self._update_check_finished)
         self._update_pool.start(task)
 
-    def _update_check_finished(self, tag: str, url: str, _notes: str, error: str) -> None:
+    def _update_check_finished(
+        self,
+        tag: str,
+        url: str,
+        _notes: str,
+        _download_url: str,
+        _sha256: str,
+        error: str,
+    ) -> None:
         self._update_check_task = None
         self.check_update_button.setEnabled(True)
         if error:
@@ -866,7 +902,7 @@ class PreferencesDialog(FramelessResizableDialog):
         QDesktopServices.openUrl(self._release_url)
 
     def _add_page(self, page: QWidget, title: str, icon_name: str) -> None:
-        button = QPushButton(title)
+        button = QPushButton(title.replace("&", "&&"))
         button.setObjectName("settingsNavButton")
         button.setCheckable(True)
         button.setMinimumHeight(38)

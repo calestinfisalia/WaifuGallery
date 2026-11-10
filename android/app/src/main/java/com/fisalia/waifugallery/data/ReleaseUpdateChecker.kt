@@ -24,6 +24,11 @@ data class ReleaseUpdate(
     val apkSha256: String,
 )
 
+data class ReleaseUpdateCheckResult(
+    val update: ReleaseUpdate?,
+    val error: String? = null,
+)
+
 object ReleaseUpdateChecker {
     private const val RELEASE_URL =
         "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
@@ -40,7 +45,11 @@ object ReleaseUpdateChecker {
         .build()
     private const val MAX_APK_SIZE = 512L * 1024 * 1024
 
-    suspend fun checkForUpdate(context: Context): ReleaseUpdate? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(context: Context): ReleaseUpdate? =
+        checkForUpdateResult(context).update
+
+    suspend fun checkForUpdateResult(context: Context): ReleaseUpdateCheckResult =
+        withContext(Dispatchers.IO) {
         try {
             @Suppress("DEPRECATION")
             val currentVersionName = context.packageManager
@@ -54,16 +63,26 @@ object ReleaseUpdateChecker {
                 .header("User-Agent", "WaifuGallery-Android/$currentVersionName")
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val release = response.body?.string()?.let(::JSONObject) ?: return@withContext null
+                if (!response.isSuccessful) {
+                    return@withContext ReleaseUpdateCheckResult(
+                        null,
+                        "GitHub returned HTTP ${response.code}.",
+                    )
+                }
+                val release = response.body?.string()?.let(::JSONObject)
+                    ?: return@withContext ReleaseUpdateCheckResult(null, "GitHub returned an empty response.")
                 if (release.optBoolean("draft", true) || release.optBoolean("prerelease", true)) {
-                    return@withContext null
+                    return@withContext ReleaseUpdateCheckResult(null)
                 }
 
                 val tag = release.optString("tag_name")
-                val currentVersion = parseVersion(currentVersionName) ?: return@withContext null
-                val releaseVersion = parseVersion(tag) ?: return@withContext null
-                if (compareVersions(releaseVersion, currentVersion) <= 0) return@withContext null
+                val currentVersion = parseVersion(currentVersionName)
+                    ?: return@withContext ReleaseUpdateCheckResult(null, "The installed app version is invalid.")
+                val releaseVersion = parseVersion(tag)
+                    ?: return@withContext ReleaseUpdateCheckResult(null, "The latest release version is invalid.")
+                if (compareVersions(releaseVersion, currentVersion) <= 0) {
+                    return@withContext ReleaseUpdateCheckResult(null)
+                }
 
                 val apkUrl = release.optJSONArray("assets")
                     ?.let { assets ->
@@ -72,25 +91,33 @@ object ReleaseUpdateChecker {
                             .mapNotNull { assets.optJSONObject(it) }
                             .firstOrNull { it.optString("name") == "app-release.apk" }
                     }
-                    ?: return@withContext null
+                    ?: return@withContext ReleaseUpdateCheckResult(
+                        null,
+                        "The latest release does not include an APK.",
+                    )
                 val url = apkUrl.optString("browser_download_url")
                 val digest = apkUrl.optString("digest")
                 val checksum = digest.removePrefix("sha256:")
                 if (!isTrustedReleaseUrl(url) || !checksum.matches(Regex("[a-fA-F0-9]{64}"))) {
-                    return@withContext null
+                    return@withContext ReleaseUpdateCheckResult(
+                        null,
+                        "The latest release APK is missing a trusted URL or SHA-256 checksum.",
+                    )
                 }
 
-                ReleaseUpdate(
-                    version = tag,
-                    notes = release.optString("body").trim(),
-                    apkUrl = url,
-                    apkSha256 = checksum,
+                ReleaseUpdateCheckResult(
+                    ReleaseUpdate(
+                        version = tag,
+                        notes = release.optString("body").trim(),
+                        apkUrl = url,
+                        apkSha256 = checksum,
+                    ),
                 )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            null
+        } catch (error: Exception) {
+            ReleaseUpdateCheckResult(null, error.message ?: "Could not contact GitHub Releases.")
         }
     }
 
@@ -137,7 +164,7 @@ object ReleaseUpdateChecker {
                 }
                 val body = response.body ?: throw IOException("The APK download was empty.")
                 val contentLength = body.contentLength()
-                if (contentLength < 0 || contentLength > MAX_APK_SIZE) {
+                if (contentLength > MAX_APK_SIZE) {
                     throw IOException("The APK is larger than the allowed download size.")
                 }
                 val digest = MessageDigest.getInstance("SHA-256")

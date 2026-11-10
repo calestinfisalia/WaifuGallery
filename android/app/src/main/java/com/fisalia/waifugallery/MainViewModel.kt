@@ -1,6 +1,7 @@
 package com.fisalia.waifugallery
 
 import android.app.Application
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
@@ -41,6 +42,7 @@ data class DownloadItem(
     val status: DownloadStatus,
     val error: String? = null,
     val progress: Float? = null,
+    val savedUri: String? = null,
 )
 
 data class UiState(
@@ -51,6 +53,7 @@ data class UiState(
     val queryInput: String = "",
     val galleryQuery: String = "",
     val gallery: List<ImagePost> = emptyList(),
+    val galleryProviderErrors: List<String> = emptyList(),
     val favorites: List<ImagePost> = emptyList(),
     val totalResults: Int? = null,
     val detailPosts: List<ImagePost> = emptyList(),
@@ -68,7 +71,7 @@ data class UiState(
     val hasMore: Boolean = false,
     val isLoading: Boolean = true,
     val searchVisible: Boolean = false,
-    val showPreferences: Boolean = false,
+    val showSettings: Boolean = false,
     val requestGelbooruCredentials: Boolean = false,
     val requestRule34Credentials: Boolean = false,
     val showDownloadQueue: Boolean = false,
@@ -89,6 +92,9 @@ data class UiState(
     val customTerms: List<String> = emptyList(),
     val saveFolderLabel: String? = null,
     val releaseUpdate: ReleaseUpdate? = null,
+    val isCheckingReleaseUpdate: Boolean = false,
+    val releaseUpdateCheckMessage: String? = null,
+    val isDownloadingReleaseUpdate: Boolean = false,
     val releaseDownloadProgress: Int? = null,
     val downloadedUpdateApk: String? = null,
     val releaseDownloadError: String? = null,
@@ -139,9 +145,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshRandom()
+        checkForReleaseUpdate()
+    }
+
+    fun checkForReleaseUpdate() {
+        if (_state.value.isCheckingReleaseUpdate) return
+        _state.update {
+            it.copy(
+                isCheckingReleaseUpdate = true,
+                releaseUpdateCheckMessage = "Checking GitHub Releases...",
+            )
+        }
         viewModelScope.launch {
-            ReleaseUpdateChecker.checkForUpdate(getApplication())?.let { update ->
-                _state.update { it.copy(releaseUpdate = update) }
+            try {
+                val result = ReleaseUpdateChecker.checkForUpdateResult(getApplication())
+                _state.update {
+                    it.copy(
+                        releaseUpdate = result.update,
+                        releaseUpdateCheckMessage = result.error
+                            ?: result.update?.let { update -> "Version ${update.version} is available." }
+                            ?: "You're up to date.",
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } finally {
+                _state.update { it.copy(isCheckingReleaseUpdate = false) }
             }
         }
     }
@@ -150,6 +179,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         it.copy(
             releaseUpdate = null,
             releaseDownloadProgress = null,
+            isDownloadingReleaseUpdate = false,
             downloadedUpdateApk = null,
             releaseDownloadError = null,
         )
@@ -159,7 +189,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (releaseDownloadJob?.isActive == true) return
         _state.update {
             it.copy(
-                releaseDownloadProgress = 0,
+                isDownloadingReleaseUpdate = true,
+                releaseDownloadProgress = null,
                 downloadedUpdateApk = null,
                 releaseDownloadError = null,
             )
@@ -173,6 +204,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _state.update {
                     it.copy(
+                        isDownloadingReleaseUpdate = false,
                         releaseDownloadProgress = null,
                         downloadedUpdateApk = apk.absolutePath,
                         releaseDownloadError = null,
@@ -183,6 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Exception) {
                 _state.update {
                     it.copy(
+                        isDownloadingReleaseUpdate = false,
                         releaseDownloadProgress = null,
                         releaseDownloadError = error.message ?: "APK download failed.",
                     )
@@ -201,8 +234,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(searchVisible = !it.searchVisible, queryInput = if (it.searchVisible) "" else it.queryInput) }
         if (!_state.value.searchVisible && _state.value.screen == AppScreen.GALLERY) refreshRandom()
     }
-    fun openPreferences() = _state.update { it.copy(showPreferences = true) }
-    fun closePreferences() = _state.update { it.copy(showPreferences = false) }
+    fun openSettings() = _state.update { it.copy(showSettings = true) }
+    fun closeSettings() = _state.update { it.copy(showSettings = false) }
     fun openGelbooruCredentials() = _state.update { it.copy(requestGelbooruCredentials = true) }
     fun openRule34Credentials() = _state.update { it.copy(requestRule34Credentials = true) }
     fun cancelGelbooruCredentials() {
@@ -214,7 +247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(requestRule34Credentials = false) }
     }
     fun openFavorites() = _state.update { it.copy(screen = AppScreen.FAVORITES, searchVisible = false) }
-    fun openDownloadQueue() = _state.update { it.copy(showPreferences = false, showDownloadQueue = true) }
+    fun openDownloadQueue() = _state.update { it.copy(showSettings = false, showDownloadQueue = true) }
     fun closeDownloadQueue() = _state.update { it.copy(showDownloadQueue = false) }
     fun dismissError() = _state.update { it.copy(error = null) }
     fun dismissNotice() = _state.update { it.copy(notice = null) }
@@ -269,7 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setGalleryFilters(provider: String, rating: RatingFilter) {
         if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
-            _state.update { it.copy(notice = "Enable NSFW results in Preferences to use this rating.") }
+            _state.update { it.copy(notice = "Enable NSFW results in Settings to use this rating.") }
             return
         }
         if (provider == "Gelbooru" && !hasGelbooruCredentials()) {
@@ -290,7 +323,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setRating(rating: RatingFilter) {
         if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
-            _state.update { it.copy(notice = "Enable NSFW results in Preferences to use this rating.") }
+            _state.update { it.copy(notice = "Enable NSFW results in Settings to use this rating.") }
             return
         }
         if (rating == _state.value.rating) return
@@ -310,16 +343,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadGallery() {
         val snapshot = _state.value
         if (snapshot.galleryQuery.isBlank()) return
-        _state.update { it.copy(screen = AppScreen.GALLERY, gallery = emptyList(), totalResults = null, isLoading = true, error = null) }
+        _state.update {
+            it.copy(
+                screen = AppScreen.GALLERY,
+                gallery = emptyList(),
+                galleryProviderErrors = emptyList(),
+                totalResults = null,
+                isLoading = true,
+                error = null,
+            )
+        }
         viewModelScope.launch {
             try {
                 val result: SearchPage = api.search(snapshot.galleryQuery, snapshot.rating, snapshot.galleryProvider, snapshot.page)
-                _state.update { it.copy(gallery = result.posts, hasMore = result.hasMore, totalPages = result.totalPages, totalResults = result.totalResults, isLoading = false) }
-                if (result.posts.isEmpty() && result.providerErrors.isNotEmpty()) {
-                    _state.update { it.copy(error = "Search providers failed:\n${result.providerErrors.joinToString("\n")}") }
+                _state.update {
+                    it.copy(
+                        gallery = result.posts,
+                        galleryProviderErrors = result.providerErrors,
+                        hasMore = result.hasMore,
+                        totalPages = result.totalPages,
+                        totalResults = result.totalResults,
+                        isLoading = false,
+                    )
                 }
             } catch (error: Exception) {
-                _state.update { it.copy(isLoading = false, error = "Failed to search images:\n${error.message ?: "Unknown error"}") }
+                _state.update {
+                    it.copy(
+                        galleryProviderErrors = emptyList(),
+                        isLoading = false,
+                        error = "Failed to search images:\n${error.message ?: "Unknown error"}",
+                    )
+                }
             }
         }
     }
@@ -696,6 +750,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         processDownloadQueue()
     }
 
+    fun openSavedDownload(id: String) {
+        val item = _state.value.downloads.firstOrNull { it.id == id } ?: return
+        val savedUri = item.savedUri
+        if (item.status != DownloadStatus.SAVED || savedUri.isNullOrBlank()) {
+            _state.update { it.copy(notice = "This downloaded file is no longer available.") }
+            return
+        }
+
+        val mime = if (item.post.mediaType == "video") {
+            "video/${item.post.extension.lowercase().ifBlank { "mp4" }}"
+        } else {
+            when (item.post.extension.lowercase()) {
+                "png" -> "image/png"
+                "webp" -> "image/webp"
+                "gif" -> "image/gif"
+                else -> "image/jpeg"
+            }
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(savedUri), mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            getApplication<Application>().startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            _state.update { it.copy(notice = "No gallery app is available to open this file.") }
+        } catch (_: SecurityException) {
+            _state.update { it.copy(notice = "Permission to open this downloaded file was denied.") }
+        }
+    }
+
     fun clearFinishedDownloads() {
         _state.update { state ->
             state.copy(downloads = state.downloads.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.DOWNLOADING })
@@ -712,12 +797,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val downloaded = withContext(Dispatchers.IO) { downloadToCache(next.post) { progress ->
                         _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(progress = progress) else it }) }
                     } }
-                    try {
-                        withContext(Dispatchers.IO) { writeImage(next.post, downloaded) }
+                    val savedUri = try {
+                        withContext(Dispatchers.IO) { writeImage(next.post, downloaded).toString() }
                     } finally {
                         downloaded.delete()
                     }
-                    _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.SAVED, progress = 1f) else it }, notice = "Media saved") }
+                    _state.update { state ->
+                        state.copy(
+                            downloads = state.downloads.map {
+                                if (it.id == next.id) it.copy(
+                                    status = DownloadStatus.SAVED,
+                                    progress = 1f,
+                                    savedUri = savedUri,
+                                ) else it
+                            },
+                            notice = "Media saved",
+                        )
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -785,7 +881,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun writeImage(post: ImagePost, source: File) {
+    private fun writeImage(post: ImagePost, source: File): Uri {
         val app = getApplication<Application>()
         val name = "waifu_${post.id.substringAfterLast(':').replace(Regex("[^A-Za-z0-9_-]"), "_")}.${post.extension.ifBlank { "jpg" }}"
         val mime = if (post.mediaType == "video") "video/${post.extension.lowercase().ifBlank { "mp4" }}" else when (post.extension.lowercase()) {
@@ -807,7 +903,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     document.delete()
                     throw error
                 }
-                return
+                return document.uri
             }
         }
         val resolver = app.contentResolver
@@ -826,5 +922,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } finally {
             source.delete()
         }
+        return uri
     }
 }
