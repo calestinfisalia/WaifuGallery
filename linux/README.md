@@ -42,6 +42,11 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 
 ## Linux 0.1.11
 
+### Fixes
+
+- **Video player:** improved playback controls and buffering feedback.
+- **Settings UI:** fixed desktop Settings layout and ambient-mode toggle behavior.
+
 ### New features
 
 - **Downloads:** history retains each saved file's path across restarts and can be cleared from the Downloads window.

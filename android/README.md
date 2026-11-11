@@ -34,9 +34,14 @@ The version 2 format is interoperable with Windows and Linux, records included s
 
 ## Android 0.1.11
 
+### Fixes
+
+- **Video player:** improved fullscreen playback controls and player behavior.
+- **Settings UI:** fixed Android Settings layout and interaction issues.
+
 ### New features
 
-- **Safety & Privacy:** added a guardian PIN, parental maximum-rating and allowed-tag filters, and a separate PIN lock for Favorites.
+- **Safety & Privacy:** added parental maximum-rating and allowed-tag controls, a guardian PIN, and a separate PIN lock for Favorites.
 - **Downloads:** history retains saved file destinations across app restarts.
 - **Encrypted backups:** version 2 files record included sections, allow selective import/export, and remain compatible with version 1 backups.
 - Release artifact: `app-release.apk` (`versionCode` 9).

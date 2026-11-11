@@ -7,16 +7,16 @@ Waifu Gallery is an independent media browsing application with separate Windows
 ## Projects
 
 - [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.11).
-- [Linux](linux/README.md) — Linux port sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
+- [Linux](linux/README.md) — Python and PySide6 desktop port (version 0.1.11), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
 - [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.11).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
 
 ## Version 0.1.11
 
-- **Windows:** added Safety & Privacy controls, a separate Favorites PIN, expanded theme selection, and section-based encrypted backups. Downloads history now retains saved file paths.
-- **Windows and Android:** parental content filtering and PIN-protected Favorites; encrypted backup format v2 supports selected sections and remains compatible with version 1 backups.
-- **Windows player:** compact controls, theme-aware purple seek/volume sliders, and a brighter solid buffer indicator. Ambient blur and provider notices also received rendering fixes.
+- **Fixes:** improved the desktop video player, fixed desktop and Android Settings UI issues, and corrected the ambient-mode toggle.
+- **New features:** added Safety & Privacy on Windows and Android, including parental content controls and a Favorites lock; added more Windows themes; and enabled selecting backup sections.
+- **Downloads:** history retains saved file paths across restarts.
 - See the platform READMEs for release-specific details and Linux verification status.
 
 ## Encrypted user data backups

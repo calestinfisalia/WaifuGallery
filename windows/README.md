@@ -109,18 +109,19 @@ On Windows, the app records its own top-level window and small centered Qt widge
 
 ## Windows 0.1.11
 
+### Fixes
+
+- **Video player:** improved fullscreen controls, themed seek/volume colors, and made buffered media easier to see.
+- **Settings UI:** fixed desktop layout and interaction issues.
+- **Ambient mode:** fixed the toggle and removed bright edges from the blurred background.
+- **Provider notices:** fixed rounded capsule corners during fade effects.
+
 ### New features
 
-- **Safety & Privacy:** optional guardian PIN, maximum-rating and allowed-tag controls, plus a separate PIN lock for Favorites. PINs are salted and hashed locally; failed attempts trigger a cooldown.
-- **Settings and themes:** expanded settings organization and previews for Dark, Light, System, and OLED Dark.
-- **Encrypted backups:** version 2 `.wgbak` files support selecting sections for export/import and retain compatibility with version 1 backups.
+- **Security & Privacy:** optional guardian PIN, parental maximum-rating and allowed-tag controls, plus a separate PIN lock for Favorites. PINs are salted and hashed locally; failed attempts trigger a cooldown.
+- **Themes:** added OLED Dark alongside Dark, Light, and System, with color previews.
+- **Encrypted backups:** version 2 `.wgbak` files let users select sections for export/import and retain compatibility with version 1 backups.
 - **Downloads:** history retains each saved file's path across restarts.
-
-### Fixes and refinements
-
-- **Video controls:** reduced the fullscreen control-bar width and matched seek/volume colors to the active theme; the buffered segment is brighter and solid.
-- **Ambient blur:** prevent transparent image pixels from exposing light surfaces through the blurred background.
-- **Provider notices:** enforce rounded clipping so capsule corners remain visible during fade effects.
 - Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.8
