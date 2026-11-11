@@ -1,16 +1,7 @@
 from PySide6.QtCore import Qt, QSize, Signal, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (
-    QDialog,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QVBoxLayout,
-)
+from PySide6.QtWidgets import QLabel, QSizePolicy
 
-from ..models import ImagePost
 from .indicators import CircularProgressIndicator
 
 
@@ -191,66 +182,3 @@ class ZoomImage(QLabel):
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
-
-
-class ImageViewer(QDialog):
-    downloadRequested = Signal(object)
-
-    def __init__(self, post: ImagePost, parent=None) -> None:
-        super().__init__(parent)
-        self.post = post
-        self.setWindowTitle(f"{post.provider} · {post.rating.upper()}")
-        self.resize(950, 720)
-        layout = QVBoxLayout(self)
-        self.image = ZoomImage()
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(False)
-        self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setWidget(self.image)
-        self.image.viewport = self.scroll.viewport()
-        self.image.scroll_area = self.scroll
-        layout.addWidget(self.scroll, 1)
-        metadata = QLabel(self._metadata_text())
-        metadata.setWordWrap(True)
-        layout.addWidget(metadata)
-        self.image.set_loading()
-        self.status = QLabel("")
-        layout.addWidget(self.status)
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        close = QPushButton("Close")
-        save = QPushButton("Download")
-        save.clicked.connect(lambda: self.downloadRequested.emit(self.post))
-        close.clicked.connect(self.close)
-        buttons.addWidget(close)
-        buttons.addWidget(save)
-        layout.addLayout(buttons)
-        self.save_button = save
-        self.save_button.setEnabled(False)
-
-    def set_image_bytes(self, content: bytes) -> None:
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(content):
-            self.show_error("The provider returned an unsupported image format.")
-            return
-        self.image.set_image(pixmap)
-        self.status.setText("Image ready · Original available to download")
-        self.save_button.setEnabled(True)
-
-    def show_error(self, message: str) -> None:
-        self.image.set_placeholder(f"Could not load image: {message}")
-        self.status.setText(f"Could not load image: {message}")
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        QTimer.singleShot(0, self.image._fit_to_viewport)
-
-    def _metadata_text(self) -> str:
-        details = [self.post.provider, self.post.rating.upper()]
-        if self.post.artists:
-            details.append("Artists: " + ", ".join(self.post.artists))
-        if self.post.source:
-            details.append("Source: " + self.post.source)
-        return " · ".join(details)

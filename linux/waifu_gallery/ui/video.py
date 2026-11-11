@@ -53,7 +53,6 @@ class VideoPlayerWidget(QWidget):
         self._slider_dragging = False
         self._slider_target = 0
         self._stream_proxy = None
-        self._fullscreen_controls_visible = True
         self._controls_visible = True
         self._buffering_backdrop_active = False
         self._buffering_active = False
@@ -367,13 +366,11 @@ class VideoPlayerWidget(QWidget):
         if self._fullscreen_mode == enabled:
             return
         self._fullscreen_mode = enabled
-        self._fullscreen_controls_visible = True
         self._controls_visible = True
         self.controls_frame.setVisible(self._has_started)
         self._schedule_reflow()
 
     def set_fullscreen_controls_visible(self, visible: bool) -> None:
-        self._fullscreen_controls_visible = visible
         self.set_controls_visible(visible)
 
     def set_controls_visible(self, visible: bool) -> None:

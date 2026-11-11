@@ -19,7 +19,6 @@ from PySide6.QtCore import (
     QThreadPool,
     QSize,
     QTimer,
-    Slot,
 )
 from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -1765,7 +1764,6 @@ class MainWindow(QMainWindow):
             self.settings.set("search/custom_term_index", index + 1)
         self.random_post = None
         self.random_content = None
-        self.random_pixmap = None
         self._full_image_loaded = False
         self.footer_meta.clear()
         self.full_image_button.hide()
@@ -1797,7 +1795,6 @@ class MainWindow(QMainWindow):
             self._finish_loading()
             self.random_image.set_placeholder("The provider returned an unsupported image format.")
             return
-        self.random_pixmap = pixmap
         self._full_image_loaded = False
         if not self._fullscreen_active:
             self.statusBar().show()

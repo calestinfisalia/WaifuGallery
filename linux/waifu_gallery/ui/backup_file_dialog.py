@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QDir, Qt
+from PySide6.QtCore import QDir
 from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,

@@ -3,10 +3,8 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import random
-import hashlib
 import secrets
 import threading
-import tempfile
 import time
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
@@ -456,49 +454,6 @@ class BooruCatalog:
         report_progress(100)
         return destination
 
-    def cache_video(self, post: ImagePost, report_progress=None) -> str:
-        """Download a video to a local cache so playback uses the app's DoH route."""
-        if post.media_type != "video":
-            raise ProviderError("The selected post is not a video.")
-        suffix = Path(urlparse(post.image_url).path).suffix or ".mp4"
-        cache_dir = Path(tempfile.gettempdir()) / "WaifuGallery" / "video-cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        name = hashlib.sha256(post.image_url.encode("utf-8")).hexdigest() + suffix
-        destination = cache_dir / name
-        if destination.is_file() and destination.stat().st_size:
-            if report_progress:
-                report_progress(100)
-            return str(destination)
-
-        temporary = destination.with_suffix(destination.suffix + ".part")
-        try:
-            with self._session().get(
-                post.image_url, headers=self._image_headers(post.image_url),
-                timeout=(8, 90), stream=True,
-            ) as response:
-                if not response.ok:
-                    raise ProviderError(f"Video server returned HTTP {response.status_code}.")
-                content_type = response.headers.get("Content-Type", "").casefold()
-                if content_type and not (content_type.startswith("video/") or "octet-stream" in content_type):
-                    raise ProviderError("The provider returned a response that is not a video.")
-                total = int(response.headers.get("Content-Length", "0") or 0)
-                received = 0
-                with temporary.open("wb") as output:
-                    for block in response.iter_content(chunk_size=256 * 1024):
-                        if not block:
-                            continue
-                        output.write(block)
-                        received += len(block)
-                        if report_progress:
-                            report_progress(min(99, int(received * 100 / total)) if total else -1)
-            temporary.replace(destination)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
-        if report_progress:
-            report_progress(100)
-        return str(destination)
-
     def create_video_stream(
         self, post: ImagePost, max_height: int | None = None
     ) -> VideoStreamProxy:
@@ -582,13 +537,13 @@ class BooruCatalog:
                 except ProviderError as error:
                     failures.append(str(error))
                     break
-                except requests.Timeout as error:
+                except requests.Timeout:
                     failures.append("The provider request timed out. Check the connection or retry shortly.")
                     break
-                except requests.exceptions.SSLError as error:
+                except requests.exceptions.SSLError:
                     failures.append("TLS certificate verification failed while connecting to the provider.")
                     break
-                except requests.ConnectionError as error:
+                except requests.ConnectionError:
                     if self.use_doh:
                         failures.append("Could not connect using the selected DoH resolver. Check its endpoint or turn DoH off in Settings.")
                     else:
@@ -767,12 +722,6 @@ class BooruCatalog:
         if len(first) < 3:
             return None
         return [f"{first}*"]
-
-    @staticmethod
-    def _query_tags(query: str) -> list[str]:
-        # Booru APIs treat whitespace as an AND between tags. Commas are accepted
-        # too so the UI can present either separator without changing semantics.
-        return [tag.strip() for chunk in query.split(",") for tag in chunk.split() if tag.strip()]
 
     @staticmethod
     def _post_list(payload) -> list[dict]:
