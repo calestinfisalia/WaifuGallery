@@ -14,21 +14,31 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
 - Optional ambient background blur, which can be turned off in Settings.
-- The toolbar download button saves the currently displayed media; the download list, progress, and clearable history are in the app menu.
+- The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts and can be cleared from the app menu.
 - User-defined search terms used by Random.
 - Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms and the download folder are under General; the default rating is under Filters.
+- Display settings include Dark, Light, System, and OLED Dark themes with color previews.
 - Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available. You can also check manually in Settings → Updates.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
+- PIN entry, notices, and confirmations use the app's own dialogs; file pickers continue to use the Windows file manager.
 - Optional process-local DNS over HTTPS, with Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard, and a custom RFC 8484 HTTPS endpoint.
 - Encrypted, cross-platform user data export/import for favorites, provider credentials, and portable preferences.
+- Safety & Privacy settings with an optional guardian PIN, maximum rating, and optional allowed-tag policy. A separate optional Favorites PIN protects opening the Favorites view.
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
+Parental controls and the Favorites lock are currently implemented only in the Windows app. They are in-app restrictions, not tamper-proof OS controls; someone with access to the same Windows account can alter local application data. Tag and rating rules depend on provider metadata and are not a guarantee that every post is correctly labeled, and these controls cannot protect media already downloaded outside the app.
+
+## Safety & Privacy
+
+Open Settings → Safety & Privacy to set up or manage parental control and the separate Favorites lock. Use Set PIN or Change PIN to manage each PIN; PIN entry and verification use an in-app dialog. Enabling, disabling, changing, or removing a configured PIN requires that feature's PIN. PINs are stored as salted PBKDF2-HMAC-SHA256 hashes, not as plain text, and failed attempts trigger an increasing local cooldown. Allowed tags use OR matching: a post must contain at least one configured tag.
+
+PINs and parental policy are device-local and are intentionally excluded from encrypted backups. Importing a backup does not replace or disable a parental policy already configured on this Windows installation. Removing a PIN disables its protection without deleting favorites; parental rating and tag settings are retained.
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are not included.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
 
-The format is shared with Linux and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Set a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials, while Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
+The version 2 format is shared with Linux and Android, records the included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Version 1 backups remain importable. Set a passphrase of at least 8 characters; it cannot be recovered. Unselected sections remain unchanged when importing. Unsupported desktop themes are identified in the import summary and left unchanged. Merge adds missing included favorites and keeps existing included provider credentials, while Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
 Export and import use the native Windows file picker to open or save backup files, with app-styled passphrase and confirmation dialogs.
 
 ## UI behavior and troubleshooting
@@ -36,7 +46,7 @@ Export and import use the native Windows file picker to open or save backup file
 - Search result cards display the media only, with no post title. Changing pages clears the previous cards while the new page loads.
 - Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
 - Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
-- Video buffering shows a centered spinner without a surrounding card. Player controls and progress use gray accents without the purple outline.
+- Video buffering shows a centered spinner without a surrounding card. Compact player controls use the active theme's purple accent; buffered media uses a brighter solid segment.
 - The bottom media footer shows `16 images, 4 videos`-style counts on Search results; for a loaded image in Random or a Search/Favorites detail, it shows provider, rating, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
 - Download history entries retain a readable row height and show the full status in a tooltip when it does not fit.
 - Provider notices use a gray capsule background without the purple outline.
@@ -48,7 +58,7 @@ For a reproducible bug report, include Windows version, image or video, steps, a
 
 The update-dialog layout and Iro-chan pose are being refined in `waifu_gallery/ui/updates.py`; the supplied artwork is `waifu_gallery/assets/Iro-chan-update-pose.png`. Current local changes place the update heading inside the card, reserve top clearance so Iro-chan's head and magical gift box pop out above the card, keep release notes and download progress on the left half, position action buttons centered at the bottom, and place the installed version label on the bottom right. The dialog's minimum size is 800×540 and its default size is 1024×730.
 
-These UI refinements are local work in progress, not part of the published 0.1.10 release. Preserve the existing download, SHA-256 verification, and install behavior when continuing this work.
+These UI refinements are included in the 0.1.11 app source. Preserve the existing download, SHA-256 verification, and install behavior when continuing this work.
 
 To preview the dialog without downloading or installing anything, run this from PowerShell in `windows/` while the virtual environment is available:
 
@@ -96,6 +106,22 @@ raise SystemExit(app.exec())
 The preview displays a mock 57% progress value; its disabled button cannot start a real download or installer.
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
+
+## Windows 0.1.11
+
+### New features
+
+- **Safety & Privacy:** optional guardian PIN, maximum-rating and allowed-tag controls, plus a separate PIN lock for Favorites. PINs are salted and hashed locally; failed attempts trigger a cooldown.
+- **Settings and themes:** expanded settings organization and previews for Dark, Light, System, and OLED Dark.
+- **Encrypted backups:** version 2 `.wgbak` files support selecting sections for export/import and retain compatibility with version 1 backups.
+- **Downloads:** history retains each saved file's path across restarts.
+
+### Fixes and refinements
+
+- **Video controls:** reduced the fullscreen control-bar width and matched seek/volume colors to the active theme; the buffered segment is brighter and solid.
+- **Ambient blur:** prevent transparent image pixels from exposing light surfaces through the blurred background.
+- **Provider notices:** enforce rounded clipping so capsule corners remain visible during fade effects.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
 
 ## Windows 0.1.8
 

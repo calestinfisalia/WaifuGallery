@@ -1,3 +1,5 @@
+import json
+
 from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
@@ -44,14 +46,28 @@ class DownloadsDialog(FramelessResizableDialog):
         layout.addLayout(row)
         outer.addWidget(surface)
         self.records: dict[str, tuple[QLabel, QLabel, QProgressBar, QPushButton]] = {}
+        self.history: dict[str, dict[str, str]] = {}
+        self.settings = getattr(parent, "settings", None)
         icon_factory = getattr(parent, "_icon", None)
         self.download_icon = icon_factory("download") if callable(icon_factory) else QIcon()
+        self._restore_history()
 
     def clear_history(self) -> None:
         self.items.clear()
         self.records.clear()
+        self.history.clear()
+        self._save_history()
 
-    def add_download(self, key: str, filename: str) -> None:
+    def add_download(
+        self,
+        key: str,
+        filename: str,
+        path: str = "",
+        status: str = "Queued",
+        *,
+        persist: bool = True,
+    ) -> None:
+        self.history[key] = {"filename": filename, "path": path, "status": status}
         item = QListWidgetItem()
         row = QWidget()
         row.setObjectName("downloadItemCard")
@@ -69,8 +85,8 @@ class DownloadsDialog(FramelessResizableDialog):
         details.setSpacing(3)
         filename_label = QLabel(filename)
         filename_label.setObjectName("downloadFilename")
-        filename_label.setToolTip(filename)
-        status_label = QLabel("Queued")
+        filename_label.setToolTip(path or filename)
+        status_label = QLabel(status)
         status_label.setObjectName("downloadStatus")
         status_label.setToolTip(status_label.text())
         details.addWidget(filename_label)
@@ -97,11 +113,25 @@ class DownloadsDialog(FramelessResizableDialog):
         self.items.addItem(item)
         self.items.setItemWidget(item, row)
         self.records[key] = (filename_label, status_label, progress, cancel)
+        self.update_download(key, status, persist=False)
+        if persist:
+            self._save_history()
 
-    def update_download(self, key: str, state: str, progress: int | None = None) -> None:
+    def update_download(
+        self,
+        key: str,
+        state: str,
+        progress: int | None = None,
+        *,
+        persist: bool = True,
+    ) -> None:
         record = self.records.get(key)
         if record is None:
             return
+        history_record = self.history.get(key)
+        status_changed = history_record is not None and history_record["status"] != state
+        if history_record is not None:
+            history_record["status"] = state
         display_state = f"{state} | {progress}%" if progress is not None and progress >= 0 else state
         _, status_label, progress_bar, cancel_button = record
         status_label.setText(display_state)
@@ -111,8 +141,11 @@ class DownloadsDialog(FramelessResizableDialog):
         elif progress is not None:
             progress_bar.setRange(0, 100)
             progress_bar.setValue(progress)
-        if state.startswith(("Saved:", "Failed:", "Cancelled")):
+        if state.startswith(("Saved:", "Failed:", "Cancelled", "Interrupted")):
             cancel_button.hide()
+            progress_bar.hide()
+        if persist and status_changed:
+            self._save_history()
 
     def mark_cancelling(self, key: str) -> None:
         record = self.records.get(key)
@@ -129,3 +162,41 @@ class DownloadsDialog(FramelessResizableDialog):
         if callable(icon_factory):
             return icon_factory(name)
         return QIcon()
+
+    def _restore_history(self) -> None:
+        if self.settings is None:
+            return
+        raw_history = self.settings.get("downloads/history", "[]")
+        entries = json.loads(str(raw_history))
+        if not isinstance(entries, list):
+            raise ValueError("Saved download history must be a list.")
+        changed = False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            key = str(entry.get("id", ""))
+            filename = str(entry.get("filename", ""))
+            if not key or not filename:
+                continue
+            status = str(entry.get("status", "Interrupted before completion"))
+            if status == "Queued" or status.startswith("Downloading"):
+                status = "Interrupted before completion"
+                changed = True
+            self.add_download(
+                key,
+                filename,
+                str(entry.get("path", "")),
+                status,
+                persist=False,
+            )
+        if changed:
+            self._save_history()
+
+    def _save_history(self) -> None:
+        if self.settings is None:
+            return
+        entries = [
+            {"id": key, **record}
+            for key, record in self.history.items()
+        ]
+        self.settings.set("downloads/history", json.dumps(entries))

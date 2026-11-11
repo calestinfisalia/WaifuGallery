@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, QSizeF, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, QSizeF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QBrush, QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
@@ -28,6 +28,7 @@ class VideoPlayerWidget(QWidget):
     playRequested = Signal()
     playbackActiveChanged = Signal(bool)
     playbackStatusChanged = Signal(str)
+    resolutionChanged = Signal(int)
     volumeChanged = Signal(int)
 
     def __init__(self, parent=None) -> None:
@@ -130,6 +131,15 @@ class VideoPlayerWidget(QWidget):
         self.play_overlay.clicked.connect(self.toggle_playback)
         preview_stack.addWidget(self.play_overlay, 0, 0, Qt.AlignmentFlag.AlignCenter)
 
+        self.video_play_overlay = QPushButton(self.video_canvas)
+        self.video_play_overlay.setObjectName("videoPlayOverlay")
+        self.video_play_overlay.setFixedSize(76, 76)
+        self.video_play_overlay.setIcon(self._icon("play.svg"))
+        self.video_play_overlay.setIconSize(QSize(34, 34))
+        self.video_play_overlay.setToolTip("Play video")
+        self.video_play_overlay.clicked.connect(self.toggle_playback)
+        self.video_play_overlay.hide()
+
         self.stage = QStackedWidget()
         self.stage.setStyleSheet("background: transparent; border: 0;")
         self.stage.addWidget(self.video_canvas)
@@ -145,6 +155,13 @@ class VideoPlayerWidget(QWidget):
         self.play_pause.setIconSize(QSize(18, 18))
         self.play_pause.setToolTip("Play")
         self.play_pause.clicked.connect(self.toggle_playback)
+        self.resolution_button = QPushButton("⋮")
+        self.resolution_button.setObjectName("videoResolutionButton")
+        self.resolution_button.setFixedSize(30, 32)
+        self.resolution_button.setToolTip("Video resolution")
+        self.resolution_button.setAccessibleName("Video resolution")
+        self.resolution_button.clicked.connect(self._show_resolution_menu)
+        self._resolution_limit = 0
         self.volume_button = QPushButton()
         self.volume_button.setObjectName("videoVolumeButton")
         self.volume_button.setFixedSize(30, 30)
@@ -187,6 +204,7 @@ class VideoPlayerWidget(QWidget):
         controls.addWidget(self.play_pause)
         controls.addWidget(self.position, 1)
         controls.addWidget(self.time_label)
+        controls.addWidget(self.resolution_button)
         controls.addWidget(self.volume_button)
         controls.addWidget(self.volume_slider)
         self.controls_layout = controls
@@ -215,6 +233,8 @@ class VideoPlayerWidget(QWidget):
             QPushButton#videoPlayOverlay { border: 0; border-radius: 38px; background: rgba(28, 30, 44, 225); color: white; font-size: 30px; }
             QPushButton#videoPlayOverlay:hover { background: rgba(122, 94, 230, 245); }
             QPushButton#videoPlayPause { padding: 0; }
+            QPushButton#videoResolutionButton { border: 0; background: transparent; color: #c8cce0; font-size: 22px; padding: 0; }
+            QPushButton#videoResolutionButton:hover { background: rgba(122, 94, 230, 120); border-radius: 8px; }
             QPushButton#videoVolumeButton { padding: 0; border: 0; background: transparent; }
             QSlider#videoVolumeSlider { min-height: 18px; }
             QSlider#videoVolumeSlider::groove:horizontal {
@@ -247,10 +267,11 @@ class VideoPlayerWidget(QWidget):
         self.buffering_overlay.setStyleSheet(
             "QFrame#videoBufferingOverlay { background: transparent; border: 0; }"
         )
-        self.controls_frame.setAutoFillBackground(True)
+        self.controls_frame.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_frame.setAutoFillBackground(False)
         self.controls_frame.setStyleSheet(
             "QFrame#videoControls { background-color: #1c1e28; "
-            "border: 0; border-radius: 9px; }"
+            "border: 0; border-radius: 24px; }"
         )
 
     def _icon(self, name: str) -> QIcon:
@@ -292,6 +313,34 @@ class VideoPlayerWidget(QWidget):
 
     def set_volume(self, value: int) -> None:
         self.volume_slider.setValue(max(0, min(100, int(value))))
+
+    def set_resolution_limit(self, height: int) -> None:
+        self._resolution_limit = height if height in {0, 480, 720, 1080, 2160} else 0
+
+    def _show_resolution_menu(self) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        for height, label in (
+            (0, "Auto"),
+            (2160, "Up to 2160p"),
+            (1080, "Up to 1080p"),
+            (720, "Up to 720p"),
+            (480, "Up to 480p"),
+        ):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(height == self._resolution_limit)
+            action.triggered.connect(
+                lambda _checked=False, selected=height: self._select_resolution(selected)
+            )
+        menu.exec(self.resolution_button.mapToGlobal(QPoint(0, -menu.sizeHint().height())))
+
+    def _select_resolution(self, height: int) -> None:
+        if height == self._resolution_limit:
+            return
+        self._resolution_limit = height
+        self.resolutionChanged.emit(height)
 
     def _volume_changed(self, value: int) -> None:
         self.audio.setVolume(value / 100.0)
@@ -479,6 +528,14 @@ class VideoPlayerWidget(QWidget):
                 self.bufferingChanged.emit(True)
                 self.playRequested.emit()
                 return
+            if (
+                self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia
+                or (
+                    self.player.duration() > 0
+                    and self.player.position() >= self.player.duration()
+                )
+            ):
+                self.player.setPosition(0)
             self.player.play()
 
     def _update_buffer_progress(self, progress: float) -> None:
@@ -547,6 +604,15 @@ class VideoPlayerWidget(QWidget):
             self.video.viewport().update()
         self.buffering_overlay.setVisible(visible)
         self._update_buffer_indicator(visible)
+        show_center_play = (
+            self._has_started
+            and self.has_source
+            and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+            and not visible
+        )
+        self.video_play_overlay.setVisible(show_center_play)
+        if show_center_play:
+            self.video_play_overlay.raise_()
         if visible:
             self._position_overlay_widgets()
             self.buffering_overlay.raise_()
@@ -713,6 +779,10 @@ class VideoPlayerWidget(QWidget):
             overlay_width,
             overlay_height,
         )
+        self.video_play_overlay.move(
+            (width - self.video_play_overlay.width()) // 2,
+            (height - self.video_play_overlay.height()) // 2,
+        )
 
     def _fit_video_surface(self) -> None:
         viewport = self.video.viewport().size()
@@ -751,12 +821,22 @@ class VideoPlayerWidget(QWidget):
         self.controls_frame.setVisible(
             self._has_started and self._controls_visible
         )
+        self.resolution_button.setVisible(self._has_started and self.has_source)
         self.play_pause.setIcon(self._icon("pause.svg" if playing else "play.svg"))
         self.play_pause.setToolTip("Pause" if playing else "Play")
         self.play_pause.setEnabled(self.has_source)
         self.play_overlay.setEnabled(self.has_source)
         self.play_overlay.setIcon(self._icon("pause.svg" if playing else "play.svg"))
         self.play_overlay.setToolTip("Pause video" if playing else "Play video")
+        show_center_play = (
+            self._has_started
+            and self.has_source
+            and not playing
+            and not self._buffering_active
+        )
+        self.video_play_overlay.setVisible(show_center_play)
+        if show_center_play:
+            self.video_play_overlay.raise_()
         self.set_fullscreen_toggle_visible(self._has_started and self.has_source and not self._fullscreen_mode)
         self._emit_playback_status(state)
 

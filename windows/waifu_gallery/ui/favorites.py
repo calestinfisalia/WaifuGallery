@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QMessageBox,
     QScrollArea,
     QSizePolicy,
     QSizeGrip,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ImagePost
+from .backup_prompts import BackupMessageDialog
 from .dialog_chrome import FramelessResizableDialog
 from .indicators import CircularProgressIndicator
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
@@ -246,14 +246,12 @@ class FavoritesDialog(FramelessResizableDialog):
             self.grid.addWidget(tile, index // columns, index % columns)
 
     def _confirm_remove(self, post_id: str) -> None:
-        answer = QMessageBox.question(
+        confirmed = BackupMessageDialog.confirm(
             self,
             "Remove favorite",
             "Remove this image from your favorites?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
         )
-        if answer == QMessageBox.StandardButton.Yes:
+        if confirmed:
             self._remove_post(post_id)
 
     def set_thumbnail(self, post_id: str, pixmap: QPixmap) -> None:

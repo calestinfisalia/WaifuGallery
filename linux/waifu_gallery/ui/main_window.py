@@ -1,4 +1,4 @@
-﻿import ctypes
+import ctypes
 import re
 import sys
 from pathlib import Path
@@ -398,7 +398,11 @@ class MainWindow(QMainWindow):
         self.random_image.setMouseTracking(True)
         self.random_video = VideoPlayerWidget()
         self.random_video.set_volume(self._saved_video_volume())
+        self.random_video.set_resolution_limit(self._saved_video_resolution())
         self.random_video.volumeChanged.connect(self._save_video_volume)
+        self.random_video.resolutionChanged.connect(
+            lambda height: self._change_video_resolution("random", height)
+        )
         self.random_video.bufferingChanged.connect(
             lambda buffering: self._on_video_buffering("random", buffering)
         )
@@ -560,7 +564,11 @@ class MainWindow(QMainWindow):
         self.detail_image.swipeRequested.connect(self._swipe_detail)
         self.detail_video = VideoPlayerWidget()
         self.detail_video.set_volume(self._saved_video_volume())
+        self.detail_video.set_resolution_limit(self._saved_video_resolution())
         self.detail_video.volumeChanged.connect(self._save_video_volume)
+        self.detail_video.resolutionChanged.connect(
+            lambda height: self._change_video_resolution("detail", height)
+        )
         self.detail_video.bufferingChanged.connect(
             lambda buffering: self._on_video_buffering("detail", buffering)
         )
@@ -1430,6 +1438,22 @@ class MainWindow(QMainWindow):
             return max(0, min(100, int(self.settings.get("video/volume", 70))))
         except (TypeError, ValueError):
             return 70
+
+    def _saved_video_resolution(self) -> int:
+        try:
+            value = int(self.settings.get("video/max_height", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+        return value if value in {0, 480, 720, 1080, 2160} else 0
+
+    def _change_video_resolution(self, source: str, height: int) -> None:
+        self.settings.set("video/max_height", height)
+        self.random_video.set_resolution_limit(height)
+        self.detail_video.set_resolution_limit(height)
+        post = getattr(self, "random_post", None) if source == "random" else self.detail_post
+        player = self.random_video if source == "random" else self.detail_video
+        if post is not None and player.has_source:
+            self._start_video_stream(player, post)
 
     def _save_video_volume(self, value: int) -> None:
         value = max(0, min(100, int(value)))
@@ -2429,11 +2453,23 @@ class MainWindow(QMainWindow):
         if current_page not in (self.random_page, self.detail_page):
             return
         self._fullscreen_source = "random" if current_page is self.random_page else "detail"
+        fullscreen_post = (
+            self.random_post
+            if self._fullscreen_source == "random"
+            else self.detail_post
+        )
         self._was_maximized_before_fullscreen = self.isMaximized()
         self._windowed_geometry = self.geometry()
         self._fullscreen_active = True
         active_player = self.random_video if self._fullscreen_source == "random" else self.detail_video
         active_player.set_fullscreen_mode(True)
+        if fullscreen_post is not None and fullscreen_post.media_type == "video":
+            ambient = (
+                self.random_ambient
+                if self._fullscreen_source == "random"
+                else self.detail_ambient
+            )
+            ambient.hide()
         self._update_detail_navigation()
         self.random_video.set_fullscreen_toggle_visible(False)
         self.detail_video.set_fullscreen_toggle_visible(False)
@@ -2454,8 +2490,9 @@ class MainWindow(QMainWindow):
         active_player._schedule_reflow()
         self._sync_favorite_buttons()
         self._show_fullscreen_controls()
-        image = self.random_image if self._fullscreen_source == "random" else self.detail_image
-        QTimer.singleShot(0, image._fit_to_viewport)
+        if fullscreen_post is None or fullscreen_post.media_type != "video":
+            image = self.random_image if self._fullscreen_source == "random" else self.detail_image
+            QTimer.singleShot(0, image._fit_to_viewport)
 
     def _set_normal_video_actions(self, source: str, visible: bool) -> None:
         if source == "random":
@@ -2552,8 +2589,9 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setVisible(image_ready)
         self._update_detail_navigation()
         self._sync_favorite_buttons()
-        image = self.random_image if getattr(self, "_fullscreen_source", "detail") == "random" else self.detail_image
-        QTimer.singleShot(0, image._fit_to_viewport)
+        if current_post is None or current_post.media_type != "video":
+            image = self.random_image if getattr(self, "_fullscreen_source", "detail") == "random" else self.detail_image
+            QTimer.singleShot(0, image._fit_to_viewport)
 
     def _show_fullscreen_controls(self) -> None:
         if not self._fullscreen_active:
@@ -2684,6 +2722,9 @@ class MainWindow(QMainWindow):
 
         def preferences_changed() -> None:
             favorites = self._favorite_posts()
+            imported_theme = str(self.settings.get("appearance/theme", self.current_theme))
+            if imported_theme in {"Dark", "Light", "System"} and imported_theme != self.current_theme:
+                self.change_theme(imported_theme)
             if favorites != preference_state["favorites"]:
                 preference_state["favorites"] = favorites
                 self._refresh_favorites_dialog(favorites)
@@ -2767,7 +2808,7 @@ class MainWindow(QMainWindow):
             return
         key = str(uuid4())
         path = Path(filename)
-        self.downloads.add_download(key, path.name)
+        self.downloads.add_download(key, path.name, str(path))
         task = FileDownloadTask(key, self._catalog(), post, path)
         task.signals.result.connect(lambda download_key, result: self._task_succeeded(f"download:{download_key}", result))
         task.signals.error.connect(lambda download_key, error: self._task_failed(f"download:{download_key}", error))
@@ -2944,10 +2985,20 @@ class MainWindow(QMainWindow):
         """Apply costly view reflows once the user finishes resizing."""
         if not self.isVisible():
             return
-        self._refresh_ambient_layers()
-        self._render_random_image()
-        if hasattr(self, "detail_image"):
-            self.detail_image._fit_to_viewport()
+        current_page = self.pages.currentWidget()
+        current_post = None
+        if current_page is self.random_page:
+            current_post = self.random_post
+        elif current_page is self.detail_page:
+            current_post = self.detail_post
+        video_page = current_post is not None and current_post.media_type == "video"
+        if not (self._fullscreen_active and video_page):
+            self._refresh_ambient_layers()
+            self._render_random_image()
+            if hasattr(self, "detail_image"):
+                self.detail_image._fit_to_viewport()
+            if video_page and self._ambient_restore_timer.isActive():
+                self._ambient_restore_timer.stop()
         if self.pages.currentWidget() is self.gallery_page and self.posts:
             columns = self._gallery_column_count()
             if columns != getattr(self, "_gallery_columns", None):

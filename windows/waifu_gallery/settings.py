@@ -20,6 +20,9 @@ class AppSettings:
     def get(self, key: str, default=None):
         return self._store.value(key, default)
 
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        return _setting_bool(self.get(key, default))
+
     def set(self, key: str, value) -> None:
         self._store.setValue(key, value)
         self._store.sync()

@@ -214,6 +214,8 @@ class BooruCatalog:
         custom_block_tags: tuple[str, ...] = (),
         media_filter: str = "image",
         doh_endpoint: str | None = None,
+        parent_max_rating: str | None = None,
+        parent_allowed_tags: tuple[str, ...] = (),
     ) -> None:
         self.user_id, self.api_key = credentials
         self.rule34_user_id, self.rule34_api_key = rule34_credentials
@@ -228,6 +230,17 @@ class BooruCatalog:
             if tag.strip()
         )
         self.media_filter = media_filter if media_filter in {"image", "video", "all"} else "image"
+        self.parent_max_rating = (
+            parent_max_rating if parent_max_rating in {"s", "q", "e"}
+            else ("s" if parent_max_rating is not None else None)
+        )
+        allowed_tag_values = (parent_allowed_tags,) if isinstance(parent_allowed_tags, str) else parent_allowed_tags
+        self.parent_allowed_tags = frozenset(
+            tag.strip().casefold().replace(" ", "_")
+            for value in allowed_tag_values
+            for tag in str(value).split(",")
+            if tag.strip()
+        )
         self._sessions = threading.local()
         self.doh_endpoint = doh_endpoint
         set_doh_enabled(self.use_doh, self.doh_endpoint)
@@ -563,6 +576,8 @@ class BooruCatalog:
                     post = self._normalize(raw, provider)
                     if not post or not self._rating_matches(post.rating, rating):
                         continue
+                    if not self._parent_policy_matches(post):
+                        continue
                     if self.media_filter != "all" and post.media_type != self.media_filter:
                         continue
                     if rating == "sfw" and post.tags.intersection(SFW_BLOCK_TAGS):
@@ -856,6 +871,15 @@ class BooruCatalog:
     @staticmethod
     def _rating_matches(value: str, choice: str) -> bool:
         return choice == "all" or (choice == "sfw" and value == "s") or (choice == "nsfw" and value == "e")
+
+    def _parent_policy_matches(self, post: ImagePost) -> bool:
+        rating_rank = {"s": 0, "q": 1, "e": 2}
+        if self.parent_max_rating is not None:
+            post_rank = rating_rank.get(post.rating)
+            maximum_rank = rating_rank[self.parent_max_rating]
+            if post_rank is None or post_rank > maximum_rank:
+                return False
+        return not self.parent_allowed_tags or bool(post.tags.intersection(self.parent_allowed_tags))
 
     @staticmethod
     def _image_headers(url: str) -> dict[str, str]:

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +20,10 @@ import com.fisalia.waifugallery.data.ReleaseUpdateChecker
 import com.fisalia.waifugallery.data.SearchPage
 import com.fisalia.waifugallery.data.UserDataBackup
 import com.fisalia.waifugallery.data.UserDataBackupCodec
+import com.fisalia.waifugallery.data.VideoVariant
+import com.fisalia.waifugallery.data.originalImageUrl
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.IOException
 import java.io.File
 import java.io.FileOutputStream
@@ -43,7 +48,10 @@ data class DownloadItem(
     val error: String? = null,
     val progress: Float? = null,
     val savedUri: String? = null,
+    val savedLocation: String? = null,
 )
+
+private data class SavedDownload(val uri: Uri, val location: String)
 
 data class UiState(
     val screen: AppScreen = AppScreen.RANDOM,
@@ -55,6 +63,13 @@ data class UiState(
     val gallery: List<ImagePost> = emptyList(),
     val galleryProviderErrors: List<String> = emptyList(),
     val favorites: List<ImagePost> = emptyList(),
+    val favoritesLockEnabled: Boolean = false,
+    val favoritesPinSet: Boolean = false,
+    val requestFavoritesUnlock: Boolean = false,
+    val parentalControlEnabled: Boolean = false,
+    val parentalPinSet: Boolean = false,
+    val parentalMaximumRating: String = "s",
+    val parentalAllowedTags: List<String> = emptyList(),
     val totalResults: Int? = null,
     val detailPosts: List<ImagePost> = emptyList(),
     val detailFirstPage: Int = 1,
@@ -134,8 +149,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ambientMode = preferences.ambientMode,
             provider = preferences.selectedProvider,
             favorites = preferences.backupFavoritePosts(),
+            favoritesLockEnabled = preferences.favoritesLockEnabled,
+            favoritesPinSet = preferences.hasSafetyPin("favorites_lock"),
+            parentalControlEnabled = preferences.parentalControlEnabled,
+            parentalPinSet = preferences.hasSafetyPin("parent"),
+            parentalMaximumRating = preferences.parentalMaximumRating,
+            parentalAllowedTags = preferences.parentalAllowedTags,
             customTerms = preferences.customSearchTerms(),
             saveFolderLabel = preferences.saveFolderUri?.let { runCatching { DocumentFile.fromTreeUri(application, Uri.parse(it))?.name }.getOrNull() },
+            downloads = restoreDownloadHistory(preferences.downloadHistoryJson),
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -144,6 +166,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingGalleryFilters: Pair<String, RatingFilter>? = null
 
     init {
+        persistDownloadHistory()
         refreshRandom()
         checkForReleaseUpdate()
     }
@@ -246,7 +269,111 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingGalleryFilters = null
         _state.update { it.copy(requestRule34Credentials = false) }
     }
-    fun openFavorites() = _state.update { it.copy(screen = AppScreen.FAVORITES, searchVisible = false) }
+    fun openFavorites() {
+        if (!preferences.favoritesLockEnabled) {
+            _state.update { it.copy(screen = AppScreen.FAVORITES, searchVisible = false) }
+        } else if (!preferences.hasSafetyPin("favorites_lock")) {
+            _state.update {
+                it.copy(notice = "Favorites PIN is unavailable. Reset it from Settings > Safety & Privacy.")
+            }
+        } else {
+            _state.update { it.copy(requestFavoritesUnlock = true) }
+        }
+    }
+
+    fun cancelFavoritesUnlock() = _state.update { it.copy(requestFavoritesUnlock = false) }
+
+    fun verifyFavoritesUnlock(pin: String): AppPreferences.PinVerification {
+        val result = preferences.verifySafetyPin("favorites_lock", pin)
+        if (result.accepted) {
+            _state.update {
+                it.copy(requestFavoritesUnlock = false, screen = AppScreen.FAVORITES, searchVisible = false)
+            }
+        }
+        return result
+    }
+
+    fun verifySafetyPin(scope: String, pin: String): AppPreferences.PinVerification =
+        preferences.verifySafetyPin(scope, pin)
+
+    fun setSafetyPin(scope: String, pin: String) {
+        preferences.setSafetyPin(scope, pin)
+        refreshSafetyState()
+    }
+
+    fun removeSafetyPin(scope: String) {
+        preferences.removeSafetyPin(scope)
+        when (scope) {
+            "favorites_lock" -> preferences.favoritesLockEnabled = false
+            "parent" -> preferences.parentalControlEnabled = false
+            else -> throw IllegalArgumentException("Unknown safety PIN.")
+        }
+        refreshSafetyState()
+        refreshCurrentResults()
+    }
+
+    fun setFavoritesLockEnabled(enabled: Boolean) {
+        preferences.favoritesLockEnabled = enabled
+        refreshSafetyState()
+    }
+
+    fun setParentalControlEnabled(enabled: Boolean) {
+        preferences.parentalControlEnabled = enabled
+        refreshSafetyState()
+        refreshCurrentResults()
+    }
+
+    fun setParentalPolicy(maximumRating: String, allowedTags: String) {
+        preferences.parentalMaximumRating = maximumRating
+        preferences.parentalAllowedTags = allowedTags.split(Regex("[,\\s]+"))
+        refreshSafetyState()
+        refreshCurrentResults()
+    }
+
+    private fun refreshSafetyState() {
+        _state.update { current ->
+            val visibleDetailImage = current.detailImage?.takeIf(::parentAllowsPost)
+            val returnFromRestrictedDetail = current.screen == AppScreen.DETAIL &&
+                current.detailImage != null && visibleDetailImage == null
+            current.copy(
+                favoritesLockEnabled = preferences.favoritesLockEnabled,
+                favoritesPinSet = preferences.hasSafetyPin("favorites_lock"),
+                parentalControlEnabled = preferences.parentalControlEnabled,
+                parentalPinSet = preferences.hasSafetyPin("parent"),
+                parentalMaximumRating = preferences.parentalMaximumRating,
+                parentalAllowedTags = preferences.parentalAllowedTags,
+                screen = if (returnFromRestrictedDetail) current.detailOrigin else current.screen,
+                image = current.image?.takeIf(::parentAllowsPost),
+                detailImage = visibleDetailImage,
+                gallery = current.gallery.filter(::parentAllowsPost),
+                detailPosts = current.detailPosts.filter(::parentAllowsPost),
+            )
+        }
+    }
+
+    fun parentalAllows(post: ImagePost): Boolean = parentAllowsPost(post)
+
+    private fun parentAllowsPost(post: ImagePost): Boolean {
+        if (!preferences.parentalControlEnabled) return true
+        val ranks = mapOf("s" to 0, "q" to 1, "e" to 2)
+        val postRank = ranks[post.rating] ?: return false
+        if (postRank > (ranks[preferences.parentalMaximumRating] ?: 0)) return false
+        val allowedTags = preferences.parentalAllowedTags
+        return allowedTags.isEmpty() || post.tags.any { tag ->
+            tag.trim().lowercase().replace(Regex("\\s+"), "_") in allowedTags
+        }
+    }
+
+    private fun effectiveRating(requested: RatingFilter): RatingFilter {
+        if (!preferences.parentalControlEnabled) return requested
+        val maximum = mapOf("s" to 0, "q" to 1, "e" to 2)[preferences.parentalMaximumRating] ?: 0
+        val requestedRank = if (requested == RatingFilter.SFW) 0 else 2
+        return if (requestedRank <= maximum) requested else if (maximum == 0) {
+            RatingFilter.SFW
+        } else {
+            RatingFilter.ALL
+        }
+    }
     fun openDownloadQueue() = _state.update { it.copy(showSettings = false, showDownloadQueue = true) }
     fun closeDownloadQueue() = _state.update { it.copy(showDownloadQueue = false) }
     fun dismissError() = _state.update { it.copy(error = null) }
@@ -286,8 +413,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(screen = AppScreen.RANDOM, detailImage = null, image = null, isLoading = true, error = null, notice = null) }
         viewModelScope.launch {
             try {
-                val image = api.randomImage(preferences.allowNsfw, term, preferences.selectedProvider)
-                _state.update { it.copy(image = image, isLoading = false) }
+                val maximumRating = if (preferences.parentalControlEnabled) {
+                    preferences.parentalMaximumRating
+                } else {
+                    null
+                }
+                val randomNsfw = preferences.allowNsfw && maximumRating != "s"
+                val attempts = if (preferences.parentalControlEnabled && preferences.parentalAllowedTags.isNotEmpty()) 10 else 1
+                var image: ImagePost? = null
+                for (attempt in 0 until attempts) {
+                    val candidate = api.randomImage(
+                        randomNsfw,
+                        term,
+                        preferences.selectedProvider,
+                        maximumRating,
+                    )
+                    if (parentAllowsPost(candidate)) {
+                        image = candidate
+                        break
+                    }
+                }
+                val selectedImage = image
+                    ?: throw IllegalStateException("No image matched the active parental rating and allowed tags.")
+                _state.update { it.copy(image = selectedImage, isLoading = false) }
             } catch (error: Exception) {
                 _state.update { it.copy(isLoading = false, error = "Failed to load image:\n${error.message ?: "Unknown error"}") }
             }
@@ -301,34 +449,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setGalleryFilters(provider: String, rating: RatingFilter) {
-        if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
+        val effective = effectiveRating(rating)
+        if (!preferences.allowNsfw && effective != RatingFilter.SFW) {
             _state.update { it.copy(notice = "Enable NSFW results in Settings to use this rating.") }
             return
         }
         if (provider == "Gelbooru" && !hasGelbooruCredentials()) {
-            pendingGalleryFilters = provider to rating
+            pendingGalleryFilters = provider to effective
             openGelbooruCredentials()
             return
         }
         if (provider == "Rule34.xxx" && !hasRule34Credentials()) {
-            pendingGalleryFilters = provider to rating
+            pendingGalleryFilters = provider to effective
             openRule34Credentials()
             return
         }
-        if (provider == _state.value.galleryProvider && rating == _state.value.rating) return
-        preferences.ratingFilter = rating.name.lowercase()
-        _state.update { it.copy(galleryProvider = provider, rating = rating, page = 1, totalPages = null, hasMore = false) }
+        if (provider == _state.value.galleryProvider && effective == _state.value.rating) return
+        preferences.ratingFilter = effective.name.lowercase()
+        _state.update { it.copy(galleryProvider = provider, rating = effective, page = 1, totalPages = null, hasMore = false) }
         loadGallery()
     }
 
     fun setRating(rating: RatingFilter) {
-        if (!preferences.allowNsfw && rating != RatingFilter.SFW) {
+        val effective = effectiveRating(rating)
+        if (!preferences.allowNsfw && effective != RatingFilter.SFW) {
             _state.update { it.copy(notice = "Enable NSFW results in Settings to use this rating.") }
             return
         }
-        if (rating == _state.value.rating) return
-        preferences.ratingFilter = rating.name.lowercase()
-        _state.update { it.copy(rating = rating, page = 1, totalPages = null, hasMore = false) }
+        if (effective == _state.value.rating) return
+        preferences.ratingFilter = effective.name.lowercase()
+        _state.update { it.copy(rating = effective, page = 1, totalPages = null, hasMore = false) }
         if (_state.value.galleryQuery.isNotBlank()) loadGallery()
     }
 
@@ -355,10 +505,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try {
-                val result: SearchPage = api.search(snapshot.galleryQuery, snapshot.rating, snapshot.galleryProvider, snapshot.page)
+                val result: SearchPage = api.search(
+                    snapshot.galleryQuery,
+                    effectiveRating(snapshot.rating),
+                    snapshot.galleryProvider,
+                    snapshot.page,
+                )
                 _state.update {
                     it.copy(
-                        gallery = result.posts,
+                        gallery = result.posts.filter(::parentAllowsPost),
                         galleryProviderErrors = result.providerErrors,
                         hasMore = result.hasMore,
                         totalPages = result.totalPages,
@@ -378,27 +533,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openDetail(post: ImagePost) = _state.update { current ->
-        val origin = current.screen
-        val detailPosts = when (origin) {
-            AppScreen.GALLERY -> current.gallery
-            AppScreen.FAVORITES -> current.favorites
-            else -> emptyList()
+    fun openDetail(post: ImagePost) {
+        if (!parentAllowsPost(post)) {
+            _state.update { it.copy(notice = "This post is restricted by Parental control.") }
+            return
         }
-        current.copy(
-            screen = AppScreen.DETAIL,
-            detailOrigin = origin,
-            detailImage = post,
-            detailPosts = detailPosts,
-            detailFirstPage = if (origin == AppScreen.GALLERY) current.page else 1,
-            detailLastPage = if (origin == AppScreen.GALLERY) current.page else 1,
-            detailHasMore = origin == AppScreen.GALLERY && current.hasMore,
-            totalResults = if (origin == AppScreen.FAVORITES) current.favorites.size else current.totalResults,
-            detailLoadingPrevious = false,
-            detailLoadingNext = false,
-            detailPreviousFailed = false,
-            detailNextFailed = false,
-        )
+        _state.update { current ->
+            val origin = current.screen
+            val detailPosts = when (origin) {
+                AppScreen.GALLERY -> current.gallery
+                AppScreen.FAVORITES -> current.favorites.filter(::parentAllowsPost)
+                else -> emptyList()
+            }
+            current.copy(
+                screen = AppScreen.DETAIL,
+                detailOrigin = origin,
+                detailImage = post,
+                detailPosts = detailPosts,
+                detailFirstPage = if (origin == AppScreen.GALLERY) current.page else 1,
+                detailLastPage = if (origin == AppScreen.GALLERY) current.page else 1,
+                detailHasMore = origin == AppScreen.GALLERY && current.hasMore,
+                totalResults = if (origin == AppScreen.FAVORITES) detailPosts.size else current.totalResults,
+                detailLoadingPrevious = false,
+                detailLoadingNext = false,
+                detailPreviousFailed = false,
+                detailNextFailed = false,
+            )
+        }
     }
     fun selectDetail(index: Int) {
         _state.update { state ->
@@ -423,9 +584,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try {
-                val result = api.search(snapshot.galleryQuery, snapshot.rating, snapshot.galleryProvider, requestedPage)
+                val result = api.search(
+                    snapshot.galleryQuery,
+                    effectiveRating(snapshot.rating),
+                    snapshot.galleryProvider,
+                    requestedPage,
+                )
                 _state.update { current ->
-                    val merged = if (previous) result.posts + current.detailPosts else current.detailPosts + result.posts
+                    val pagePosts = result.posts.filter(::parentAllowsPost)
+                    val merged = if (previous) pagePosts + current.detailPosts else current.detailPosts + pagePosts
                     val unique = merged.distinctBy { it.dedupeKey }
                     current.copy(
                         detailPosts = unique,
@@ -515,47 +682,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun applyUserDataBackup(data: UserDataBackup, merge: Boolean) {
         val favorites = preferences.applyUserData(data, merge)
-        val provider = if (data.provider == "All") "Auto" else data.provider
-        val importedRating = when (data.rating) {
-            "nsfw" -> RatingFilter.NSFW
-            "all" -> RatingFilter.ALL
-            else -> RatingFilter.SFW
-        }
+        val importsSettings = "settings" in data.includedSections
+        val importedRating = if (importsSettings) {
+            when (data.rating) {
+                "nsfw" -> RatingFilter.NSFW
+                "all" -> RatingFilter.ALL
+                else -> RatingFilter.SFW
+            }
+        } else null
         _state.update { current ->
             current.copy(
                 favorites = favorites,
-                provider = provider,
-                allowNsfw = data.allowNsfw,
-                rating = if (data.allowNsfw) importedRating else RatingFilter.SFW,
-                useDoh = data.useDoh,
-                dohProvider = data.dohProvider,
-                customDohEndpoint = data.customDohEndpoint,
-                filterGore = data.filterGore,
-                excludeMale = data.excludeMale,
-                customBlockTags = data.customBlockTags,
-                mediaFilter = data.mediaFilter,
-                videoMaxHeight = data.videoMaxHeight,
-                ambientMode = data.ambientMode,
-                customTerms = data.customTerms,
-                detailPosts = if (current.detailOrigin == AppScreen.FAVORITES) favorites else current.detailPosts,
+                provider = if (importsSettings) {
+                    if (data.provider == "All") "Auto" else data.provider
+                } else current.provider,
+                allowNsfw = if (importsSettings) data.allowNsfw else current.allowNsfw,
+                rating = if (importsSettings) {
+                    if (data.allowNsfw) importedRating ?: RatingFilter.SFW else RatingFilter.SFW
+                } else current.rating,
+                useDoh = if (importsSettings) data.useDoh else current.useDoh,
+                dohProvider = if (importsSettings) data.dohProvider else current.dohProvider,
+                customDohEndpoint = if (importsSettings) data.customDohEndpoint else current.customDohEndpoint,
+                filterGore = if (importsSettings) data.filterGore else current.filterGore,
+                excludeMale = if (importsSettings) data.excludeMale else current.excludeMale,
+                customBlockTags = if (importsSettings) data.customBlockTags else current.customBlockTags,
+                mediaFilter = if (importsSettings) data.mediaFilter else current.mediaFilter,
+                videoMaxHeight = if (importsSettings) data.videoMaxHeight else current.videoMaxHeight,
+                ambientMode = if (importsSettings) data.ambientMode else current.ambientMode,
+                customTerms = if (importsSettings) data.customTerms else current.customTerms,
+                detailPosts = if (
+                    "favorites" in data.includedSections &&
+                    current.detailOrigin == AppScreen.FAVORITES
+                ) favorites else current.detailPosts,
                 notice = "User data imported",
             )
         }
-        refreshCurrentResults()
+        if (importsSettings) refreshCurrentResults()
     }
 
     fun setRatingPreference(rating: RatingFilter) {
-        val allowNsfw = rating != RatingFilter.SFW
-        if (rating == _state.value.rating && allowNsfw == _state.value.allowNsfw) return
+        val effective = effectiveRating(rating)
+        val allowNsfw = effective != RatingFilter.SFW
+        if (effective == _state.value.rating && allowNsfw == _state.value.allowNsfw) return
         preferences.allowNsfw = allowNsfw
-        preferences.ratingFilter = rating.name.lowercase()
+        preferences.ratingFilter = effective.name.lowercase()
         _state.update {
             it.copy(
                 allowNsfw = allowNsfw,
-                rating = rating,
+                rating = effective,
                 page = 1,
                 totalPages = null,
                 hasMore = false,
+                notice = if (effective != rating) {
+                    "The rating was limited by Parental control."
+                } else {
+                    it.notice
+                },
             )
         }
         val current = _state.value
@@ -611,10 +793,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(ambientMode = value) }
     }
     private fun refreshCurrentResults() {
-        when (_state.value.screen) {
+        val current = _state.value
+        when (current.screen) {
             AppScreen.RANDOM -> refreshRandom()
             AppScreen.GALLERY -> loadGallery()
-            else -> Unit
+            AppScreen.DETAIL -> when (current.detailOrigin) {
+                AppScreen.RANDOM -> refreshRandom()
+                AppScreen.GALLERY -> loadGallery()
+                else -> Unit
+            }
+            AppScreen.FAVORITES -> Unit
         }
     }
     fun setProvider(value: String) {
@@ -740,6 +928,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val item = DownloadItem(java.util.UUID.randomUUID().toString(), post, DownloadStatus.QUEUED)
         _state.update { it.copy(downloads = it.downloads + item, error = null, notice = "Added to download queue") }
+        persistDownloadHistory()
         processDownloadQueue()
     }
 
@@ -747,6 +936,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { state ->
             state.copy(downloads = state.downloads.map { if (it.id == id && it.status == DownloadStatus.FAILED) it.copy(status = DownloadStatus.QUEUED, error = null, progress = 0f) else it })
         }
+        persistDownloadHistory()
         processDownloadQueue()
     }
 
@@ -785,6 +975,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { state ->
             state.copy(downloads = state.downloads.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.DOWNLOADING })
         }
+        persistDownloadHistory()
     }
 
     private fun processDownloadQueue() {
@@ -793,12 +984,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             while (true) {
                 val next = _state.value.downloads.firstOrNull { it.status == DownloadStatus.QUEUED } ?: break
                 _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.DOWNLOADING, error = null, progress = 0f) else it }) }
+                persistDownloadHistory()
                 try {
                     val downloaded = withContext(Dispatchers.IO) { downloadToCache(next.post) { progress ->
                         _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(progress = progress) else it }) }
                     } }
-                    val savedUri = try {
-                        withContext(Dispatchers.IO) { writeImage(next.post, downloaded).toString() }
+                    val savedDownload = try {
+                        withContext(Dispatchers.IO) { writeImage(next.post, downloaded) }
                     } finally {
                         downloaded.delete()
                     }
@@ -808,20 +1000,135 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (it.id == next.id) it.copy(
                                     status = DownloadStatus.SAVED,
                                     progress = 1f,
-                                    savedUri = savedUri,
+                                    savedUri = savedDownload.uri.toString(),
+                                    savedLocation = savedDownload.location,
                                 ) else it
                             },
                             notice = "Media saved",
                         )
                     }
+                    persistDownloadHistory()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.FAILED, error = error.message ?: "Download failed") else it }) }
+                    persistDownloadHistory()
                 }
             }
         }
     }
+
+    private fun persistDownloadHistory() {
+        preferences.downloadHistoryJson = JSONArray().apply {
+            _state.value.downloads.forEach { item ->
+                put(JSONObject().apply {
+                    put("id", item.id)
+                    put("post", item.post.toDownloadJson())
+                    put("status", item.status.name)
+                    put("error", item.error)
+                    put("savedUri", item.savedUri)
+                    put("savedLocation", item.savedLocation)
+                })
+            }
+        }.toString()
+    }
+
+    private fun restoreDownloadHistory(json: String): List<DownloadItem> {
+        val entries = try {
+            JSONArray(json)
+        } catch (error: Exception) {
+            throw IllegalStateException("Saved download history could not be read.", error)
+        }
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index)
+            if (item == null) {
+                Log.w("WaifuGallery", "Skipped an invalid download history entry.")
+                return@mapNotNull null
+            }
+            try {
+                val status = DownloadStatus.valueOf(item.getString("status"))
+                val interrupted = status == DownloadStatus.QUEUED || status == DownloadStatus.DOWNLOADING
+                DownloadItem(
+                    id = item.getString("id"),
+                    post = item.getJSONObject("post").toImagePost(),
+                    status = if (interrupted) DownloadStatus.FAILED else status,
+                    error = if (interrupted) {
+                        "App closed before download completed. Retry to download again."
+                    } else {
+                        item.optString("error").takeIf(String::isNotBlank)
+                    },
+                    savedUri = item.optString("savedUri").takeIf(String::isNotBlank),
+                    savedLocation = item.optString("savedLocation").takeIf(String::isNotBlank),
+                )
+            } catch (error: Exception) {
+                Log.w("WaifuGallery", "Skipped an unreadable download history entry.", error)
+                null
+            }
+        }
+    }
+
+    private fun ImagePost.toDownloadJson() = JSONObject().apply {
+        put("id", id)
+        put("dedupeKey", dedupeKey)
+        put("provider", provider)
+        put("imageUrl", imageUrl)
+        put("thumbnailUrl", thumbnailUrl)
+        put("thumbnailCandidates", JSONArray(thumbnailCandidates))
+        put("extension", extension)
+        put("rating", rating)
+        put("tags", JSONArray(tags))
+        put("source", source)
+        put("artists", JSONArray(artists))
+        put("mediaType", mediaType)
+        put("title", title)
+        put("width", width)
+        put("height", height)
+        put("videoVariants", JSONArray().apply {
+            videoVariants.forEach { variant ->
+                put(JSONObject().apply {
+                    put("url", variant.url)
+                    put("width", variant.width)
+                    put("height", variant.height)
+                })
+            }
+        })
+    }
+
+    private fun JSONObject.toImagePost(): ImagePost {
+        val thumbnailCandidates = optJSONArray("thumbnailCandidates").stringList()
+        val mediaType = optString("mediaType", "image")
+        return ImagePost(
+            id = getString("id"),
+            dedupeKey = optString("dedupeKey"),
+            provider = getString("provider"),
+            imageUrl = getString("imageUrl").let { url ->
+                if (mediaType == "video") url else originalImageUrl(url, thumbnailCandidates)
+            },
+            thumbnailUrl = getString("thumbnailUrl"),
+            thumbnailCandidates = thumbnailCandidates,
+            extension = optString("extension", "jpg"),
+            rating = optString("rating"),
+            tags = optJSONArray("tags").stringList().toSet(),
+            source = optString("source"),
+            artists = optJSONArray("artists").stringList(),
+            mediaType = mediaType,
+            title = optString("title"),
+            width = optInt("width", 0),
+            height = optInt("height", 0),
+            videoVariants = optJSONArray("videoVariants")?.let { variants ->
+                (0 until variants.length()).mapNotNull { variantIndex ->
+                    val variant = variants.optJSONObject(variantIndex) ?: return@mapNotNull null
+                    variant.optString("url").takeIf(String::isNotBlank)?.let { url ->
+                        VideoVariant(url, variant.optInt("width", 0), variant.optInt("height", 0))
+                    }
+                }
+            }.orEmpty(),
+        )
+    }
+
+    private fun JSONArray?.stringList(): List<String> = this?.let { array ->
+        (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+    }.orEmpty()
 
     private fun downloadToCache(post: ImagePost, reportProgress: (Float?) -> Unit): File {
         val temp = File.createTempFile("waifu-download-", ".tmp", getApplication<Application>().cacheDir)
@@ -881,7 +1188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun writeImage(post: ImagePost, source: File): Uri {
+    private fun writeImage(post: ImagePost, source: File): SavedDownload {
         val app = getApplication<Application>()
         val name = "waifu_${post.id.substringAfterLast(':').replace(Regex("[^A-Za-z0-9_-]"), "_")}.${post.extension.ifBlank { "jpg" }}"
         val mime = if (post.mediaType == "video") "video/${post.extension.lowercase().ifBlank { "mp4" }}" else when (post.extension.lowercase()) {
@@ -903,7 +1210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     document.delete()
                     throw error
                 }
-                return document.uri
+                return SavedDownload(document.uri, directory.name ?: "Selected folder")
             }
         }
         val resolver = app.contentResolver
@@ -922,6 +1229,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } finally {
             source.delete()
         }
-        return uri
+        return SavedDownload(uri, "Pictures/Waifu Gallery")
     }
 }

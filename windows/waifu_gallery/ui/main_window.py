@@ -10,13 +10,14 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
+    QRect,
     QPropertyAnimation,
     Qt,
     QThreadPool,
     QSize,
     QTimer,
 )
-from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap, QRegion
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (
@@ -27,7 +28,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -46,12 +46,16 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..models import ImagePost, SearchPage
 from ..providers import BooruCatalog, ProviderError
+from ..pin_security import has_pin, verify_pin
 from ..settings import AppSettings
 from .downloads import DownloadsDialog
 from .credits import ImageCreditsDialog, rating_label
 from .favorites import FavoritesDialog, favorite_key
 from .indicators import CircularProgressIndicator
 from .preferences import PreferencesDialog
+from .pin_prompts import PinPromptDialog
+from .backup_prompts import BackupMessageDialog
+from .themes import THEME_NAMES, THEME_PALETTES
 from .updates import (
     WINDOWS_INSTALLER,
     ReleaseNotesDialog,
@@ -253,7 +257,7 @@ class MainWindow(QMainWindow):
         self._windowed_geometry = None
         self.card_buttons: dict[str, QPushButton] = {}
         self.current_theme = str(self.settings.get("appearance/theme", "Dark"))
-        if self.current_theme not in ("Dark", "Light", "System"):
+        if self.current_theme not in THEME_NAMES:
             self.current_theme = "Dark"
         self._icon_cache: dict[tuple[str, str], QIcon] = {}
         self._icon_buttons: list[QPushButton] = []
@@ -379,6 +383,8 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
         self.random_page = QWidget()
+        self.random_page.setObjectName("randomPage")
+        self.random_page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         random_layout = QVBoxLayout(self.random_page)
         random_layout.setContentsMargins(0, 0, 0, 0)
         random_layout.setSpacing(6)
@@ -387,6 +393,12 @@ class MainWindow(QMainWindow):
         self.random_scroll.setWidgetResizable(False)
         self.random_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.random_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.random_scroll.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.random_scroll.setAutoFillBackground(False)
+        self.random_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True
+        )
+        self.random_scroll.viewport().setAutoFillBackground(False)
         self.random_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.random_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.random_image = ZoomImage()
@@ -401,7 +413,11 @@ class MainWindow(QMainWindow):
         self.random_image.setMouseTracking(True)
         self.random_video = VideoPlayerWidget()
         self.random_video.set_volume(self._saved_video_volume())
+        self.random_video.set_resolution_limit(self._saved_video_resolution())
         self.random_video.volumeChanged.connect(self._save_video_volume)
+        self.random_video.resolutionChanged.connect(
+            lambda height: self._change_video_resolution("random", height)
+        )
         self.random_video.bufferingChanged.connect(
             lambda buffering: self._on_video_buffering("random", buffering)
         )
@@ -485,6 +501,7 @@ class MainWindow(QMainWindow):
         # permanent row or push the search results down.
         self.gallery_status = QLabel(self.gallery_page)
         self.gallery_status.setObjectName("galleryNotice")
+        self.gallery_status.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.gallery_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.gallery_status.setWordWrap(True)
         self.gallery_status.setStyleSheet(
@@ -541,6 +558,8 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.gallery_page)
 
         self.detail_page = QWidget()
+        self.detail_page.setObjectName("detailPage")
+        self.detail_page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         detail_layout = QVBoxLayout(self.detail_page)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(8)
@@ -549,6 +568,12 @@ class MainWindow(QMainWindow):
         self.detail_scroll.setWidgetResizable(False)
         self.detail_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detail_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.detail_scroll.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.detail_scroll.setAutoFillBackground(False)
+        self.detail_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True
+        )
+        self.detail_scroll.viewport().setAutoFillBackground(False)
         self.detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.detail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.detail_image = ZoomImage()
@@ -563,7 +588,11 @@ class MainWindow(QMainWindow):
         self.detail_image.swipeRequested.connect(self._swipe_detail)
         self.detail_video = VideoPlayerWidget()
         self.detail_video.set_volume(self._saved_video_volume())
+        self.detail_video.set_resolution_limit(self._saved_video_resolution())
         self.detail_video.volumeChanged.connect(self._save_video_volume)
+        self.detail_video.resolutionChanged.connect(
+            lambda height: self._change_video_resolution("detail", height)
+        )
         self.detail_video.bufferingChanged.connect(
             lambda buffering: self._on_video_buffering("detail", buffering)
         )
@@ -738,21 +767,6 @@ class MainWindow(QMainWindow):
             rating_group.addAction(action)
             action.triggered.connect(lambda checked, selected=value: self.rating_changed(selected) if checked else None)
             self.rating_actions[value] = action
-
-        self.theme_actions = {}
-        theme_group = QActionGroup(menu)
-        theme_group.setExclusive(True)
-        theme_menu = menu.addMenu("Theme")
-        theme_menu.setMinimumWidth(180)
-        for theme in ("Dark", "Light", "System"):
-            action = theme_menu.addAction(theme)
-            action.setCheckable(True)
-            action.setChecked(theme == self.current_theme)
-            theme_group.addAction(action)
-            action.triggered.connect(
-                lambda checked, selected=theme: self.change_theme(selected) if checked else None
-            )
-            self.theme_actions[theme] = action
 
         self.media_actions = {}
         media_group = QActionGroup(menu)
@@ -962,7 +976,25 @@ class MainWindow(QMainWindow):
             self.favorites_dialog.raise_()
             self.favorites_dialog.activateWindow()
             return
-        posts = self._favorite_posts()
+        if self.settings.get_bool("favorites_lock/enabled"):
+            if not has_pin(self.settings, "favorites_lock"):
+                BackupMessageDialog.notify(
+                    self,
+                    "Favorites locked",
+                    "The Favorites PIN is unavailable. Reset it from Safety & Privacy.",
+                )
+                return
+            pin_dialog = PinPromptDialog(
+                title="Unlock Favorites",
+                description="Enter your Favorites PIN to continue.",
+                verify_current=lambda value: verify_pin(
+                    self.settings, "favorites_lock", value
+                ),
+                parent=self,
+            )
+            if pin_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+        posts = [post for post in self._favorite_posts() if self._parent_allows_post(post)]
         token = str(uuid4())
         dialog = FavoritesDialog(posts, self._open_favorite, self._remove_favorite, self)
         self.favorites_dialog = dialog
@@ -987,6 +1019,7 @@ class MainWindow(QMainWindow):
             self.favorites_dialog_token = ""
 
     def _refresh_favorites_dialog(self, posts: list[ImagePost]) -> None:
+        posts = [post for post in posts if self._parent_allows_post(post)]
         self._favorite_navigation_posts = list(posts)
         dialog = self.favorites_dialog
         if dialog:
@@ -1024,6 +1057,12 @@ class MainWindow(QMainWindow):
             self._update_detail_navigation()
 
     def _open_favorite(self, post: ImagePost) -> None:
+        if not self._parent_allows_post(post):
+            BackupMessageDialog.notify(
+                self, "Parental control",
+                "This favorite is above the guardian's content limits.",
+            )
+            return
         dialog = self.favorites_dialog
         if dialog:
             self._favorite_navigation_posts = list(dialog.posts)
@@ -1076,7 +1115,7 @@ class MainWindow(QMainWindow):
         return button
 
     def change_theme(self, theme: str) -> None:
-        if theme not in ("Dark", "Light", "System"):
+        if theme not in THEME_NAMES:
             return
         self.current_theme = theme
         self.settings.set("appearance/theme", theme)
@@ -1088,39 +1127,31 @@ class MainWindow(QMainWindow):
                 button.setIcon(self._icon(icon_name))
         self.title_bar.refresh_icons()
         self.title_bar.refresh_search_icon()
-        for name, action in self.theme_actions.items():
-            action.setChecked(name == theme)
 
     def _apply_theme(self, theme: str | None = None) -> None:
         theme = theme or self.current_theme
+        if theme not in THEME_NAMES:
+            theme = "Dark"
         if theme == "System":
             system_window = QApplication.palette().color(QPalette.ColorRole.Window)
             theme = "Dark" if system_window.lightness() < 128 else "Light"
 
-        if theme == "Light":
-            palette = {
-                "BG": "#F4F6FB", "SIDEBAR": "#EAEEF7", "PANEL": "#FFFFFF",
-                "TEXT": "#424B68", "STRONG": "#252B40", "MUTED": "#697491",
-                "BORDER": "#D8DEED", "HOVER": "#EEF1F9", "ACCENT": "#7557D6",
-                "BLUE": "#4F74DC", "ACTIVE": "#E5E9F6", "PRESSED": "#E0E5F1",
-                "DISABLED": "#EEF0F6", "MENU_SELECTED": "#E5E9F6",
-                "SEARCH_BG": "#FFFFFF", "SEARCH_BORDER": "#B9C1D5",
-            }
-        else:
-            palette = {
-                "BG": "#171923", "SIDEBAR": "#1B1D2A", "PANEL": "#222638",
-                "TEXT": "#A9B1D6", "STRONG": "#C0CAF5", "MUTED": "#7982A9",
-                "BORDER": "#343A55", "HOVER": "#2D334B", "ACCENT": "#BB9AF7",
-                "BLUE": "#7AA2F7", "ACTIVE": "#292E46", "PRESSED": "#202438",
-                "DISABLED": "#202230", "MENU_SELECTED": "#343B58",
-                "SEARCH_BG": "#11131B", "SEARCH_BORDER": "#545B78",
-            }
+        palette = dict(THEME_PALETTES[theme])
+        content_surface = palette["BG"]
+        title_surface = palette["SIDEBAR"]
+        status_surface = palette["SIDEBAR"]
 
         stylesheet = """
             * { font-family: "Inter", "Segoe UI", sans-serif; font-size: 10pt; }
             QMainWindow { background: transparent; border: 1px solid __BORDER__; border-radius: 12px; }
-            QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
+            QDialog { background: __BG__; color: __TEXT__; }
+            QWidget#appRoot { background: __BG__; color: __TEXT__; }
+            QWidget#contentArea { background: __CONTENT_SURFACE__; color: __TEXT__; }
             QDialog#settingsDialog { background: transparent; border: 0; }
+            QDialog#pinPromptDialog { background: transparent; border: 0; }
+            QWidget#pinPromptSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLineEdit#pinPromptCurrent, QLineEdit#pinPromptNew, QLineEdit#pinPromptConfirm { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
+            QLabel#pinPromptError { color: #F7768E; }
             QWidget#settingsSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
             QDialog#backupPromptDialog { background: transparent; border: 0; }
             QWidget#backupPromptSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
@@ -1135,7 +1166,7 @@ class MainWindow(QMainWindow):
             QWidget#downloadsSurface, QWidget#releaseNotesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QWidget#dialogTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
             QLabel#downloadsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
-            QPushButton#downloadsCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
+            QPushButton#downloadsCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#downloadsCloseButton:hover { background: #F7768E; }
             QListWidget#downloadsList { background: transparent; border: 0; outline: 0; }
             QListWidget#downloadsList::item, QListWidget#downloadsList::item:selected { background: transparent; border: 0; padding: 0; }
@@ -1151,7 +1182,7 @@ class MainWindow(QMainWindow):
             QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 700; }
             QLabel#releaseNotesVersion { color: __MUTED__; }
             QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
-            QPushButton#favoritesCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
+            QPushButton#favoritesCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#favoritesCloseButton:hover { background: #F7768E; }
             QDialog#mediaInfoDialog { background: transparent; border: 0; }
             QWidget#mediaInfoSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
@@ -1172,6 +1203,10 @@ class MainWindow(QMainWindow):
             QWidget#settingsPage QFrame#settingsSection { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
             QLabel#settingsSectionTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
             QLabel#settingsHelpText { color: __MUTED__; }
+            QWidget#settingsPage QPushButton#themePreviewCard { text-align: left; background: __PANEL__; border: 1px solid __BORDER__; border-radius: 10px; padding: 2px; }
+            QWidget#settingsPage QPushButton#themePreviewCard:hover { border-color: __ACCENT__; }
+            QWidget#settingsPage QPushButton#themePreviewCard:checked { border: 1px solid __ACCENT__; }
+            QLineEdit#parentAllowedTags, QComboBox#parentMaxRating { padding: 5px 10px; }
             QWidget#customTermRow { background: transparent; border: 0; }
             QPushButton#removeCustomTermButton { background: transparent; border: 0; border-radius: 14px; padding: 0; }
             QPushButton#removeCustomTermButton:hover { background: #4A3042; }
@@ -1179,7 +1214,7 @@ class MainWindow(QMainWindow):
             QPushButton#settingsNavButton:hover { background: __HOVER__; }
             QPushButton#settingsNavButton:checked { background: __MENU_SELECTED__; color: __STRONG__; }
             QWidget#appRoot { border-radius: 12px; }
-            QWidget#titleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+            QWidget#titleBar { background: __TITLE_SURFACE__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
             QLabel#windowTitle { color: __STRONG__; font-size: 10pt; font-weight: 650; }
             QWidget#titleBar QPushButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
             QWidget#titleBar QPushButton:hover { background: __HOVER__; }
@@ -1198,6 +1233,7 @@ class MainWindow(QMainWindow):
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid __MUTED__; border-radius: 4px; background: __PANEL__; }
             QCheckBox::indicator:hover { border-color: __ACCENT__; }
             QCheckBox::indicator:checked { image: url("__CHECKMARK__"); background: __ACCENT__; border-color: __ACCENT__; }
+            QCheckBox#settingsSafetyToggle { spacing: 0; padding: 0; background: transparent; border: 0; }
             QComboBox { padding-right: 28px; }
             QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; width: 26px; border: 0; }
             QComboBox QAbstractItemView { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; selection-background-color: __ACTIVE__; outline: 0; padding: 4px; }
@@ -1210,6 +1246,7 @@ class MainWindow(QMainWindow):
             QPushButton#action_menu::menu-indicator { image: none; width: 0; }
             QPushButton#action_search { background: __BLUE__; border-color: __BLUE__; color: __BG__; }
             QPushButton#action_search:hover { background: __ACCENT__; border-color: __ACCENT__; }
+            QPushButton#closeWindowButton { border-radius: 17px; }
             QPushButton#closeWindowButton:hover { background: #F7768E; border-color: #F7768E; }
             QMenu { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; padding: 5px; }
             QMenu#mediaTypeMenu { min-width: 132px; }
@@ -1217,8 +1254,6 @@ class MainWindow(QMainWindow):
             QMenu::item:selected { background: __MENU_SELECTED__; }
             QMenu::separator { height: 1px; background: __BORDER__; margin: 5px 4px; }
             QToolTip { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; border-radius: 8px; padding: 5px 8px; }
-            QMessageBox { background: __BG__; color: __TEXT__; }
-            QMessageBox QLabel { color: __TEXT__; }
             QGroupBox { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 14px; margin-top: 12px; padding: 12px; }
             QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: __STRONG__; }
             QListWidget::item { padding: 7px 8px; border-radius: 7px; }
@@ -1226,7 +1261,7 @@ class MainWindow(QMainWindow):
             QListWidget::item:focus { outline: 0; border: 0; }
             QSlider::groove:horizontal { height: 5px; background: __BORDER__; border-radius: 2px; }
             QSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: __ACCENT__; }
-            QStatusBar#statusBar { background: __SIDEBAR__; color: __MUTED__; border: 0; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+            QStatusBar#statusBar { background: __STATUS_SURFACE__; color: __MUTED__; border: 0; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
             QStatusBar#statusBar::item { border: 0; }
             QLabel#footerMeta { color: __MUTED__; padding-left: 8px; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
@@ -1255,11 +1290,26 @@ class MainWindow(QMainWindow):
         """
         for token, color in palette.items():
             stylesheet = stylesheet.replace(f"__{token}__", color)
+        stylesheet = stylesheet.replace("__CONTENT_SURFACE__", content_surface)
+        stylesheet = stylesheet.replace("__TITLE_SURFACE__", title_surface)
+        stylesheet = stylesheet.replace("__STATUS_SURFACE__", status_surface)
         checkmark = str(Path(__file__).resolve().parent.parent / "assets" / "check.svg").replace("\\", "/")
         stylesheet = stylesheet.replace("__CHECKMARK__", checkmark)
         self.setStyleSheet(stylesheet)
+        for player in (
+            getattr(self, "random_video", None),
+            getattr(self, "detail_video", None),
+        ):
+            if player is not None:
+                player.set_accent_color(palette["ACCENT"])
+        if hasattr(self, "random_ambient"):
+            self._refresh_ambient_layers()
 
     def _catalog(self) -> BooruCatalog:
+        parent_enabled = self.settings.get_bool("parent/enabled")
+        allowed_tags = self.settings.get("parent/allowed_tags", []) if parent_enabled else []
+        if isinstance(allowed_tags, str):
+            allowed_tags = allowed_tags.split(",")
         return BooruCatalog(
             self.settings.gelbooru_credentials,
             bool(self.settings.get("search/exclude_male", True)),
@@ -1269,7 +1319,30 @@ class MainWindow(QMainWindow):
             tuple(self.settings.get("search/custom_block_tags", []) or []),
             str(self.settings.get("search/media_filter", "image")),
             self.settings.doh_endpoint,
+            str(self.settings.get("parent/max_rating", "s")) if parent_enabled else None,
+            tuple(map(str, allowed_tags)) if isinstance(allowed_tags, (list, tuple)) else (),
         )
+
+    def _parent_allows_post(self, post: ImagePost) -> bool:
+        if not self.settings.get_bool("parent/enabled"):
+            return True
+        maximum = str(self.settings.get("parent/max_rating", "s"))
+        rating_rank = {"s": 0, "q": 1, "e": 2}
+        post_rank = rating_rank.get(post.rating)
+        if post_rank is None or post_rank > rating_rank.get(maximum, 0):
+            return False
+        allowed_tags = self.settings.get("parent/allowed_tags", [])
+        if isinstance(allowed_tags, str):
+            allowed_tags = allowed_tags.split(",")
+        if allowed_tags:
+            normalized = {
+                str(value).strip().casefold().replace(" ", "_")
+                for value in allowed_tags
+                if str(value).strip()
+            }
+            if not normalized or not post.tags.intersection(normalized):
+                return False
+        return True
 
     @staticmethod
     def _create_ambient_layer(page: QWidget) -> QLabel:
@@ -1288,7 +1361,7 @@ class MainWindow(QMainWindow):
         if pixmap.isNull():
             label._ambient_source = QPixmap()
             label.clear()
-            label.hide()
+            self._set_ambient_visibility(label, page, False)
             return
         label._ambient_source = pixmap
         size = page.size().expandedTo(QSize(1, 1))
@@ -1300,7 +1373,7 @@ class MainWindow(QMainWindow):
         crop_y = max(0, (scaled.height() - size.height()) // 2)
         background = scaled.copy(crop_x, crop_y, size.width(), size.height())
         tinted = QPixmap(background.size())
-        tinted.fill(Qt.GlobalColor.transparent)
+        tinted.fill(QColor(0, 0, 0))
         painter = QPainter(tinted)
         painter.drawPixmap(0, 0, background)
         painter.fillRect(tinted.rect(), QColor(0, 0, 0, 150))
@@ -1308,8 +1381,17 @@ class MainWindow(QMainWindow):
         label.setPixmap(tinted)
         label.setGeometry(page.rect())
         enabled = self._ambient_mode_enabled()
-        label.setVisible(enabled)
+        self._set_ambient_visibility(label, page, enabled)
         label.lower()
+
+    @staticmethod
+    def _set_ambient_visibility(label: QLabel, page: QWidget, visible: bool) -> None:
+        page.setStyleSheet(
+            "background: #000000; border: 0;"
+            if visible
+            else "background: transparent; border: 0;"
+        )
+        label.setVisible(visible)
 
     def _ambient_mode_enabled(self) -> bool:
         return self.settings.ambient_mode
@@ -1320,7 +1402,7 @@ class MainWindow(QMainWindow):
             label.setGeometry(page.rect())
             pixmap = label.pixmap()
             has_image = pixmap is not None and not pixmap.isNull()
-            label.setVisible(enabled and has_image)
+            self._set_ambient_visibility(label, page, enabled and has_image)
             label.lower()
 
     def _refresh_ambient_layers(self) -> None:
@@ -1334,7 +1416,7 @@ class MainWindow(QMainWindow):
                 self._set_ambient_image(label, source, page)
             else:
                 label.setGeometry(page.rect())
-                label.hide()
+                self._set_ambient_visibility(label, page, False)
                 label.lower()
             page.update()
         self.random_video._reflow()
@@ -1428,6 +1510,22 @@ class MainWindow(QMainWindow):
             return max(0, min(100, int(self.settings.get("video/volume", 70))))
         except (TypeError, ValueError):
             return 70
+
+    def _saved_video_resolution(self) -> int:
+        try:
+            value = int(self.settings.get("video/max_height", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+        return value if value in {0, 480, 720, 1080, 2160} else 0
+
+    def _change_video_resolution(self, source: str, height: int) -> None:
+        self.settings.set("video/max_height", height)
+        self.random_video.set_resolution_limit(height)
+        self.detail_video.set_resolution_limit(height)
+        post = getattr(self, "random_post", None) if source == "random" else self.detail_post
+        player = self.random_video if source == "random" else self.detail_video
+        if post is not None and player.has_source:
+            self._start_video_stream(player, post)
 
     def _save_video_volume(self, value: int) -> None:
         value = max(0, min(100, int(value)))
@@ -1695,14 +1793,38 @@ class MainWindow(QMainWindow):
             target.set_loading_progress(value)
 
     def _active_rating(self) -> str:
+        if self.settings.get_bool("parent/enabled") and str(
+            self.settings.get("parent/max_rating", "s")
+        ) == "s":
+            return "sfw"
         return self.selected_rating
 
     def _rating_allowed(self) -> bool:
-        if self._active_rating() == "sfw" or bool(self.settings.get("search/allow_nsfw", False)):
+        if self.settings.get_bool("parent/enabled"):
+            maximum = str(self.settings.get("parent/max_rating", "s"))
+            maximum_rank = {"s": 0, "q": 1, "e": 2}.get(maximum, 0)
+            requested_rank = {"sfw": 0, "nsfw": 2, "all": 2}.get(self.selected_rating, 2)
+            if requested_rank > maximum_rank:
+                BackupMessageDialog.notify(
+                    self, "Parental control",
+                    "This rating is above the maximum selected by the guardian.",
+                )
+                replacement = "sfw" if maximum_rank == 0 else "all"
+                self.selected_rating = replacement
+                self.settings.set("search/rating", replacement)
+                if replacement in self.rating_actions:
+                    self.rating_actions[replacement].setChecked(True)
+                self._update_filter_tooltip()
+                return False
+        if self._active_rating() == "sfw" or self.settings.get_bool("search/allow_nsfw"):
             return True
-        QMessageBox.information(self, "NSFW filter", "Enable 'Allow NSFW results' in Settings before selecting this rating.")
+        BackupMessageDialog.notify(
+            self,
+            "NSFW filter",
+            "Enable 'Allow NSFW results' in Settings before selecting this rating.",
+        )
         self.open_preferences()
-        if bool(self.settings.get("search/allow_nsfw", False)):
+        if self.settings.get_bool("search/allow_nsfw"):
             return True
         self.rating_changed("sfw")
         return False
@@ -1965,6 +2087,7 @@ class MainWindow(QMainWindow):
             width,
             height,
         )
+        self._update_gallery_notice_mask()
         self._gallery_notice_opacity.setOpacity(0.0)
         self.gallery_status.show()
         self.gallery_status.raise_()
@@ -1990,6 +2113,33 @@ class MainWindow(QMainWindow):
         self._gallery_notice_animation.stop()
         self._gallery_notice_opacity.setOpacity(1.0)
         self.gallery_status.hide()
+
+    def _update_gallery_notice_mask(self) -> None:
+        width, height = self.gallery_status.width(), self.gallery_status.height()
+        radius = min(24, width // 2, height // 2)
+        if radius <= 0:
+            self.gallery_status.clearMask()
+            return
+        diameter = radius * 2
+        mask = QRegion(
+            QRect(radius, 0, width - diameter, height),
+            QRegion.RegionType.Rectangle,
+        )
+        mask |= QRegion(
+            QRect(0, radius, width, height - diameter),
+            QRegion.RegionType.Rectangle,
+        )
+        for x, y in (
+            (0, 0),
+            (width - diameter, 0),
+            (0, height - diameter),
+            (width - diameter, height - diameter),
+        ):
+            mask |= QRegion(
+                QRect(x, y, diameter, diameter),
+                QRegion.RegionType.Ellipse,
+            )
+        self.gallery_status.setMask(mask)
 
     def _set_gallery_rows_top_aligned(self) -> None:
         """Rebuild compact, centered rows and leave spare height below them."""
@@ -2171,6 +2321,12 @@ class MainWindow(QMainWindow):
             badge.show()
 
     def open_post(self, post: ImagePost) -> None:
+        if not self._parent_allows_post(post):
+            BackupMessageDialog.notify(
+                self, "Parental control",
+                "This media is above the guardian's content limits.",
+            )
+            return
         self._media_controls_idle_timer.stop()
         self.footer_meta.clear()
         self.random_video.clear()
@@ -2431,11 +2587,23 @@ class MainWindow(QMainWindow):
         if current_page not in (self.random_page, self.detail_page):
             return
         self._fullscreen_source = "random" if current_page is self.random_page else "detail"
+        fullscreen_post = (
+            self.random_post
+            if self._fullscreen_source == "random"
+            else self.detail_post
+        )
         self._was_maximized_before_fullscreen = self.isMaximized()
         self._windowed_geometry = self.geometry()
         self._fullscreen_active = True
         active_player = self.random_video if self._fullscreen_source == "random" else self.detail_video
         active_player.set_fullscreen_mode(True)
+        if fullscreen_post is not None and fullscreen_post.media_type == "video":
+            ambient = (
+                self.random_ambient
+                if self._fullscreen_source == "random"
+                else self.detail_ambient
+            )
+            self._set_ambient_visibility(ambient, current_page, False)
         self._update_detail_navigation()
         self.random_video.set_fullscreen_toggle_visible(False)
         self.detail_video.set_fullscreen_toggle_visible(False)
@@ -2456,8 +2624,9 @@ class MainWindow(QMainWindow):
         active_player._schedule_reflow()
         self._sync_favorite_buttons()
         self._show_fullscreen_controls()
-        image = self.random_image if self._fullscreen_source == "random" else self.detail_image
-        QTimer.singleShot(0, image._fit_to_viewport)
+        if fullscreen_post is None or fullscreen_post.media_type != "video":
+            image = self.random_image if self._fullscreen_source == "random" else self.detail_image
+            QTimer.singleShot(0, image._fit_to_viewport)
 
     def _set_normal_video_actions(self, source: str, visible: bool) -> None:
         if source == "random":
@@ -2613,8 +2782,9 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setVisible(image_ready)
         self._update_detail_navigation()
         self._sync_favorite_buttons()
-        image = self.random_image if getattr(self, "_fullscreen_source", "detail") == "random" else self.detail_image
-        QTimer.singleShot(0, image._fit_to_viewport)
+        if current_post is None or current_post.media_type != "video":
+            image = self.random_image if getattr(self, "_fullscreen_source", "detail") == "random" else self.detail_image
+            QTimer.singleShot(0, image._fit_to_viewport)
 
     def _show_fullscreen_controls(self) -> None:
         if not self._fullscreen_active:
@@ -2732,6 +2902,9 @@ class MainWindow(QMainWindow):
             bool(self.settings.get("search/exclude_male", True)),
             bool(self.settings.get("search/filter_gore", True)),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
+            self.settings.get_bool("parent/enabled"),
+            str(self.settings.get("parent/max_rating", "s")),
+            tuple(self.settings.get("parent/allowed_tags", []) or []),
         )
         dialog = PreferencesDialog(self.settings, self)
         self.preferences_dialog = dialog
@@ -2741,11 +2914,28 @@ class MainWindow(QMainWindow):
             "rating": previous_rating,
             "filters": previous_filter_settings,
             "favorites": self._favorite_posts(),
+            "parent_policy": (
+                self.settings.get_bool("parent/enabled"),
+                str(self.settings.get("parent/max_rating", "s")),
+                tuple(self.settings.get("parent/allowed_tags", []) or []),
+            ),
+            "favorites_lock": self.settings.get_bool("favorites_lock/enabled"),
         }
 
         def preferences_changed() -> None:
             favorites = self._favorite_posts()
-            if favorites != preference_state["favorites"]:
+            imported_theme = str(self.settings.get("appearance/theme", self.current_theme))
+            if imported_theme in THEME_NAMES and imported_theme != self.current_theme:
+                self.change_theme(imported_theme)
+            parent_policy = (
+                self.settings.get_bool("parent/enabled"),
+                str(self.settings.get("parent/max_rating", "s")),
+                tuple(self.settings.get("parent/allowed_tags", []) or []),
+            )
+            favorites_lock_enabled = self.settings.get_bool("favorites_lock/enabled")
+            if favorites_lock_enabled and not preference_state["favorites_lock"] and self.favorites_dialog:
+                self.favorites_dialog.close()
+            if favorites != preference_state["favorites"] or parent_policy != preference_state["parent_policy"]:
                 preference_state["favorites"] = favorites
                 self._refresh_favorites_dialog(favorites)
             self._preferences_updated(
@@ -2759,7 +2949,12 @@ class MainWindow(QMainWindow):
                 bool(self.settings.get("search/exclude_male", True)),
                 bool(self.settings.get("search/filter_gore", True)),
                 tuple(self.settings.get("search/custom_block_tags", []) or []),
+                self.settings.get_bool("parent/enabled"),
+                str(self.settings.get("parent/max_rating", "s")),
+                tuple(self.settings.get("parent/allowed_tags", []) or []),
             )
+            preference_state["parent_policy"] = parent_policy
+            preference_state["favorites_lock"] = favorites_lock_enabled
 
         dialog.settings_changed.connect(preferences_changed)
         dialog.finished.connect(
@@ -2777,7 +2972,7 @@ class MainWindow(QMainWindow):
         self,
         previous_provider: str,
         previous_rating: str,
-        previous_filter_settings: tuple[bool, bool, tuple],
+        previous_filter_settings: tuple,
     ) -> None:
         provider = str(self.settings.get("search/provider", "All"))
         rating = str(self.settings.get("search/rating", "sfw"))
@@ -2798,20 +2993,31 @@ class MainWindow(QMainWindow):
             bool(self.settings.get("search/exclude_male", True)),
             bool(self.settings.get("search/filter_gore", True)),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
+            self.settings.get_bool("parent/enabled"),
+            str(self.settings.get("parent/max_rating", "s")),
+            tuple(self.settings.get("parent/allowed_tags", []) or []),
         )
         filters_changed = current_filter_settings != previous_filter_settings
-        if (
+        settings_changed = (
             self.selected_provider != previous_provider
             or self.selected_rating != previous_rating
             or self.selected_media != previous_media
             or filters_changed
-        ) and self._rating_allowed():
+        )
+        if settings_changed:
+            self._rating_allowed()
             if self.current_query:
                 self.load_page(self.current_page)
             else:
                 self.show_random()
 
     def queue_download(self, post: ImagePost) -> None:
+        if not self._parent_allows_post(post):
+            BackupMessageDialog.notify(
+                self, "Parental control",
+                "This media is above the guardian's content limits.",
+            )
+            return
         folder = str(self.settings.get("downloads/folder", "")).strip()
         if not folder:
             folder = str(Path.home() / "Pictures" / "Waifu Gallery")
@@ -2828,7 +3034,7 @@ class MainWindow(QMainWindow):
             return
         key = str(uuid4())
         path = Path(filename)
-        self.downloads.add_download(key, path.name)
+        self.downloads.add_download(key, path.name, str(path))
         task = FileDownloadTask(key, self._catalog(), post, path)
         task.signals.result.connect(lambda download_key, result: self._task_succeeded(f"download:{download_key}", result))
         task.signals.error.connect(lambda download_key, error: self._task_failed(f"download:{download_key}", error))
@@ -2993,6 +3199,7 @@ class MainWindow(QMainWindow):
             self.gallery_status.adjustSize()
             height = min(110, max(42, self.gallery_status.sizeHint().height()))
             self.gallery_status.setGeometry((self.gallery_page.width() - width) // 2, 12, width, height)
+            self._update_gallery_notice_mask()
         if hasattr(self, "random_ambient"):
             self.random_ambient.setGeometry(self.random_page.rect())
             self.random_ambient.lower()
@@ -3005,10 +3212,20 @@ class MainWindow(QMainWindow):
         """Apply costly view reflows once the user finishes resizing."""
         if not self.isVisible():
             return
-        self._refresh_ambient_layers()
-        self._render_random_image()
-        if hasattr(self, "detail_image"):
-            self.detail_image._fit_to_viewport()
+        current_page = self.pages.currentWidget()
+        current_post = None
+        if current_page is self.random_page:
+            current_post = self.random_post
+        elif current_page is self.detail_page:
+            current_post = self.detail_post
+        video_page = current_post is not None and current_post.media_type == "video"
+        if not (self._fullscreen_active and video_page):
+            self._refresh_ambient_layers()
+            self._render_random_image()
+            if hasattr(self, "detail_image"):
+                self.detail_image._fit_to_viewport()
+            if video_page and self._ambient_restore_timer.isActive():
+                self._ambient_restore_timer.stop()
         if self.pages.currentWidget() is self.gallery_page and self.posts:
             columns = self._gallery_column_count()
             if columns != getattr(self, "_gallery_columns", None):

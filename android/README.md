@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The Android release version is aligned with the desktop projects (`0.1.10`). Android's `versionCode` is `8` and continues to increase independently for each Android update.
+The Android release version is aligned with the desktop projects (`0.1.11`). Android's `versionCode` is `9` and continues to increase independently for each Android update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -15,21 +15,31 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
-- Download queue with progress and retry states; tap a completed item to open the saved media in an installed gallery or video app.
+- Download queue with progress and retry states; download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
 - Local favorites with image/video badges and separate totals; search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
+- Safety & Privacy controls with PIN-protected Favorites and parental maximum-rating/allowed-tag filters. PINs are salted and hashed locally and are excluded from encrypted user-data backups; parental filtering relies on provider metadata and is not OS-level supervision.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
 - Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. You can also check manually in **Settings → Updates**. Update downloads show determinate or indeterminate progress and verify the APK checksum before installation. About and update dialogs feature the Iro-chan mascot.
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
-Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Backup & Restore, Updates, and About. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
+Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Safety & Privacy, Backup & Restore, Updates, and About. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
 The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL.
 
 ## Encrypted user data backup
 
-Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Backups include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android's selected download folder is device-specific and is not included.
+Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
-The version 1 format is interoperable with Windows and Linux and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters; it cannot be recovered. Merge adds missing favorites and keeps provider credentials already present on the device; Replace uses the backup's favorites and credentials. Both import portable preferences. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+
+## Android 0.1.11
+
+### New features
+
+- **Safety & Privacy:** added a guardian PIN, parental maximum-rating and allowed-tag filters, and a separate PIN lock for Favorites.
+- **Downloads:** history retains saved file destinations across app restarts.
+- **Encrypted backups:** version 2 files record included sections, allow selective import/export, and remain compatible with version 1 backups.
+- Release artifact: `app-release.apk` (`versionCode` 9).
 
 ## Android 0.1.10
 

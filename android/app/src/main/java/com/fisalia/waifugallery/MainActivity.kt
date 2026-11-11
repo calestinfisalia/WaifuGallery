@@ -95,6 +95,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
@@ -108,6 +109,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -135,6 +137,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -155,6 +158,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
+import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.UserDataBackup
@@ -435,6 +439,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             Modifier.padding(padding),
                             mediaFullscreen,
                             onFullscreenChanged = { mediaFullscreen = it },
+                            onVideoResolutionChanged = model::setVideoMaxHeight,
                         )
                         AppScreen.GALLERY -> GalleryScreen(
                             state,
@@ -453,6 +458,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             modifier = Modifier.padding(padding),
                             mediaFullscreen = mediaFullscreen,
                             onFullscreenChanged = { mediaFullscreen = it },
+                            onVideoResolutionChanged = model::setVideoMaxHeight,
                         )
                     }
                 }
@@ -489,6 +495,15 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             initialApiKey = model.preferences.rule34ApiKey,
             onSave = model::saveRule34Credentials,
             onDismiss = model::cancelRule34Credentials,
+        )
+    }
+    if (state.requestFavoritesUnlock) {
+        SafetyPinEntryDialog(
+            title = "Unlock Favorites",
+            description = "Enter your Favorites PIN to continue.",
+            onDismiss = model::cancelFavoritesUnlock,
+            onVerify = model::verifyFavoritesUnlock,
+            onVerified = {},
         )
     }
     confirmFavoriteRemoval?.let { post ->
@@ -741,6 +756,7 @@ private fun RandomScreen(
     modifier: Modifier = Modifier,
     mediaFullscreen: Boolean = false,
     onFullscreenChanged: (Boolean) -> Unit = {},
+    onVideoResolutionChanged: (Int) -> Unit = {},
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         state.image?.let { post ->
@@ -755,6 +771,7 @@ private fun RandomScreen(
                 videoMaxHeight = state.videoMaxHeight,
                 mediaFullscreen = mediaFullscreen,
                 onFullscreenChanged = onFullscreenChanged,
+                onVideoResolutionChanged = onVideoResolutionChanged,
             )
         }
         if (state.image == null && !state.isLoading) Text("No image loaded")
@@ -971,8 +988,9 @@ private fun FavoritesScreen(
     onRequestRemoval: (ImagePost) -> Unit,
     onClose: () -> Unit,
 ) {
-    val imageCount = state.favorites.count { it.mediaType != "video" }
-    val videoCount = state.favorites.size - imageCount
+    val visibleFavorites = state.favorites.filter(model::parentalAllows)
+    val imageCount = visibleFavorites.count { it.mediaType != "video" }
+    val videoCount = visibleFavorites.size - imageCount
     Surface(modifier.fillMaxSize(), color = AppBackground) {
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -991,12 +1009,15 @@ private fun FavoritesScreen(
                     )
                 }
             }
-            if (state.favorites.isEmpty()) {
+            if (visibleFavorites.isEmpty()) {
                 Box(
                     Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No favorites yet")
+                    Text(
+                        if (state.favorites.isEmpty()) "No favorites yet"
+                        else "No favorites match the parental content policy",
+                    )
                 }
             } else {
                 LazyVerticalGrid(
@@ -1006,7 +1027,7 @@ private fun FavoritesScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(state.favorites, key = { it.id }) { post ->
+                    items(visibleFavorites, key = { it.id }) { post ->
                         Box(Modifier.fillMaxWidth().aspectRatio(0.95f)) {
                             ImageFrame(
                                 post.thumbnailUrl,
@@ -1037,6 +1058,79 @@ private fun FavoritesScreen(
 }
 
 @Composable
+private fun SafetyPinEntryDialog(
+    title: String,
+    description: String,
+    confirmLabel: String = "Unlock",
+    onDismiss: () -> Unit,
+    onVerify: (String) -> AppPreferences.PinVerification,
+    onVerified: () -> Unit,
+) {
+    var pin by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf("") }
+    var isVerifying by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!isVerifying) onDismiss() },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(description)
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { value ->
+                        pin = value.filter { it in '0'..'9' }.take(12)
+                        error = ""
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("PIN") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                        imeAction = ImeAction.Done,
+                    ),
+                )
+                if (error.isNotBlank()) {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = pin.length in 4..12 && !isVerifying,
+                onClick = {
+                    isVerifying = true
+                    scope.launch {
+                        try {
+                            val result = withContext(Dispatchers.Default) { onVerify(pin) }
+                            if (result.accepted) {
+                                onVerified()
+                            } else {
+                                error = if (result.retryAfterSeconds > 0) {
+                                    "Too many attempts. Try again in ${result.retryAfterSeconds} seconds."
+                                } else {
+                                    "The PIN is incorrect."
+                                }
+                            }
+                        } catch (failure: Exception) {
+                            error = failure.message ?: "Could not verify the PIN."
+                        } finally {
+                            isVerifying = false
+                        }
+                    }
+                },
+            ) {
+                Text(if (isVerifying) "Checking..." else confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !isVerifying, onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
 private fun DetailScreen(
     state: UiState,
     imageLoader: ImageLoader,
@@ -1045,6 +1139,7 @@ private fun DetailScreen(
     modifier: Modifier = Modifier,
     mediaFullscreen: Boolean = false,
     onFullscreenChanged: (Boolean) -> Unit = {},
+    onVideoResolutionChanged: (Int) -> Unit = {},
 ) {
     val posts = state.detailPosts
     val selectedIndex = posts.indexOfFirst { it.id == state.detailImage?.id }.coerceAtLeast(0)
@@ -1090,6 +1185,7 @@ private fun DetailScreen(
                     videoMaxHeight = state.videoMaxHeight,
                     mediaFullscreen = mediaFullscreen,
                     onFullscreenChanged = onFullscreenChanged,
+                    onVideoResolutionChanged = onVideoResolutionChanged,
                 )
             }
         } else {
@@ -1104,6 +1200,7 @@ private fun DetailScreen(
                     videoMaxHeight = state.videoMaxHeight,
                     mediaFullscreen = mediaFullscreen,
                     onFullscreenChanged = onFullscreenChanged,
+                    onVideoResolutionChanged = onVideoResolutionChanged,
                 )
             }
         }
@@ -1160,6 +1257,7 @@ private fun ImageFrame(
     videoMaxHeight: Int = 0,
     mediaFullscreen: Boolean = false,
     onFullscreenChanged: (Boolean) -> Unit = {},
+    onVideoResolutionChanged: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1243,7 +1341,19 @@ private fun ImageFrame(
     var videoPosition by remember(post.id) { mutableStateOf(0) }
     var videoError by remember(post.id) { mutableStateOf(false) }
     var videoBuffering by remember(post.id) { mutableStateOf(false) }
+    var videoCompleted by remember(post.id) { mutableStateOf(false) }
+    var previousVideoMaxHeight by remember(post.id) { mutableIntStateOf(videoMaxHeight) }
+    var pendingVideoPosition by remember(post.id) { mutableIntStateOf(0) }
+    var videoResolutionMenuExpanded by remember(post.id) { mutableStateOf(false) }
     var videoFeedback by remember(post.id) { mutableStateOf<String?>(null) }
+    fun resumeVideo() {
+        if (videoCompleted) {
+            videoView?.seekTo(0)
+            videoPosition = 0
+            videoCompleted = false
+        }
+        videoPlaying = true
+    }
     LaunchedEffect(videoFeedback) {
         if (videoFeedback != null) {
             delay(900)
@@ -1260,9 +1370,13 @@ private fun ImageFrame(
         }
     }
     LaunchedEffect(post.id, videoMaxHeight) {
-        videoPlaying = false
-        videoStarted = false
-        videoPrepared = false
+        if (previousVideoMaxHeight != videoMaxHeight) {
+            if (videoStarted && playbackAllowed) {
+                pendingVideoPosition = videoPosition
+                videoPrepared = false
+            }
+            previousVideoMaxHeight = videoMaxHeight
+        }
     }
     LaunchedEffect(videoPlaying, videoView) {
         while (videoPlaying) {
@@ -1293,10 +1407,11 @@ private fun ImageFrame(
             contentScale = ContentScale.Crop,
         )
         if (post.mediaType == "video" && videoStarted && playbackAllowed && !allowThumbnailFallback && !videoError) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context ->
-                    android.widget.VideoView(context).apply {
+            key(videoMaxHeight) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        android.widget.VideoView(context).apply {
                         val playerView = this
                         videoView = playerView
                         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -1373,11 +1488,21 @@ private fun ImageFrame(
                             post.imageUrl
                         }
                         setOnPreparedListener { player ->
-                            player.isLooping = true
+                            player.isLooping = false
                             videoDuration = player.duration.coerceAtLeast(0)
                             videoBuffering = false
                             videoPrepared = true
+                            if (pendingVideoPosition > 0) {
+                                playerView.seekTo(pendingVideoPosition.coerceAtMost(videoDuration))
+                                videoPosition = pendingVideoPosition.coerceAtMost(videoDuration)
+                                pendingVideoPosition = 0
+                            }
                             if (currentVideoPlaying) playerView.start() else playerView.pause()
+                        }
+                        setOnCompletionListener {
+                            videoCompleted = true
+                            videoPlaying = false
+                            videoPosition = videoDuration
                         }
                         setOnInfoListener { _, what, _ ->
                             when (what) {
@@ -1401,18 +1526,19 @@ private fun ImageFrame(
                         }
                         setVideoURI(Uri.parse(videoUrl), headers)
                     }
-                },
-                update = { view ->
-                    if (videoPrepared) {
-                        if (videoPlaying && !view.isPlaying) view.start()
-                        else if (!videoPlaying && view.isPlaying) view.pause()
-                    }
-                },
-                onRelease = {
-                    if (videoView === it) videoView = null
-                    it.stopPlayback()
-                },
-            )
+                    },
+                    update = { view ->
+                        if (videoPrepared) {
+                            if (videoPlaying && !view.isPlaying) view.start()
+                            else if (!videoPlaying && view.isPlaying) view.pause()
+                        }
+                    },
+                    onRelease = {
+                        if (videoView === it) videoView = null
+                        it.stopPlayback()
+                    },
+                )
+            }
         } else {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).crossfade(true).build(),
@@ -1447,6 +1573,27 @@ private fun ImageFrame(
                 shape = RoundedCornerShape(50.dp), color = Color(0xBB111118),
             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(44.dp)) } }
         }
+        if (
+            post.mediaType == "video" &&
+            videoStarted &&
+            !videoPlaying &&
+            !videoBuffering &&
+            !videoError &&
+            playbackAllowed &&
+            !allowThumbnailFallback
+        ) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).size(68.dp).clickable {
+                    resumeVideo()
+                },
+                shape = RoundedCornerShape(50.dp),
+                color = Color(0xBB111118),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(44.dp))
+                }
+            }
+        }
         if (post.mediaType == "video" && videoError && !allowThumbnailFallback) {
             Surface(
                 modifier = Modifier.align(Alignment.Center).padding(16.dp),
@@ -1464,6 +1611,30 @@ private fun ImageFrame(
             }
         }
         if (post.mediaType == "video" && playbackAllowed && !allowThumbnailFallback && !videoError) {
+            Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                IconButton(onClick = { videoResolutionMenuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Video resolution")
+                }
+                DropdownMenu(
+                    expanded = videoResolutionMenuExpanded,
+                    onDismissRequest = { videoResolutionMenuExpanded = false },
+                ) {
+                    listOf(0 to "Auto", 2160 to "2160p", 1080 to "1080p", 720 to "720p", 480 to "480p")
+                        .forEach { (height, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (videoMaxHeight == height) "$label  ✓" else label,
+                                    )
+                                },
+                                onClick = {
+                                    videoResolutionMenuExpanded = false
+                                    if (videoMaxHeight != height) onVideoResolutionChanged(height)
+                                },
+                            )
+                        }
+                }
+            }
             Surface(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
                 color = Color(0xEE1C1E28),
@@ -1476,8 +1647,12 @@ private fun ImageFrame(
                     IconButton(
                         onClick = {
                             if (videoStarted) {
-                                videoPlaying = !videoPlaying
-                                if (!videoPlaying) videoBuffering = false
+                                if (videoPlaying) {
+                                    videoPlaying = false
+                                    videoBuffering = false
+                                } else {
+                                    resumeVideo()
+                                }
                             } else {
                                 videoStarted = true
                                 videoPlaying = true
@@ -1644,8 +1819,45 @@ private fun SettingsScreen(
     var ratingMenu by remember { mutableStateOf(false) }
     var mediaMenu by remember { mutableStateOf(false) }
     var videoResolutionMenu by remember { mutableStateOf(false) }
+    var pendingProtectedPage by rememberSaveable { mutableStateOf("") }
+    var showProtectedSettingsPrompt by rememberSaveable { mutableStateOf(false) }
+    fun navigateToPage(page: String) {
+        if (
+            state.parentalControlEnabled &&
+            state.parentalPinSet &&
+            page in setOf("browsing", "providers", "filters", "backup")
+        ) {
+            pendingProtectedPage = page
+            showProtectedSettingsPrompt = true
+        } else {
+            selectedPage = page
+        }
+    }
+    fun navigateBack() {
+        selectedPage = when (selectedPage) {
+            "favoritesLock", "parentalControl" -> "safety"
+            else -> ""
+        }
+    }
     BackHandler {
-        if (selectedPage.isNotEmpty()) selectedPage = "" else onClose()
+        if (selectedPage.isNotEmpty()) navigateBack() else onClose()
+    }
+    if (showProtectedSettingsPrompt) {
+        SafetyPinEntryDialog(
+            title = "Guardian PIN required",
+            description = "Enter the guardian PIN to open these settings.",
+            confirmLabel = "Verify PIN",
+            onDismiss = {
+                showProtectedSettingsPrompt = false
+                pendingProtectedPage = ""
+            },
+            onVerify = { pin -> model.verifySafetyPin("parent", pin) },
+            onVerified = {
+                selectedPage = pendingProtectedPage
+                pendingProtectedPage = ""
+                showProtectedSettingsPrompt = false
+            },
+        )
     }
 
     val pageTitle = when (selectedPage) {
@@ -1656,6 +1868,9 @@ private fun SettingsScreen(
         "display" -> "Display"
         "downloads" -> "Downloads"
         "backup" -> "Backup & restore"
+        "safety" -> "Safety & privacy"
+        "favoritesLock" -> "Favorites lock"
+        "parentalControl" -> "Parental control"
         "updates" -> "Updates"
         "about" -> "About"
         else -> "Settings"
@@ -1668,35 +1883,52 @@ private fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = { if (selectedPage.isNotEmpty()) selectedPage = "" else onClose() },
+                    onClick = { if (selectedPage.isNotEmpty()) navigateBack() else onClose() },
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = if (selectedPage.isNotEmpty()) "Back to settings" else "Back to gallery",
+                        contentDescription = when (selectedPage) {
+                            "favoritesLock", "parentalControl" -> "Back to Safety & privacy"
+                            "" -> "Back to gallery"
+                            else -> "Back to settings"
+                        },
                     )
                 }
                 Text(pageTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
 
             Column(
-                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                Modifier.weight(1f).fillMaxWidth()
+                    .then(
+                        if (selectedPage == "updates") Modifier
+                        else Modifier.verticalScroll(rememberScrollState()),
+                    )
                     .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (selectedPage.isEmpty()) {
                     SettingsCategoryRow("Browsing", "Default provider and search terms", Icons.Default.Search) {
-                        selectedPage = "browsing"
+                        navigateToPage("browsing")
                     }
-                    SettingsCategoryRow("Providers", "Provider account credentials", Icons.Default.Info) { selectedPage = "providers" }
-                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Refresh) { selectedPage = "network" }
-                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.Check) { selectedPage = "filters" }
-                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen) { selectedPage = "display" }
-                    SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download) { selectedPage = "downloads" }
-                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Check) { selectedPage = "backup" }
-                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.Refresh) { selectedPage = "updates" }
-                    SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info) { selectedPage = "about" }
+                    SettingsCategoryRow("Providers", "Provider account credentials", Icons.Default.Info) { navigateToPage("providers") }
+                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Refresh) { navigateToPage("network") }
+                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.Check) { navigateToPage("filters") }
+                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen) { navigateToPage("display") }
+                    SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download) { navigateToPage("downloads") }
+                    SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Info) { navigateToPage("safety") }
+                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Check) { navigateToPage("backup") }
+                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.Refresh) { navigateToPage("updates") }
+                    SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info) { navigateToPage("about") }
                 } else {
                     when (selectedPage) {
+                        "safety" -> {
+                            SettingsCategoryRow("Favorites lock", "Require a PIN to open Favorites", Icons.Default.Favorite) {
+                                selectedPage = "favoritesLock"
+                            }
+                            SettingsCategoryRow("Parental control", "Restrict media by rating and allowed tags", Icons.Default.Info) {
+                                selectedPage = "parentalControl"
+                            }
+                        }
                         "browsing" -> {
                             Box {
                                 SettingsValueRow("Default provider", state.provider) { providerMenu = true }
@@ -1987,47 +2219,66 @@ private fun SettingsScreen(
                                 state.saveFolderLabel ?: "Default: Pictures/Waifu Gallery",
                             ) { onChooseFolder() }
                         }
+                        "favoritesLock" -> SafetySettingsSection(state, model, showFavoritesLock = true)
+                        "parentalControl" -> SafetySettingsSection(state, model, showParentalControl = true)
                         "backup" -> UserDataBackupSection(model)
                         "updates" -> {
-                            Text(
-                                state.releaseUpdateCheckMessage ?: "Check GitHub Releases for the latest version.",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Button(
-                                onClick = model::checkForReleaseUpdate,
-                                enabled = !state.isCheckingReleaseUpdate,
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                if (state.isCheckingReleaseUpdate) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                Column(
+                                    Modifier.fillMaxWidth().widthIn(max = 360.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                ) {
+                                    Image(
+                                        painter = painterResource(R.mipmap.ic_launcher),
+                                        contentDescription = "Waifu Gallery",
+                                        modifier = Modifier.size(96.dp),
+                                        contentScale = ContentScale.Fit,
                                     )
-                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        state.releaseUpdateCheckMessage ?: "Check GitHub Releases for the latest version.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Button(
+                                        onClick = model::checkForReleaseUpdate,
+                                        enabled = !state.isCheckingReleaseUpdate,
+                                    ) {
+                                        if (state.isCheckingReleaseUpdate) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (state.isCheckingReleaseUpdate) "Checking..." else "Check for updates")
+                                    }
+                                    if (state.isDownloadingReleaseUpdate) {
+                                        val progress = state.releaseDownloadProgress
+                                        Text(
+                                            if (progress == null) "Downloading update..."
+                                            else "Downloading update... $progress%",
+                                        )
+                                        if (progress == null) {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                color = Accent,
+                                            )
+                                        } else {
+                                            LinearProgressIndicator(
+                                                progress = { progress / 100f },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                color = Accent,
+                                            )
+                                        }
+                                    }
+                                    state.releaseDownloadError?.let { error ->
+                                        Text(error, color = MaterialTheme.colorScheme.error)
+                                    }
                                 }
-                                Text(if (state.isCheckingReleaseUpdate) "Checking..." else "Check for updates")
-                            }
-                            if (state.isDownloadingReleaseUpdate) {
-                                val progress = state.releaseDownloadProgress
-                                Text(
-                                    if (progress == null) "Downloading update..."
-                                    else "Downloading update... $progress%",
-                                )
-                                if (progress == null) {
-                                    LinearProgressIndicator(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = Accent,
-                                    )
-                                } else {
-                                    LinearProgressIndicator(
-                                        progress = { progress / 100f },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = Accent,
-                                    )
-                                }
-                            }
-                            state.releaseDownloadError?.let { error ->
-                                Text(error, color = MaterialTheme.colorScheme.error)
                             }
                         }
                         "about" -> {
@@ -2070,6 +2321,356 @@ private fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SafetySettingsSection(
+    state: UiState,
+    model: MainViewModel,
+    showFavoritesLock: Boolean = false,
+    showParentalControl: Boolean = false,
+) {
+    var pinAction by remember { mutableStateOf<SafetyPinAction?>(null) }
+    var currentPin by rememberSaveable { mutableStateOf("") }
+    var newPin by rememberSaveable { mutableStateOf("") }
+    var confirmPin by rememberSaveable { mutableStateOf("") }
+    var pinError by rememberSaveable { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var maximumRating by remember(state.parentalMaximumRating) {
+        mutableStateOf(state.parentalMaximumRating)
+    }
+    var allowedTags by remember(state.parentalAllowedTags) {
+        mutableStateOf(state.parentalAllowedTags.joinToString(", "))
+    }
+    var showRatingDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val favoritesPinSet = state.favoritesPinSet
+    val parentalPinSet = state.parentalPinSet
+
+    fun requestPinAction(action: SafetyPinAction) {
+        pinAction = action
+        currentPin = ""
+        newPin = ""
+        confirmPin = ""
+        pinError = ""
+    }
+
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (showFavoritesLock) {
+            SettingSwitch(
+                "Require a PIN to open Favorites",
+                state.favoritesLockEnabled,
+                if (state.favoritesLockEnabled && !favoritesPinSet) {
+                    "Enabled without a PIN. Set a PIN or turn the lock off."
+                } else {
+                    "Ask for the Favorites PIN whenever the Favorites screen is opened."
+                },
+            ) { enabled ->
+                when {
+                    enabled && favoritesPinSet -> requestPinAction(SafetyPinAction.ENABLE_FAVORITES)
+                    enabled -> requestPinAction(SafetyPinAction.ENABLE_FAVORITES)
+                    favoritesPinSet -> requestPinAction(SafetyPinAction.DISABLE_FAVORITES)
+                    else -> model.setFavoritesLockEnabled(false)
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { requestPinAction(SafetyPinAction.SET_FAVORITES) },
+                ) {
+                    Text(if (favoritesPinSet) "Change PIN" else "Set PIN")
+                }
+                if (favoritesPinSet) {
+                    TextButton(onClick = { requestPinAction(SafetyPinAction.REMOVE_FAVORITES) }) {
+                        Text("Remove PIN")
+                    }
+                }
+            }
+        }
+
+        if (showParentalControl) {
+            SettingSwitch(
+                "Restrict content",
+                state.parentalControlEnabled,
+                if (state.parentalControlEnabled && !parentalPinSet) {
+                    "Enabled without a PIN. Set a PIN or turn the restriction off."
+                } else {
+                    "Limit media by rating and, optionally, by allowed tags."
+                },
+            ) { enabled ->
+                when {
+                    enabled -> requestPinAction(SafetyPinAction.ENABLE_PARENT)
+                    parentalPinSet -> requestPinAction(SafetyPinAction.DISABLE_PARENT)
+                    else -> model.setParentalControlEnabled(false)
+                }
+            }
+            SettingsValueRow(
+                "Maximum rating",
+                when (maximumRating) {
+                    "q" -> "Questionable"
+                    "e" -> "Explicit"
+                    else -> "Safe"
+                },
+            ) { showRatingDialog = true }
+            if (showRatingDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRatingDialog = false },
+                    title = { Text("Maximum rating") },
+                    text = {
+                        Column {
+                            listOf("s" to "Safe", "q" to "Questionable", "e" to "Explicit")
+                                .forEach { (value, label) ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable {
+                                            maximumRating = value
+                                            showRatingDialog = false
+                                        }.padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        RadioButton(
+                                            selected = maximumRating == value,
+                                            onClick = {
+                                                maximumRating = value
+                                                showRatingDialog = false
+                                            },
+                                        )
+                                        Text(label)
+                                    }
+                                }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showRatingDialog = false }) {
+                            Text("Close")
+                        }
+                    },
+                )
+            }
+            OutlinedTextField(
+                value = allowedTags,
+                onValueChange = { allowedTags = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Allowed tags (optional)") },
+                supportingText = { Text("Separate tags with commas. A post must match at least one.") },
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { requestPinAction(SafetyPinAction.SAVE_PARENT_POLICY) },
+            ) {
+                Text("Save parental policy")
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { requestPinAction(SafetyPinAction.SET_PARENT) },
+                ) {
+                    Text(if (parentalPinSet) "Change guardian PIN" else "Set guardian PIN")
+                }
+                if (parentalPinSet) {
+                    TextButton(onClick = { requestPinAction(SafetyPinAction.REMOVE_PARENT) }) {
+                        Text("Remove PIN")
+                    }
+                }
+            }
+            Text(
+                "Parental controls filter provider metadata and tags; they are not a substitute for OS-level supervision.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (showFavoritesLock) {
+            Text(
+                "PINs are 4–12 digits and stored as salted hashes on this device. They are not included in encrypted user-data backups.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    pinAction?.let { action ->
+        val isFavoritesAction = action.name.endsWith("FAVORITES")
+        val prefix = if (isFavoritesAction) "favorites_lock" else "parent"
+        val hasPin = if (isFavoritesAction) favoritesPinSet else parentalPinSet
+        val requiresCurrentPin = hasPin && (
+            action != SafetyPinAction.SAVE_PARENT_POLICY ||
+                state.parentalControlEnabled
+            )
+        val needsNewPin = action == SafetyPinAction.SET_FAVORITES ||
+            action == SafetyPinAction.SET_PARENT ||
+            ((action == SafetyPinAction.ENABLE_FAVORITES || action == SafetyPinAction.ENABLE_PARENT) && !hasPin)
+        val dialogTitle = when (action) {
+            SafetyPinAction.SET_FAVORITES -> if (hasPin) "Change Favorites PIN" else "Set Favorites PIN"
+            SafetyPinAction.ENABLE_FAVORITES -> "Enable Favorites lock"
+            SafetyPinAction.DISABLE_FAVORITES -> "Disable Favorites lock"
+            SafetyPinAction.REMOVE_FAVORITES -> "Remove Favorites PIN"
+            SafetyPinAction.SET_PARENT -> if (hasPin) "Change guardian PIN" else "Set guardian PIN"
+            SafetyPinAction.ENABLE_PARENT -> "Enable parental control"
+            SafetyPinAction.DISABLE_PARENT -> "Disable parental control"
+            SafetyPinAction.REMOVE_PARENT -> "Remove guardian PIN"
+            SafetyPinAction.SAVE_PARENT_POLICY -> "Save parental policy"
+        }
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) pinAction = null },
+            title = { Text(dialogTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        when (action) {
+                            SafetyPinAction.REMOVE_FAVORITES ->
+                                "Enter the current PIN to remove it and disable the Favorites lock."
+                            SafetyPinAction.REMOVE_PARENT ->
+                                "Enter the current PIN to remove it and disable parental control. The saved policy will be kept."
+                            SafetyPinAction.SAVE_PARENT_POLICY ->
+                                if (requiresCurrentPin) {
+                                    "Enter the guardian PIN to save these content restrictions."
+                                } else {
+                                    "Save these content restrictions for when Parental control is enabled."
+                                }
+                            SafetyPinAction.SET_FAVORITES ->
+                                if (hasPin) {
+                                    "Verify the current PIN and choose a new 4–12 digit PIN."
+                                } else {
+                                    "Choose a 4–12 digit PIN for Favorites."
+                                }
+                            SafetyPinAction.SET_PARENT ->
+                                if (hasPin) {
+                                    "Verify the current guardian PIN and choose a new 4–12 digit PIN."
+                                } else {
+                                    "Choose a 4–12 digit guardian PIN."
+                                }
+                            SafetyPinAction.ENABLE_FAVORITES, SafetyPinAction.ENABLE_PARENT ->
+                                if (needsNewPin) "Choose a 4–12 digit PIN to enable this protection."
+                                else "Enter the current PIN to enable this protection."
+                            SafetyPinAction.DISABLE_FAVORITES, SafetyPinAction.DISABLE_PARENT ->
+                                "Enter the current PIN to disable this protection."
+                        },
+                    )
+                    if (requiresCurrentPin) {
+                        OutlinedTextField(
+                            value = currentPin,
+                            onValueChange = { currentPin = it.filter { char -> char in '0'..'9' }.take(12); pinError = "" },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Current PIN") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        )
+                    }
+                    if (needsNewPin) {
+                        OutlinedTextField(
+                            value = newPin,
+                            onValueChange = { newPin = it.filter { char -> char in '0'..'9' }.take(12); pinError = "" },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("New PIN (4–12 digits)") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        )
+                        OutlinedTextField(
+                            value = confirmPin,
+                            onValueChange = { confirmPin = it.filter { char -> char in '0'..'9' }.take(12); pinError = "" },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Confirm new PIN") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        )
+                    }
+                    if (pinError.isNotBlank()) {
+                        Text(pinError, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = {
+                        if (requiresCurrentPin && currentPin.length !in 4..12) {
+                            pinError = "Enter your 4–12 digit current PIN."
+                            return@TextButton
+                        }
+                        if (needsNewPin && newPin.length !in 4..12) {
+                            pinError = "Choose a PIN with 4–12 digits."
+                            return@TextButton
+                        }
+                        if (needsNewPin && newPin != confirmPin) {
+                            pinError = "The new PINs do not match."
+                            return@TextButton
+                        }
+                        isSaving = true
+                        scope.launch {
+                            try {
+                                if (requiresCurrentPin) {
+                                    val verification = withContext(Dispatchers.Default) {
+                                        model.verifySafetyPin(prefix, currentPin)
+                                    }
+                                    if (!verification.accepted) {
+                                        pinError = if (verification.retryAfterSeconds > 0) {
+                                            "Too many attempts. Try again in ${verification.retryAfterSeconds} seconds."
+                                        } else {
+                                            "The current PIN is incorrect."
+                                        }
+                                        return@launch
+                                    }
+                                }
+                                withContext(Dispatchers.Default) {
+                                    when (action) {
+                                        SafetyPinAction.SET_FAVORITES -> model.setSafetyPin(prefix, newPin)
+                                        SafetyPinAction.ENABLE_FAVORITES -> {
+                                            if (!hasPin) model.setSafetyPin(prefix, newPin)
+                                            model.setFavoritesLockEnabled(true)
+                                        }
+                                        SafetyPinAction.DISABLE_FAVORITES -> model.setFavoritesLockEnabled(false)
+                                        SafetyPinAction.REMOVE_FAVORITES -> model.removeSafetyPin(prefix)
+                                        SafetyPinAction.SET_PARENT -> model.setSafetyPin(prefix, newPin)
+                                        SafetyPinAction.ENABLE_PARENT -> {
+                                            if (!hasPin) model.setSafetyPin(prefix, newPin)
+                                            model.setParentalControlEnabled(true)
+                                        }
+                                        SafetyPinAction.DISABLE_PARENT -> model.setParentalControlEnabled(false)
+                                        SafetyPinAction.REMOVE_PARENT -> model.removeSafetyPin(prefix)
+                                        SafetyPinAction.SAVE_PARENT_POLICY ->
+                                            model.setParentalPolicy(maximumRating, allowedTags)
+                                    }
+                                }
+                                pinAction = null
+                            } catch (failure: Exception) {
+                                pinError = failure.message ?: "Could not update the safety settings."
+                            } finally {
+                                isSaving = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(if (isSaving) "Saving..." else "Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !isSaving, onClick = { pinAction = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+private enum class SafetyPinAction {
+    SET_FAVORITES,
+    ENABLE_FAVORITES,
+    DISABLE_FAVORITES,
+    REMOVE_FAVORITES,
+    SET_PARENT,
+    ENABLE_PARENT,
+    DISABLE_PARENT,
+    REMOVE_PARENT,
+    SAVE_PARENT_POLICY,
 }
 
 @Composable
@@ -2334,15 +2935,26 @@ private fun UserDataBackupSection(model: MainViewModel) {
     }
 
     pendingImport?.let { data ->
+        val includedSummary = buildList {
+            if ("favorites" in data.includedSections) {
+                add("${data.favorites.size} favorites")
+            }
+            if ("providers" in data.includedSections) {
+                add(
+                    "${listOf(data.gelbooruUserId, data.rule34UserId).count(String::isNotBlank)} provider logins",
+                )
+            }
+            if ("theme" in data.includedSections) add("${data.theme} theme (not used on Android)")
+            if ("settings" in data.includedSections) add("portable settings")
+        }.joinToString()
         AlertDialog(
             onDismissRequest = { pendingImport = null },
             title = { Text("Import user data") },
             text = {
                 Text(
-                    "${data.favorites.size} favorites, " +
-                        "${listOf(data.gelbooruUserId, data.rule34UserId).count(String::isNotBlank)} provider accounts, " +
-                        "and portable preferences. Merge keeps existing favorites and credentials when present; " +
-                        "Replace uses the backup's favorites and credentials. Both options import preferences.",
+                    "Import $includedSummary. Merge keeps existing favorites and provider logins; " +
+                        "Replace replaces included favorites and provider logins. Unselected sections " +
+                        "remain unchanged.",
                 )
             },
             confirmButton = {
@@ -2600,6 +3212,13 @@ private fun DownloadQueueScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 1,
                                 )
+                                if (item.status == DownloadStatus.SAVED && !item.savedLocation.isNullOrBlank()) {
+                                    Text(
+                                        "Saved to ${item.savedLocation}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         when (item.status) {

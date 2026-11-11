@@ -101,7 +101,12 @@ class BooruApi(
     fun imageClient(): OkHttpClient = if (useDoh()) dohImageClient else standardImageClient
     private fun apiClient(): OkHttpClient = if (useDoh()) dohClient else standardClient
 
-    suspend fun randomImage(nsfw: Boolean, searchTerm: String, selectedProvider: String): ImagePost =
+    suspend fun randomImage(
+        nsfw: Boolean,
+        searchTerm: String,
+        selectedProvider: String,
+        parentalMaximumRating: String? = null,
+    ): ImagePost =
         withContext(Dispatchers.IO) {
             val videoOnly = mediaFilter() == "video"
             val providers = when (selectedProvider) {
@@ -119,7 +124,7 @@ class BooruApi(
             val errors = mutableListOf<String>()
             for (provider in providers) {
                 try {
-                    val candidates = randomCandidates(provider, nsfw, searchTerm)
+                    val candidates = randomCandidates(provider, nsfw, searchTerm, parentalMaximumRating)
                     if (candidates.isNotEmpty()) return@withContext chooseNonRecent(provider, nsfw, searchTerm, candidates)
                 } catch (error: Exception) {
                     errors += "${provider.name}: ${error.message ?: "Request failed"}"
@@ -325,13 +330,23 @@ class BooruApi(
         }
     }
 
-    private suspend fun randomCandidates(provider: Provider, nsfw: Boolean, query: String): List<ImagePost> {
+    private suspend fun randomCandidates(
+        provider: Provider,
+        nsfw: Boolean,
+        query: String,
+        parentalMaximumRating: String?,
+    ): List<ImagePost> {
         val candidateQueries = searchTags(query).toMutableList()
         if (candidateQueries.isEmpty()) candidateQueries.add(emptyList())
         prefixFallback(query)?.let { if (it !in candidateQueries) candidateQueries += it }
         for (tags in candidateQueries) {
             val posts = mutableListOf<ImagePost>()
-            val wantedRatings = if (nsfw) listOf("e") else listOf("s")
+            val wantedRatings = when (parentalMaximumRating) {
+                "s" -> listOf("s")
+                "q" -> if (nsfw) listOf("q") else listOf("s")
+                "e" -> if (nsfw) listOf("e") else listOf("s")
+                else -> if (nsfw) listOf("e") else listOf("s")
+            }
             for (rating in wantedRatings) {
                 val requestTags = tags + listOfNotNull(
                     if (mediaFilter() == "video") "video" else null,

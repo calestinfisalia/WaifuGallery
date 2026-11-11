@@ -40,59 +40,64 @@ def _themed_icon(widget: QWidget, name: str) -> QIcon:
 
 
 def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) -> dict[str, object]:
-    imported_settings = payload["settings"]
-    imported_providers = payload["providers"]
-    favorites = list(payload["favorites"])
-    if merge:
-        existing = settings.get("favorites/posts", [])
-        if isinstance(existing, (list, tuple)):
-            merged = list(existing)
-        else:
-            merged = []
-        identities = {
-            (str(item.get("provider", "")), str(item.get("post_id", "")))
-            for item in merged
-            if isinstance(item, dict)
-        }
-        for item in payload["favorites"]:
-            identity = (item["provider"], item["post_id"])
-            if identity not in identities:
-                merged.append(item)
-                identities.add(identity)
-        favorites = merged
+    sections = set(payload["sections"])
+    values: dict[str, object] = {}
+    if "favorites" in sections:
+        favorites = list(payload["favorites"])
+        if merge:
+            existing = settings.get("favorites/posts", [])
+            merged = list(existing) if isinstance(existing, (list, tuple)) else []
+            identities = {
+                (str(item.get("provider", "")), str(item.get("post_id", "")))
+                for item in merged
+                if isinstance(item, dict)
+            }
+            for item in favorites:
+                identity = (item["provider"], item["post_id"])
+                if identity not in identities:
+                    merged.append(item)
+                    identities.add(identity)
+            favorites = merged
+        values["favorites/posts"] = favorites
 
-    gelbooru = dict(imported_providers["gelbooru"])
-    rule34 = dict(imported_providers["rule34"])
-    if merge:
-        for prefix, current in (
-            ("gelbooru", settings.gelbooru_credentials),
-            ("rule34", settings.rule34_credentials),
-        ):
-            if all(current):
-                (gelbooru if prefix == "gelbooru" else rule34).update(
-                    user_id=current[0], api_key=current[1]
-                )
-    provider = imported_settings["provider"]
-    return {
-        "favorites/posts": favorites,
-        "gelbooru/user_id": gelbooru["user_id"],
-        "gelbooru/api_key": gelbooru["api_key"],
-        "rule34/user_id": rule34["user_id"],
-        "rule34/api_key": rule34["api_key"],
-        "search/provider": "All" if provider == "Auto" else provider,
-        "search/rating": imported_settings["rating"],
-        "search/allow_nsfw": imported_settings["allow_nsfw"],
-        "search/custom_terms": imported_settings["custom_terms"],
-        "search/exclude_male": imported_settings["exclude_male"],
-        "search/filter_gore": imported_settings["filter_gore"],
-        "search/custom_block_tags": imported_settings["custom_block_tags"],
-        "search/media_filter": imported_settings["media_filter"],
-        "network/use_doh": imported_settings["use_doh"],
-        "network/doh_provider": imported_settings["doh_provider"],
-        "network/doh_custom_endpoint": imported_settings["doh_custom_endpoint"],
-        "view/ambient_mode": imported_settings["ambient_mode"],
-        "video/max_height": imported_settings["video_max_height"],
-    }
+    if "providers" in sections:
+        providers = {
+            "gelbooru": dict(payload["providers"]["gelbooru"]),
+            "rule34": dict(payload["providers"]["rule34"]),
+        }
+        if merge:
+            for prefix, current in (
+                ("gelbooru", settings.gelbooru_credentials),
+                ("rule34", settings.rule34_credentials),
+            ):
+                if all(current):
+                    providers[prefix].update(user_id=current[0], api_key=current[1])
+        for prefix, credentials in providers.items():
+            values[f"{prefix}/user_id"] = credentials["user_id"]
+            values[f"{prefix}/api_key"] = credentials["api_key"]
+
+    if "settings" in sections:
+        imported = payload["settings"]
+        provider = imported["provider"]
+        values.update({
+            "search/provider": "All" if provider == "Auto" else provider,
+            "search/rating": imported["rating"],
+            "search/allow_nsfw": imported["allow_nsfw"],
+            "search/custom_terms": imported["custom_terms"],
+            "search/exclude_male": imported["exclude_male"],
+            "search/filter_gore": imported["filter_gore"],
+            "search/custom_block_tags": imported["custom_block_tags"],
+            "search/media_filter": imported["media_filter"],
+            "network/use_doh": imported["use_doh"],
+            "network/doh_provider": imported["doh_provider"],
+            "network/doh_custom_endpoint": imported["doh_custom_endpoint"],
+            "view/ambient_mode": imported["ambient_mode"],
+            "video/max_height": imported["video_max_height"],
+        })
+
+    if "theme" in sections and payload["theme"] in {"Dark", "Light", "System"}:
+        values["appearance/theme"] = payload["theme"]
+    return values
 
 
 class ProviderLoginDialog(QDialog):
@@ -647,31 +652,51 @@ class PreferencesDialog(FramelessResizableDialog):
             BackupMessageDialog.ask(self, "Could not import backup", str(error), ("OK",))
             return
 
-        summary = (
-            f"{len(payload['favorites'])} favorites, "
-            f"{sum(bool(item['user_id']) for item in payload['providers'].values())} provider accounts, "
-            "and portable preferences."
-        )
+        sections = set(payload["sections"])
+        summary_parts = []
+        if "favorites" in sections:
+            summary_parts.append(f"{len(payload['favorites'])} favorites")
+        if "providers" in sections:
+            account_count = sum(
+                bool(item["user_id"]) for item in payload["providers"].values()
+            )
+            summary_parts.append(f"{account_count} provider logins")
+        if "theme" in sections:
+            if payload["theme"] in {"Dark", "Light", "System"}:
+                summary_parts.append(f"{payload['theme']} theme")
+            else:
+                summary_parts.append("theme (unsupported here; current theme will remain unchanged)")
+        if "settings" in sections:
+            summary_parts.append("portable settings")
+        summary = ", ".join(summary_parts)
         choice = BackupMessageDialog.ask(
             self,
             "Import user data",
             f"Import {summary}\n\n"
-            "Merge keeps current favorites and existing provider credentials when present. "
-            "Replace uses the backup's favorites and provider credentials. Both options import "
-            "the backup's portable preferences; device-specific download locations are kept.",
+            "Merge adds favorites and keeps existing provider logins. Replace replaces the "
+            "included favorites and provider logins. Only the sections listed above are changed; "
+            "other data stays as it is.",
             ("Merge", "Replace", "Cancel"),
             default_button="Merge",
         )
         if choice not in ("Merge", "Replace"):
             return
 
-        settings = payload["settings"]
-        endpoint = settings["doh_custom_endpoint"] if settings["doh_provider"] == "Custom" else DOH_ENDPOINTS[settings["doh_provider"]]
         try:
-            if settings["use_doh"]:
-                endpoint = validate_doh_endpoint(endpoint)
-            set_doh_enabled(settings["use_doh"], endpoint if settings["use_doh"] else None)
             values = _settings_from_backup(payload, self.settings, merge=choice == "Merge")
+            if "settings" in sections:
+                imported_settings = payload["settings"]
+                endpoint = (
+                    imported_settings["doh_custom_endpoint"]
+                    if imported_settings["doh_provider"] == "Custom"
+                    else DOH_ENDPOINTS[imported_settings["doh_provider"]]
+                )
+                if imported_settings["use_doh"]:
+                    endpoint = validate_doh_endpoint(endpoint)
+                set_doh_enabled(
+                    imported_settings["use_doh"],
+                    endpoint if imported_settings["use_doh"] else None,
+                )
             self.settings.set_many(values)
         except (OSError, TypeError, ValueError) as error:
             BackupMessageDialog.ask(self, "Could not import backup", str(error), ("OK",))

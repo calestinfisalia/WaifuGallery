@@ -8,10 +8,16 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 SCHEMA = "waifu-gallery-user-data"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+SUPPORTED_FORMAT_VERSIONS = {1, FORMAT_VERSION}
 KDF_ITERATIONS = 600_000
-AAD = b"waifu-gallery-backup:v1"
+AAD_BY_VERSION = {
+    1: b"waifu-gallery-backup:v1",
+    FORMAT_VERSION: b"waifu-gallery-backup:v2",
+}
 MAX_BACKUP_BYTES = 32 * 1024 * 1024
+BACKUP_SECTIONS = ("favorites", "providers", "theme", "settings")
+LEGACY_BACKUP_SECTIONS = ("favorites", "providers", "settings")
 _PROVIDERS = {"All", "Auto", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"}
 _DOH_PROVIDERS = {
     "Cloudflare",
@@ -38,8 +44,33 @@ def _boolean(value: object, field: str) -> bool:
 def normalize_payload(payload: object) -> dict:
     if not isinstance(payload, Mapping):
         raise ValueError("The backup data is not a JSON object.")
-    if payload.get("schema") != SCHEMA or type(payload.get("version")) is not int or payload.get("version") != FORMAT_VERSION:
+    version = payload.get("version")
+    if (
+        payload.get("schema") != SCHEMA
+        or type(version) is not int
+        or version not in SUPPORTED_FORMAT_VERSIONS
+    ):
         raise ValueError("This backup format is unsupported.")
+    if "sections" in payload:
+        sections = _strings(payload["sections"], "sections")
+        if (
+            not sections
+            or len(sections) != len(set(sections))
+            or any(section not in BACKUP_SECTIONS for section in sections)
+        ):
+            raise ValueError("The backup contains an invalid section selection.")
+    elif version == 1:
+        sections = list(LEGACY_BACKUP_SECTIONS)
+        if "theme" in payload:
+            sections.append("theme")
+    else:
+        raise ValueError("The backup is missing its included data sections.")
+    if "theme" in sections:
+        theme = _optional_string(payload.get("theme"), "theme")
+        if not theme.strip():
+            raise ValueError("The backup contains an invalid theme.")
+    else:
+        theme = "Dark"
 
     favorites = payload.get("favorites")
     if not isinstance(favorites, list):
@@ -118,9 +149,17 @@ def normalize_payload(payload: object) -> dict:
     video_height = settings.get("video_max_height")
     if provider not in _PROVIDERS:
         raise ValueError("The backup contains an unsupported provider setting.")
-    if provider == "Gelbooru" and not credentials["gelbooru"]["user_id"]:
+    if (
+        "providers" in sections
+        and provider == "Gelbooru"
+        and not credentials["gelbooru"]["user_id"]
+    ):
         raise ValueError("The selected provider is missing its backup credentials.")
-    if provider == "Rule34.xxx" and not credentials["rule34"]["user_id"]:
+    if (
+        "providers" in sections
+        and provider == "Rule34.xxx"
+        and not credentials["rule34"]["user_id"]
+    ):
         raise ValueError("The selected provider is missing its backup credentials.")
     if rating not in {"sfw", "nsfw", "all"}:
         raise ValueError("The backup contains an unsupported rating setting.")
@@ -147,7 +186,9 @@ def normalize_payload(payload: object) -> dict:
     }
     return {
         "schema": SCHEMA,
-        "version": FORMAT_VERSION,
+        "version": version,
+        "sections": sections,
+        "theme": theme,
         "favorites": normalized_favorites,
         "providers": credentials,
         "settings": normalized_settings,
@@ -160,36 +201,43 @@ def _optional_string(value: object, field: str) -> str:
     return value
 
 
-def create_payload(settings) -> dict:
+def create_payload(settings, sections: tuple[str, ...] | None = None) -> dict:
+    selected_sections = BACKUP_SECTIONS if sections is None else tuple(sections)
+    included = set(selected_sections)
     allow_nsfw = bool(settings.get("search/allow_nsfw", False))
+    theme = str(settings.get("appearance/theme", "Dark"))
+    if theme not in {"Dark", "Light", "System", "OLED Dark"}:
+        theme = "Dark"
     payload = {
         "schema": SCHEMA,
         "version": FORMAT_VERSION,
-        "favorites": settings.get("favorites/posts", []),
+        "sections": list(selected_sections),
+        "theme": theme if "theme" in included else "Dark",
+        "favorites": settings.get("favorites/posts", []) if "favorites" in included else [],
         "providers": {
             "gelbooru": {
-                "user_id": str(settings.get("gelbooru/user_id", "")).strip(),
-                "api_key": str(settings.get("gelbooru/api_key", "")).strip(),
+                "user_id": str(settings.get("gelbooru/user_id", "")).strip() if "providers" in included else "",
+                "api_key": str(settings.get("gelbooru/api_key", "")).strip() if "providers" in included else "",
             },
             "rule34": {
-                "user_id": str(settings.get("rule34/user_id", "")).strip(),
-                "api_key": str(settings.get("rule34/api_key", "")).strip(),
+                "user_id": str(settings.get("rule34/user_id", "")).strip() if "providers" in included else "",
+                "api_key": str(settings.get("rule34/api_key", "")).strip() if "providers" in included else "",
             },
         },
         "settings": {
-            "provider": str(settings.get("search/provider", "All")),
-            "rating": str(settings.get("search/rating", "sfw")),
-            "allow_nsfw": allow_nsfw,
-            "custom_terms": settings.get("search/custom_terms", []),
-            "exclude_male": bool(settings.get("search/exclude_male", True)),
-            "filter_gore": bool(settings.get("search/filter_gore", True)),
-            "custom_block_tags": settings.get("search/custom_block_tags", []),
-            "media_filter": str(settings.get("search/media_filter", "image")),
-            "use_doh": settings.use_doh,
-            "doh_provider": str(settings.get("network/doh_provider", "Cloudflare")),
-            "doh_custom_endpoint": str(settings.get("network/doh_custom_endpoint", "")),
-            "ambient_mode": bool(settings.get("view/ambient_mode", True)),
-            "video_max_height": int(settings.get("video/max_height", 0) or 0),
+            "provider": str(settings.get("search/provider", "All")) if "settings" in included else "All",
+            "rating": str(settings.get("search/rating", "sfw")) if "settings" in included else "sfw",
+            "allow_nsfw": allow_nsfw if "settings" in included else False,
+            "custom_terms": settings.get("search/custom_terms", []) if "settings" in included else [],
+            "exclude_male": bool(settings.get("search/exclude_male", True)) if "settings" in included else True,
+            "filter_gore": bool(settings.get("search/filter_gore", True)) if "settings" in included else True,
+            "custom_block_tags": settings.get("search/custom_block_tags", []) if "settings" in included else [],
+            "media_filter": str(settings.get("search/media_filter", "image")) if "settings" in included else "image",
+            "use_doh": settings.use_doh if "settings" in included else False,
+            "doh_provider": str(settings.get("network/doh_provider", "Cloudflare")) if "settings" in included else "Cloudflare",
+            "doh_custom_endpoint": str(settings.get("network/doh_custom_endpoint", "")) if "settings" in included else "",
+            "ambient_mode": bool(settings.get("view/ambient_mode", True)) if "settings" in included else True,
+            "video_max_height": int(settings.get("video/max_height", 0) or 0) if "settings" in included else 0,
         },
     }
     return normalize_payload(payload)
@@ -197,11 +245,13 @@ def create_payload(settings) -> dict:
 
 def encrypt_payload(payload: Mapping, passphrase: str) -> str:
     _validate_passphrase(passphrase)
-    plaintext = json.dumps(normalize_payload(payload), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    normalized = normalize_payload(payload)
+    normalized["version"] = FORMAT_VERSION
+    plaintext = json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     salt = os.urandom(16)
     nonce = os.urandom(12)
     key = hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, KDF_ITERATIONS, dklen=32)
-    ciphertext = AESGCM(key).encrypt(nonce, plaintext, AAD)
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, AAD_BY_VERSION[FORMAT_VERSION])
     envelope = {
         "format": SCHEMA,
         "version": FORMAT_VERSION,
@@ -226,9 +276,15 @@ def decrypt_payload(contents: str, passphrase: str) -> dict:
         envelope = json.loads(contents)
     except (json.JSONDecodeError, UnicodeError) as error:
         raise ValueError("The selected file is not a valid backup.") from error
+    if (
+        not isinstance(envelope, Mapping)
+        or type(envelope.get("version")) is not int
+        or envelope["version"] not in SUPPORTED_FORMAT_VERSIONS
+    ):
+        raise ValueError("This backup format or encryption configuration is unsupported.")
+    version = envelope["version"]
     expected = {
         "format": SCHEMA,
-        "version": FORMAT_VERSION,
         "kdf": "PBKDF2-HMAC-SHA256",
         "iterations": KDF_ITERATIONS,
         "cipher": "AES-256-GCM",
@@ -242,8 +298,11 @@ def decrypt_payload(contents: str, passphrase: str) -> dict:
         if len(salt) != 16 or len(nonce) != 12 or not ciphertext:
             raise ValueError("The backup file is incomplete.")
         key = hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, KDF_ITERATIONS, dklen=32)
-        plaintext = AESGCM(key).decrypt(nonce, ciphertext, AAD)
-        return normalize_payload(json.loads(plaintext.decode("utf-8")))
+        plaintext = AESGCM(key).decrypt(nonce, ciphertext, AAD_BY_VERSION[version])
+        payload = normalize_payload(json.loads(plaintext.decode("utf-8")))
+        if payload["version"] != version:
+            raise ValueError("The backup payload and encryption versions do not match.")
+        return payload
     except ValueError:
         raise
     except Exception as error:

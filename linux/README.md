@@ -1,10 +1,10 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, and media-info features are aligned with Windows 0.1.10 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.11 while Linux launch and packaging files remain separate.
 
 ## Status
 
-The source includes the Windows 0.1.3–0.1.10 application features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, encrypted cross-platform user-data backups, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
+The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 
@@ -15,6 +15,7 @@ The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `Q
 - SFW/NSFW rating, male-only and gore filters, custom blocked tags, image/video selection, and configurable video stream resolution.
 - Video play/pause, seeking, volume/mute, buffering and playback-error feedback, and fullscreen controls.
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.
+- Downloads history, including saved file paths, is retained locally across app restarts and can be cleared from the Downloads window.
 - Optional process-local DoH using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom RFC 8484 endpoint.
 - Encrypted, cross-platform user data export/import for favorites, provider credentials, and portable preferences.
 
@@ -22,9 +23,9 @@ The application filters content only by provider metadata and tags. Follow each 
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Backups include favorites, Gelbooru and Rule34.xxx credentials, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Download folders and window state are excluded.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Imports respect the sections selected in a backup and leave unselected data unchanged. Download folders, safety PINs/policies, and window state are excluded.
 
-The version 1 format is shared with Windows and Android and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. Merge adds missing favorites and keeps existing provider credentials; Replace uses the backup's favorites and credentials. Both import the backup's portable preferences, while the current download folder is retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
+The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. Unsupported desktop themes are identified in the import summary and left unchanged. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
 
 ## UI behavior and troubleshooting
@@ -38,6 +39,14 @@ Export and import use app-styled passphrase/confirmation dialogs and the applica
 - The Back button is hidden while viewing a favorite, and download history entries retain a readable row height.
 
 For a reproducible bug report, include Linux distribution/desktop session (Wayland or X11), image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../windows/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
+
+## Linux 0.1.11
+
+### New features
+
+- **Downloads:** history retains each saved file's path across restarts and can be cleared from the Downloads window.
+- **Encrypted backups:** version 2 exports include section metadata and the current theme; imports can preserve unselected sections and still accept version 1 backups.
+- Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
 ## Linux 0.1.8
 

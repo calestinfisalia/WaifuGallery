@@ -3,9 +3,16 @@ package com.fisalia.waifugallery.data
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 class AppPreferences(context: Context) {
     private val store = context.getSharedPreferences("waifu_gallery", Context.MODE_PRIVATE)
+    private val random = SecureRandom()
+
+    data class PinVerification(val accepted: Boolean, val retryAfterSeconds: Int = 0)
 
     var allowNsfw: Boolean
         get() = store.getBoolean("nsfw", false)
@@ -77,6 +84,107 @@ class AppPreferences(context: Context) {
         get() = store.getBoolean("ambient_mode", true)
         set(value) = store.edit().putBoolean("ambient_mode", value).apply()
 
+    var favoritesLockEnabled: Boolean
+        get() = store.getBoolean("favorites_lock/enabled", false)
+        set(value) = store.edit().putBoolean("favorites_lock/enabled", value).apply()
+
+    var parentalControlEnabled: Boolean
+        get() = store.getBoolean("parent/enabled", false)
+        set(value) = store.edit().putBoolean("parent/enabled", value).apply()
+
+    var parentalMaximumRating: String
+        get() = store.getString("parent/max_rating", "s")?.takeIf { it in setOf("s", "q", "e") } ?: "s"
+        set(value) {
+            require(value in setOf("s", "q", "e"))
+            store.edit().putString("parent/max_rating", value).apply()
+        }
+
+    var parentalAllowedTags: List<String>
+        get() = try {
+            val array = JSONArray(store.getString("parent/allowed_tags", "[]"))
+            (0 until array.length()).mapNotNull { array.optString(it).trim().takeIf(String::isNotBlank) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        set(value) {
+            val normalized = value.map { it.trim().lowercase().replace(Regex("\\s+"), "_") }
+                .filter(String::isNotBlank).distinct()
+            val array = JSONArray()
+            normalized.forEach(array::put)
+            store.edit().putString("parent/allowed_tags", array.toString()).apply()
+        }
+
+    var downloadHistoryJson: String
+        get() = store.getString("download_history", "[]") ?: "[]"
+        set(value) = store.edit().putString("download_history", value).apply()
+
+    fun hasSafetyPin(scope: String): Boolean {
+        require(scope in SAFETY_PIN_SCOPES)
+        return !store.getString("$scope/pin_salt", "").isNullOrBlank() &&
+            !store.getString("$scope/pin_hash", "").isNullOrBlank()
+    }
+
+    fun setSafetyPin(scope: String, pin: String) {
+        require(scope in SAFETY_PIN_SCOPES)
+        require(validPin(pin)) { "PIN must contain 4 to 12 digits." }
+        val salt = ByteArray(SALT_BYTES).also(random::nextBytes)
+        val digest = derivePinHash(pin, salt)
+        check(
+            store.edit()
+                .putString("$scope/pin_salt", salt.toHex())
+                .putString("$scope/pin_hash", digest.toHex())
+                .putInt("$scope/pin_failures", 0)
+                .putLong("$scope/pin_locked_until", 0)
+                .commit(),
+        ) { "Could not save the PIN." }
+    }
+
+    fun verifySafetyPin(scope: String, pin: String): PinVerification {
+        require(scope in SAFETY_PIN_SCOPES)
+        if (!validPin(pin)) return PinVerification(false)
+        val now = System.currentTimeMillis() / 1000
+        val lockedUntil = store.getLong("$scope/pin_locked_until", 0)
+        if (lockedUntil > now) {
+            return PinVerification(false, (lockedUntil - now).toInt().coerceAtLeast(1))
+        }
+        val salt = store.getString("$scope/pin_salt", "").orEmpty().fromHexOrNull()
+        val expected = store.getString("$scope/pin_hash", "").orEmpty().fromHexOrNull()
+        if (salt == null || salt.isEmpty() || expected?.size != HASH_BYTES) {
+            return PinVerification(false)
+        }
+        val accepted = MessageDigest.isEqual(derivePinHash(pin, salt), expected)
+        if (accepted) {
+            check(
+                store.edit()
+                    .putInt("$scope/pin_failures", 0)
+                    .putLong("$scope/pin_locked_until", 0)
+                    .commit(),
+            ) { "Could not update PIN verification state." }
+            return PinVerification(true)
+        }
+        val failures = store.getInt("$scope/pin_failures", 0).coerceAtLeast(0) + 1
+        val delay = minOf(MAX_LOCK_SECONDS, BASE_LOCK_SECONDS * (1L shl (failures - 1).coerceAtMost(7)))
+        check(
+            store.edit()
+                .putInt("$scope/pin_failures", failures)
+                .putLong("$scope/pin_locked_until", now + delay)
+                .commit(),
+        ) { "Could not update PIN verification state." }
+        return PinVerification(false, delay.toInt())
+    }
+
+    fun removeSafetyPin(scope: String) {
+        require(scope in SAFETY_PIN_SCOPES)
+        check(
+            store.edit()
+                .remove("$scope/pin_salt")
+                .remove("$scope/pin_hash")
+                .putInt("$scope/pin_failures", 0)
+                .putLong("$scope/pin_locked_until", 0)
+                .commit(),
+        ) { "Could not remove the PIN." }
+    }
+
     var customSearchIndex: Int
         get() = store.getInt("custom_search_index", 0)
         set(value) = store.edit().putInt("custom_search_index", value).apply()
@@ -96,6 +204,36 @@ class AppPreferences(context: Context) {
         val array = JSONArray()
         terms.forEach(array::put)
         store.edit().putString("custom_search_terms", array.toString()).apply()
+    }
+
+    private fun validPin(pin: String): Boolean =
+        pin.length in MIN_PIN_LENGTH..MAX_PIN_LENGTH && pin.all { it in '0'..'9' }
+
+    private fun derivePinHash(pin: String, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(pin.toCharArray(), salt, PIN_ITERATIONS, HASH_BYTES * 8)
+        return try {
+            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    private fun String.fromHexOrNull(): ByteArray? {
+        if (length % 2 != 0 || any { it.digitToIntOrNull(16) == null }) return null
+        return runCatching { chunked(2).map { it.toInt(16).toByte() }.toByteArray() }.getOrNull()
+    }
+
+    private companion object {
+        val SAFETY_PIN_SCOPES = setOf("favorites_lock", "parent")
+        const val PIN_ITERATIONS = 310_000
+        const val MIN_PIN_LENGTH = 4
+        const val MAX_PIN_LENGTH = 12
+        const val SALT_BYTES = 16
+        const val HASH_BYTES = 32
+        const val BASE_LOCK_SECONDS = 30L
+        const val MAX_LOCK_SECONDS = 3600L
     }
 
     fun favoritePosts(): List<ImagePost> = try {
@@ -159,8 +297,12 @@ class AppPreferences(context: Context) {
     }
 
     fun applyUserData(data: UserDataBackup, merge: Boolean): List<ImagePost> {
-        val favorites = if (merge) {
-            val combined = favoritePosts().toMutableList()
+        val sections = data.includedSections
+        val currentFavorites = favoritePosts()
+        val favorites = if ("favorites" !in sections) {
+            currentFavorites
+        } else if (merge) {
+            val combined = currentFavorites.toMutableList()
             val existingKeys = combined.mapTo(mutableSetOf()) { "${it.provider}:${it.id}" }
             data.favorites.forEach { post ->
                 if (existingKeys.add("${post.provider}:${post.id}")) combined.add(post)
@@ -169,33 +311,41 @@ class AppPreferences(context: Context) {
         } else {
             data.favorites
         }
-        val gelbooruCredentials = if (merge && hasCredentials(gelbooruUserId, gelbooruApiKey)) {
-            gelbooruUserId to gelbooruApiKey
-        } else data.gelbooruUserId to data.gelbooruApiKey
-        val rule34Credentials = if (merge && hasCredentials(rule34UserId, rule34ApiKey)) {
-            rule34UserId to rule34ApiKey
-        } else data.rule34UserId to data.rule34ApiKey
 
         val editor = store.edit()
-            .putString("favorite_posts", favoritePostsJson(favorites))
-            .putString("gelbooru_user_id", gelbooruCredentials.first.trim())
-            .putString("gelbooru_api_key", gelbooruCredentials.second.trim())
-            .putString("rule34_user_id", rule34Credentials.first.trim())
-            .putString("rule34_api_key", rule34Credentials.second.trim())
-            .putString("provider", if (data.provider == "All") "Auto" else data.provider)
-            .putBoolean("nsfw", data.allowNsfw)
-            .putString("rating_filter", if (data.allowNsfw) data.rating else "sfw")
-            .putBoolean("doh", data.useDoh)
-            .putString("doh_provider", data.dohProvider)
-            .putString("custom_doh_endpoint", data.customDohEndpoint.trim())
-            .putBoolean("filter_gore", data.filterGore)
-            .putBoolean("exclude_male", data.excludeMale)
-            .putString("custom_block_tags", data.customBlockTags)
-            .putString("media_filter", data.mediaFilter)
-            .putInt("video_max_height", data.videoMaxHeight)
-            .putBoolean("ambient_mode", data.ambientMode)
-            .putString("custom_search_terms", JSONArray(data.customTerms).toString())
-            .putInt("custom_search_index", 0)
+        if ("favorites" in sections) {
+            editor.putString("favorite_posts", favoritePostsJson(favorites))
+        }
+        if ("providers" in sections) {
+            val gelbooruCredentials = if (merge && hasCredentials(gelbooruUserId, gelbooruApiKey)) {
+                gelbooruUserId to gelbooruApiKey
+            } else data.gelbooruUserId to data.gelbooruApiKey
+            val rule34Credentials = if (merge && hasCredentials(rule34UserId, rule34ApiKey)) {
+                rule34UserId to rule34ApiKey
+            } else data.rule34UserId to data.rule34ApiKey
+            editor
+                .putString("gelbooru_user_id", gelbooruCredentials.first.trim())
+                .putString("gelbooru_api_key", gelbooruCredentials.second.trim())
+                .putString("rule34_user_id", rule34Credentials.first.trim())
+                .putString("rule34_api_key", rule34Credentials.second.trim())
+        }
+        if ("settings" in sections) {
+            editor
+                .putString("provider", if (data.provider == "All") "Auto" else data.provider)
+                .putBoolean("nsfw", data.allowNsfw)
+                .putString("rating_filter", if (data.allowNsfw) data.rating else "sfw")
+                .putBoolean("doh", data.useDoh)
+                .putString("doh_provider", data.dohProvider)
+                .putString("custom_doh_endpoint", data.customDohEndpoint.trim())
+                .putBoolean("filter_gore", data.filterGore)
+                .putBoolean("exclude_male", data.excludeMale)
+                .putString("custom_block_tags", data.customBlockTags)
+                .putString("media_filter", data.mediaFilter)
+                .putInt("video_max_height", data.videoMaxHeight)
+                .putBoolean("ambient_mode", data.ambientMode)
+                .putString("custom_search_terms", JSONArray(data.customTerms).toString())
+                .putInt("custom_search_index", 0)
+        }
         if (!editor.commit()) {
             throw IllegalStateException("Could not save imported user data.")
         }

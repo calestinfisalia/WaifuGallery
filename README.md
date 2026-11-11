@@ -6,17 +6,24 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.10).
-- [Linux](linux/README.md) — Linux port aligned with the Windows 0.1.10 desktop feature set; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.10).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.11).
+- [Linux](linux/README.md) — Linux port sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.11).
 
-The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Feature availability and platform requirements are documented in each project README.
+The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
+
+## Version 0.1.11
+
+- **Windows:** added Safety & Privacy controls, a separate Favorites PIN, expanded theme selection, and section-based encrypted backups. Downloads history now retains saved file paths.
+- **Windows and Android:** parental content filtering and PIN-protected Favorites; encrypted backup format v2 supports selected sections and remains compatible with version 1 backups.
+- **Windows player:** compact controls, theme-aware purple seek/volume sliders, and a brighter solid buffer indicator. Ambient blur and provider notices also received rendering fixes.
+- See the platform READMEs for release-specific details and Linux verification status.
 
 ## Encrypted user data backups
 
-Windows, Linux, and Android provide **Settings → Backup & Restore**. Android Settings opens full-screen with separate category pages. Export creates a `.wgbak` file containing favorites, Gelbooru/Rule34.xxx credentials, and portable preferences such as provider, rating/content filters, search terms, DoH settings, media filter, ambient mode, and video resolution. Device-specific download locations and window state are excluded.
+Windows, Linux, and Android provide **Settings → Backup & Restore**. Android Settings opens full-screen with separate category pages. Windows export lets you choose Favorites, Provider logins, Theme, and Settings before creating the encrypted `.wgbak` file. Linux export and Android export include the data supported by those platforms; Android does not use desktop themes. Download history and locations, safety PINs/policies, and window state are excluded.
 
-The shared version 1 format uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces favorites and provider credentials. Both options import the backup's portable preferences. The local download location is retained.
+The shared version 2 format records which sections are included and uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything, and leaves unselected sections unchanged. Unsupported desktop themes are reported during confirmation and left unchanged; Android does not apply themes. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces included favorites and provider credentials. Included portable settings are imported with either option. The local download location is retained.
 
 This encrypts the exported file only. Provider credentials remain stored using each platform's existing local settings storage, so protect access to your device as usual.
 Windows and Linux use app-styled dialogs and an in-app file browser for backup passphrases and file selection; Android uses its system document picker.

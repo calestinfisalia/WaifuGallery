@@ -32,14 +32,20 @@ data class UserDataBackup(
     val customDohEndpoint: String,
     val ambientMode: Boolean,
     val videoMaxHeight: Int,
+    val includedSections: Set<String> = setOf("favorites", "providers", "settings"),
+    val theme: String = "Dark",
+    val formatVersion: Int = 2,
 )
 
 object UserDataBackupCodec {
     private const val SCHEMA = "waifu-gallery-user-data"
-    private const val VERSION = 1
+    private const val VERSION = 2
+    private val supportedVersions = setOf(1, VERSION)
+    private val validSections = setOf("favorites", "providers", "theme", "settings")
     private const val ITERATIONS = 600_000
     private const val MAX_BACKUP_BYTES = 32 * 1024 * 1024
-    private val aad = "waifu-gallery-backup:v1".toByteArray(StandardCharsets.UTF_8)
+    private fun aad(version: Int) =
+        "waifu-gallery-backup:v$version".toByteArray(StandardCharsets.UTF_8)
     private val random = SecureRandom()
 
     fun create(
@@ -89,7 +95,7 @@ object UserDataBackupCodec {
         val nonce = ByteArray(12).also(random::nextBytes)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, deriveKey(passphrase, salt), GCMParameterSpec(128, nonce))
-        cipher.updateAAD(aad)
+        cipher.updateAAD(aad(VERSION))
         val encrypted = cipher.doFinal(payloadJson(data).toByteArray(StandardCharsets.UTF_8))
         val envelope = JSONObject().apply {
             put("format", SCHEMA)
@@ -117,9 +123,10 @@ object UserDataBackupCodec {
         } catch (error: Exception) {
             throw IllegalArgumentException("The selected file is not a valid backup.", error)
         }
+        val envelopeVersion = envelope.requiredInt("version")
         require(
             envelope.requiredString("format") == SCHEMA &&
-                envelope.requiredInt("version") == VERSION &&
+                envelopeVersion in supportedVersions &&
                 envelope.requiredString("kdf") == "PBKDF2-HMAC-SHA256" &&
                 envelope.requiredInt("iterations") == ITERATIONS &&
                 envelope.requiredString("cipher") == "AES-256-GCM"
@@ -133,9 +140,9 @@ object UserDataBackupCodec {
             }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt), GCMParameterSpec(128, nonce))
-            cipher.updateAAD(aad)
+            cipher.updateAAD(aad(envelopeVersion))
             val plaintext = cipher.doFinal(encrypted).toString(StandardCharsets.UTF_8)
-            return parsePayload(JSONObject(plaintext)).also(::validate)
+            return parsePayload(JSONObject(plaintext), envelopeVersion).also(::validate)
         } catch (error: IllegalArgumentException) {
             throw error
         } catch (error: Exception) {
@@ -164,6 +171,8 @@ object UserDataBackupCodec {
     private fun payloadJson(data: UserDataBackup): String = JSONObject().apply {
         put("schema", SCHEMA)
         put("version", VERSION)
+        put("sections", JSONArray(data.includedSections))
+        if ("theme" in data.includedSections) put("theme", data.theme)
         put("favorites", JSONArray().apply { data.favorites.forEach { put(favoriteJson(it)) } })
         put("providers", JSONObject().apply {
             put("gelbooru", credentialJson(data.gelbooruUserId, data.gelbooruApiKey))
@@ -215,9 +224,36 @@ object UserDataBackupCodec {
         put("api_key", apiKey.trim())
     }
 
-    private fun parsePayload(payload: JSONObject): UserDataBackup {
-        require(payload.requiredString("schema") == SCHEMA && payload.requiredInt("version") == VERSION) {
+    private fun parsePayload(payload: JSONObject, envelopeVersion: Int): UserDataBackup {
+        require(
+            payload.requiredString("schema") == SCHEMA &&
+                payload.requiredInt("version") == envelopeVersion
+        ) {
             "This backup format is unsupported."
+        }
+        val sections = if (payload.has("sections")) {
+            val sectionArray = payload.getJSONArray("sections")
+            val parsed = (0 until sectionArray.length()).map { sectionArray.requiredString(it) }
+            require(
+                parsed.isNotEmpty() &&
+                    parsed.size == parsed.toSet().size &&
+                    parsed.all { it in validSections }
+            ) { "The backup contains an invalid section selection." }
+            parsed.toSet()
+        } else {
+            require(envelopeVersion == 1) { "The backup is missing its included data sections." }
+            buildSet {
+                addAll(setOf("favorites", "providers", "settings"))
+                if (payload.has("theme")) add("theme")
+            }
+        }
+        val theme = if ("theme" in sections) {
+            require(payload.has("theme")) { "The backup is missing its selected theme." }
+            payload.requiredString("theme").also {
+                require(it.isNotBlank()) { "The backup contains an invalid theme." }
+            }
+        } else {
+            "Dark"
         }
         val providers = payload.getJSONObject("providers")
         val gelbooru = providers.getJSONObject("gelbooru")
@@ -282,6 +318,9 @@ object UserDataBackupCodec {
             customDohEndpoint = settings.optionalString("doh_custom_endpoint", ""),
             ambientMode = settings.requiredBoolean("ambient_mode"),
             videoMaxHeight = settings.requiredInt("video_max_height"),
+            includedSections = sections,
+            theme = theme,
+            formatVersion = envelopeVersion,
         )
     }
 
@@ -327,6 +366,12 @@ object UserDataBackupCodec {
     }
 
     private fun validate(data: UserDataBackup) {
+        require(data.includedSections.isNotEmpty() && data.includedSections.all { it in validSections }) {
+            "The backup contains an invalid section selection."
+        }
+        require(data.formatVersion in supportedVersions) {
+            "This backup format is unsupported."
+        }
         require(data.provider in setOf("All", "Auto", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx")) {
             "The backup contains an unsupported provider setting."
         }
@@ -358,16 +403,16 @@ object UserDataBackupCodec {
         require(data.rule34UserId.isNotBlank() == data.rule34ApiKey.isNotBlank()) {
             "Backup credentials for Rule34.xxx are incomplete."
         }
-        require(data.provider != "Gelbooru" || data.gelbooruUserId.isNotBlank()) {
+        require("providers" !in data.includedSections || data.provider != "Gelbooru" || data.gelbooruUserId.isNotBlank()) {
             "The selected provider is missing its backup credentials."
         }
-        require(data.provider != "Rule34.xxx" || data.rule34UserId.isNotBlank()) {
+        require("providers" !in data.includedSections || data.provider != "Rule34.xxx" || data.rule34UserId.isNotBlank()) {
             "The selected provider is missing its backup credentials."
         }
-        require(data.favorites.all { it.id.isNotBlank() && it.provider.isNotBlank() && it.imageUrl.isNotBlank() }) {
+        require("favorites" !in data.includedSections || data.favorites.all { it.id.isNotBlank() && it.provider.isNotBlank() && it.imageUrl.isNotBlank() }) {
             "A favorite is missing its ID, provider, or image URL."
         }
-        require(data.favorites.all {
+        require("favorites" !in data.includedSections || data.favorites.all {
             it.mediaType in setOf("image", "video") && it.width >= 0 && it.height >= 0 &&
                 it.videoVariants.all { variant -> variant.url.isNotBlank() && variant.width >= 0 && variant.height >= 0 }
         }) { "A favorite contains unsupported media details." }

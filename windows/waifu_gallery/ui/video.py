@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, QSizeF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QIcon
+from PySide6.QtCore import QEvent, QPoint, QSize, QSizeF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -28,6 +28,7 @@ class VideoPlayerWidget(QWidget):
     playRequested = Signal()
     playbackActiveChanged = Signal(bool)
     playbackStatusChanged = Signal(str)
+    resolutionChanged = Signal(int)
     volumeChanged = Signal(int)
 
     def __init__(self, parent=None) -> None:
@@ -58,6 +59,8 @@ class VideoPlayerWidget(QWidget):
         self._buffering_active = False
         self._has_video_frame = False
         self._buffered_percent = -1
+        self._accent_color = "#BB9AF7"
+        self._buffered_color = QColor(self._accent_color).lighter(150).name()
         self._reflow_timer = QTimer(self)
         self._reflow_timer.setSingleShot(True)
         self._reflow_timer.setInterval(24)
@@ -130,6 +133,15 @@ class VideoPlayerWidget(QWidget):
         self.play_overlay.clicked.connect(self.toggle_playback)
         preview_stack.addWidget(self.play_overlay, 0, 0, Qt.AlignmentFlag.AlignCenter)
 
+        self.video_play_overlay = QPushButton(self.video_canvas)
+        self.video_play_overlay.setObjectName("videoPlayOverlay")
+        self.video_play_overlay.setFixedSize(76, 76)
+        self.video_play_overlay.setIcon(self._icon("play.svg"))
+        self.video_play_overlay.setIconSize(QSize(34, 34))
+        self.video_play_overlay.setToolTip("Play video")
+        self.video_play_overlay.clicked.connect(self.toggle_playback)
+        self.video_play_overlay.hide()
+
         self.stage = QStackedWidget()
         self.stage.setStyleSheet("background: transparent; border: 0;")
         self.stage.addWidget(self.video_canvas)
@@ -145,6 +157,13 @@ class VideoPlayerWidget(QWidget):
         self.play_pause.setIconSize(QSize(18, 18))
         self.play_pause.setToolTip("Play")
         self.play_pause.clicked.connect(self.toggle_playback)
+        self.resolution_button = QPushButton("⋮")
+        self.resolution_button.setObjectName("videoResolutionButton")
+        self.resolution_button.setFixedSize(30, 32)
+        self.resolution_button.setToolTip("Video resolution")
+        self.resolution_button.setAccessibleName("Video resolution")
+        self.resolution_button.clicked.connect(self._show_resolution_menu)
+        self._resolution_limit = 0
         self.volume_button = QPushButton()
         self.volume_button.setObjectName("videoVolumeButton")
         self.volume_button.setFixedSize(30, 30)
@@ -187,6 +206,7 @@ class VideoPlayerWidget(QWidget):
         controls.addWidget(self.play_pause)
         controls.addWidget(self.position, 1)
         controls.addWidget(self.time_label)
+        controls.addWidget(self.resolution_button)
         controls.addWidget(self.volume_button)
         controls.addWidget(self.volume_slider)
         self.controls_layout = controls
@@ -215,42 +235,24 @@ class VideoPlayerWidget(QWidget):
             QPushButton#videoPlayOverlay { border: 0; border-radius: 38px; background: rgba(28, 30, 44, 225); color: white; font-size: 30px; }
             QPushButton#videoPlayOverlay:hover { background: rgba(122, 94, 230, 245); }
             QPushButton#videoPlayPause { padding: 0; }
+            QPushButton#videoResolutionButton { border: 0; background: transparent; color: #c8cce0; font-size: 22px; padding: 0; }
+            QPushButton#videoResolutionButton:hover { background: rgba(122, 94, 230, 120); border-radius: 8px; }
             QPushButton#videoVolumeButton { padding: 0; border: 0; background: transparent; }
             QSlider#videoVolumeSlider { min-height: 18px; }
-            QSlider#videoVolumeSlider::groove:horizontal {
-                height: 5px;
-                background: #292b32;
-                border-radius: 2px;
-            }
-            QSlider#videoPositionSlider::sub-page:horizontal,
-            QSlider#videoVolumeSlider::sub-page:horizontal {
-                background: #8b909b;
-                border-radius: 2px;
-            }
-            QSlider#videoVolumeSlider::add-page:horizontal {
-                background: #292b32;
-                border-radius: 2px;
-            }
-            QSlider#videoPositionSlider::handle:horizontal,
-            QSlider#videoVolumeSlider::handle:horizontal {
-                width: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
-                background: #a0a5af;
-            }
             QLabel { color: #c8cce0; }
         """)
-        self._update_buffer_progress(self.player.bufferProgress())
+        self.set_accent_color(self._accent_color)
         self._update_buffer_indicator(False)
         self.controls_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.buffering_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.buffering_overlay.setStyleSheet(
             "QFrame#videoBufferingOverlay { background: transparent; border: 0; }"
         )
-        self.controls_frame.setAutoFillBackground(True)
+        self.controls_frame.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_frame.setAutoFillBackground(False)
         self.controls_frame.setStyleSheet(
             "QFrame#videoControls { background-color: #1c1e28; "
-            "border: 0; border-radius: 9px; }"
+            "border: 0; border-radius: 24px; }"
         )
 
     def _icon(self, name: str) -> QIcon:
@@ -292,6 +294,34 @@ class VideoPlayerWidget(QWidget):
 
     def set_volume(self, value: int) -> None:
         self.volume_slider.setValue(max(0, min(100, int(value))))
+
+    def set_resolution_limit(self, height: int) -> None:
+        self._resolution_limit = height if height in {0, 480, 720, 1080, 2160} else 0
+
+    def _show_resolution_menu(self) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        for height, label in (
+            (0, "Auto"),
+            (2160, "Up to 2160p"),
+            (1080, "Up to 1080p"),
+            (720, "Up to 720p"),
+            (480, "Up to 480p"),
+        ):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(height == self._resolution_limit)
+            action.triggered.connect(
+                lambda _checked=False, selected=height: self._select_resolution(selected)
+            )
+        menu.exec(self.resolution_button.mapToGlobal(QPoint(0, -menu.sizeHint().height())))
+
+    def _select_resolution(self, height: int) -> None:
+        if height == self._resolution_limit:
+            return
+        self._resolution_limit = height
+        self.resolutionChanged.emit(height)
 
     def _volume_changed(self, value: int) -> None:
         self.audio.setVolume(value / 100.0)
@@ -479,7 +509,34 @@ class VideoPlayerWidget(QWidget):
                 self.bufferingChanged.emit(True)
                 self.playRequested.emit()
                 return
+            if (
+                self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia
+                or (
+                    self.player.duration() > 0
+                    and self.player.position() >= self.player.duration()
+                )
+            ):
+                self.player.setPosition(0)
             self.player.play()
+
+    def set_accent_color(self, color: str) -> None:
+        accent = QColor(color)
+        if not accent.isValid():
+            return
+        self._accent_color = accent.name()
+        self._buffered_color = accent.lighter(150).name()
+        self.volume_slider.setStyleSheet(
+            "QSlider#videoVolumeSlider::groove:horizontal { "
+            "height: 5px; background: #292b32; border-radius: 2px; }"
+            "QSlider#videoVolumeSlider::sub-page:horizontal { "
+            f"background: {self._accent_color}; border-radius: 2px; }}"
+            "QSlider#videoVolumeSlider::add-page:horizontal { "
+            "background: #292b32; border-radius: 2px; }"
+            "QSlider#videoVolumeSlider::handle:horizontal { "
+            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
+        )
+        self._buffered_percent = -1
+        self._update_buffer_progress(self.player.bufferProgress())
 
     def _update_buffer_progress(self, progress: float) -> None:
         percent = max(0, min(100, round(progress * 100)))
@@ -489,17 +546,17 @@ class VideoPlayerWidget(QWidget):
         stop = percent / 100
         gradient = (
             "qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-            f"stop:0 #8b909b, stop:{stop:.3f} #8b909b, "
-            f"stop:{min(1.0, stop + 0.001):.3f} #292b32, stop:1 #292b32)"
+            f"stop:0 {self._buffered_color}, stop:{stop:.3f} {self._buffered_color}, "
+            f"stop:{stop:.3f} #292b32, stop:1 #292b32)"
         )
         self.position.setStyleSheet(
             "QSlider#videoPositionSlider { min-height: 18px; }"
             "QSlider#videoPositionSlider::groove:horizontal { "
             f"height: 5px; background: {gradient}; border-radius: 2px; }}"
             "QSlider#videoPositionSlider::sub-page:horizontal { "
-            "background: #8b909b; border-radius: 2px; }"
+            f"background: {self._accent_color}; border-radius: 2px; }}"
             "QSlider#videoPositionSlider::handle:horizontal { "
-            "width: 12px; margin: -4px 0; border-radius: 6px; background: #a0a5af; }"
+            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
         )
 
     def _reset_buffer_progress(self) -> None:
@@ -547,6 +604,15 @@ class VideoPlayerWidget(QWidget):
             self.video.viewport().update()
         self.buffering_overlay.setVisible(visible)
         self._update_buffer_indicator(visible)
+        show_center_play = (
+            self._has_started
+            and self.has_source
+            and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+            and not visible
+        )
+        self.video_play_overlay.setVisible(show_center_play)
+        if show_center_play:
+            self.video_play_overlay.raise_()
         if visible:
             self._position_overlay_widgets()
             self.buffering_overlay.raise_()
@@ -690,7 +756,7 @@ class VideoPlayerWidget(QWidget):
         if canvas_width <= 0 or canvas_height <= 0:
             return
         bar_height = self.controls_frame.sizeHint().height()
-        bar_width = max(1, canvas_width - 48)
+        bar_width = min(max(1, canvas_width - 48), 820)
         bar_x = (canvas_width - bar_width) // 2
         bar_y = canvas_height - bar_height - 28
         self.controls_frame.setGeometry(
@@ -712,6 +778,10 @@ class VideoPlayerWidget(QWidget):
             (height - overlay_height) // 2,
             overlay_width,
             overlay_height,
+        )
+        self.video_play_overlay.move(
+            (width - self.video_play_overlay.width()) // 2,
+            (height - self.video_play_overlay.height()) // 2,
         )
 
     def _fit_video_surface(self) -> None:
@@ -751,12 +821,22 @@ class VideoPlayerWidget(QWidget):
         self.controls_frame.setVisible(
             self._has_started and self._controls_visible
         )
+        self.resolution_button.setVisible(self._has_started and self.has_source)
         self.play_pause.setIcon(self._icon("pause.svg" if playing else "play.svg"))
         self.play_pause.setToolTip("Pause" if playing else "Play")
         self.play_pause.setEnabled(self.has_source)
         self.play_overlay.setEnabled(self.has_source)
         self.play_overlay.setIcon(self._icon("pause.svg" if playing else "play.svg"))
         self.play_overlay.setToolTip("Pause video" if playing else "Play video")
+        show_center_play = (
+            self._has_started
+            and self.has_source
+            and not playing
+            and not self._buffering_active
+        )
+        self.video_play_overlay.setVisible(show_center_play)
+        if show_center_play:
+            self.video_play_overlay.raise_()
         self.set_fullscreen_toggle_visible(self._has_started and self.has_source and not self._fullscreen_mode)
         self._emit_playback_status(state)
 
