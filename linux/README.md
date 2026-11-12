@@ -1,6 +1,6 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.11 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.12 while Linux launch and packaging files remain separate.
 
 ## Status
 
@@ -68,6 +68,12 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
+
+## Linux 0.1.12
+
+- **Flatpak compatibility:** build Python and frozen extensions against the Flatpak 24.08 SDK glibc baseline and bundle the Kerberos libraries required by Qt Multimedia.
+- **User data:** migrate existing non-sandbox QSettings data into the Flatpak profile without deleting the original profile; merge favorites and preserve settings already present in Flatpak.
+- Linux packages are published for x86_64. Windows installers will be added to the release separately.
 
 ## Linux 0.1.10
 
