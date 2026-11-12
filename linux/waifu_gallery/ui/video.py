@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QSize, QSizeF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QIcon
+from PySide6.QtGui import QBrush, QColor, QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -58,6 +58,8 @@ class VideoPlayerWidget(QWidget):
         self._buffering_active = False
         self._has_video_frame = False
         self._buffered_percent = -1
+        self._accent_color = "#BB9AF7"
+        self._buffered_color = "#E2D3FF"
         self._reflow_timer = QTimer(self)
         self._reflow_timer.setSingleShot(True)
         self._reflow_timer.setInterval(24)
@@ -272,6 +274,7 @@ class VideoPlayerWidget(QWidget):
             "QFrame#videoControls { background-color: #1c1e28; "
             "border: 0; border-radius: 24px; }"
         )
+        self.set_accent_color(self._accent_color)
 
     def _icon(self, name: str) -> QIcon:
         return QIcon(str(self._asset_dir / name))
@@ -543,7 +546,7 @@ class VideoPlayerWidget(QWidget):
         stop = percent / 100
         gradient = (
             "qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-            f"stop:0 #8b909b, stop:{stop:.3f} #8b909b, "
+            f"stop:0 {self._buffered_color}, stop:{stop:.3f} {self._buffered_color}, "
             f"stop:{min(1.0, stop + 0.001):.3f} #292b32, stop:1 #292b32)"
         )
         self.position.setStyleSheet(
@@ -551,10 +554,27 @@ class VideoPlayerWidget(QWidget):
             "QSlider#videoPositionSlider::groove:horizontal { "
             f"height: 5px; background: {gradient}; border-radius: 2px; }}"
             "QSlider#videoPositionSlider::sub-page:horizontal { "
-            "background: #8b909b; border-radius: 2px; }"
+            f"background: {self._accent_color}; border-radius: 2px; }}"
             "QSlider#videoPositionSlider::handle:horizontal { "
-            "width: 12px; margin: -4px 0; border-radius: 6px; background: #a0a5af; }"
+            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
         )
+
+    def set_accent_color(self, color: str) -> None:
+        accent = QColor(color)
+        if not accent.isValid():
+            return
+        self._accent_color = accent.name()
+        self._buffered_color = accent.lighter(150).name()
+        self.volume_slider.setStyleSheet(
+            "QSlider#videoVolumeSlider::groove:horizontal { height: 5px; background: #292b32; border-radius: 2px; }"
+            "QSlider#videoVolumeSlider::sub-page:horizontal { "
+            f"background: {self._accent_color}; border-radius: 2px; }}"
+            "QSlider#videoVolumeSlider::add-page:horizontal { background: #292b32; border-radius: 2px; }"
+            "QSlider#videoVolumeSlider::handle:horizontal { "
+            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
+        )
+        self._buffered_percent = -1
+        self._update_buffer_progress(self.player.bufferProgress())
 
     def _reset_buffer_progress(self) -> None:
         self._buffered_percent = -1

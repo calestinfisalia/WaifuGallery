@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -9,6 +10,69 @@ from PySide6.QtWidgets import (
 )
 
 from .dialog_chrome import DialogTitleBar, FramelessResizableDialog
+
+
+class BackupSectionsDialog(FramelessResizableDialog):
+    SECTION_OPTIONS = (
+        ("favorites", "Favorites"),
+        ("providers", "Provider logins"),
+        ("theme", "Theme"),
+        ("settings", "Settings"),
+    )
+
+    def __init__(
+        self,
+        *,
+        available_sections: tuple[str, ...] | None = None,
+        checked_sections: tuple[str, ...] | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.selected_sections: tuple[str, ...] = ()
+        self.setObjectName("backupPromptDialog")
+        self.setWindowTitle("Choose backup contents")
+        self.setFixedWidth(420)
+
+        available = set(available_sections or (key for key, _label in self.SECTION_OPTIONS))
+        checked = available if checked_sections is None else set(checked_sections)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QWidget(self)
+        surface.setObjectName("backupPromptSurface")
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(14, 4, 14, 14)
+        layout.setSpacing(10)
+        layout.addWidget(DialogTitleBar(self, "Choose backup contents"))
+        instructions = QLabel("Select the data to include in this backup operation.")
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        self.section_checks: dict[str, QCheckBox] = {}
+        for key, label in self.SECTION_OPTIONS:
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(key in checked)
+            checkbox.setEnabled(key in available)
+            self.section_checks[key] = checkbox
+            layout.addWidget(checkbox)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        submit = QPushButton("Continue")
+        submit.setDefault(True)
+        submit.clicked.connect(self._submit)
+        buttons.addWidget(cancel)
+        buttons.addWidget(submit)
+        layout.addLayout(buttons)
+        outer.addWidget(surface)
+
+    def _submit(self) -> None:
+        self.selected_sections = tuple(
+            key for key, checkbox in self.section_checks.items()
+            if checkbox.isEnabled() and checkbox.isChecked()
+        )
+        if self.selected_sections:
+            self.accept()
 
 
 class BackupPassphraseDialog(FramelessResizableDialog):
@@ -154,6 +218,10 @@ class BackupMessageDialog(FramelessResizableDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return dialog.selected_action
         return None
+
+    @classmethod
+    def notify(cls, parent, title: str, message: str) -> None:
+        cls.ask(parent, title, message, ("OK",), default_button="OK")
 
     def _choose(self, action: str) -> None:
         self.selected_action = action

@@ -9,7 +9,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
     exit 1
 fi
 
-for command in python3 flatpak flatpak-builder appimagetool; do
+for command in python3 flatpak flatpak-builder appimagetool magick; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required command not found: $command" >&2
         exit 1
@@ -62,7 +62,7 @@ PIP_CACHE_DIR="$BUILD_ROOT/pip-cache" \
     --collect-all PySide6.QtMultimedia \
     --distpath "$BUILD_ROOT/dist" \
     --workpath "$BUILD_ROOT/pyinstaller" \
-    waifu_gallery/__main__.py
+    launcher.py
 
 APP_ID="com.fisalia.WaifuGallery"
 APP_NAME="Waifu Gallery"
@@ -111,7 +111,9 @@ ARCH="$APPIMAGE_ARCH" appimagetool "$APPIMAGE_DIR" "$APPIMAGE_PATH"
 FLATPAK_SOURCE="$BUILD_ROOT/flatpak-source"
 mkdir -p "$FLATPAK_SOURCE"
 cp -a "$APP_BUNDLE" "$FLATPAK_SOURCE/WaifuGallery"
-cp "$APP_ICON" "$FLATPAK_SOURCE/icon.png"
+ICON_SIZE="$(magick identify -format '%[fx:max(w,h)]' "$APP_ICON")"
+magick "$APP_ICON" -gravity center -background none \
+    -extent "${ICON_SIZE}x${ICON_SIZE}" "$FLATPAK_SOURCE/icon.png"
 cat > "$FLATPAK_SOURCE/waifu-gallery" <<'FLATPAK_LAUNCHER'
 #!/usr/bin/env sh
 exec /app/lib/waifu-gallery/WaifuGallery "$@"
@@ -133,6 +135,8 @@ mkdir -p "$BUILD_ROOT/flatpak"
 cp "$SCRIPT_DIR/flatpak/$APP_ID.yml" "$BUILD_ROOT/flatpak/$APP_ID.yml"
 flatpak-builder \
     --force-clean \
+    --state-dir="$BUILD_ROOT/flatpak-state" \
+    --default-branch=stable \
     --repo="$FLATPAK_REPO" \
     "$FLATPAK_BUILD" \
     "$BUILD_ROOT/flatpak/$APP_ID.yml"

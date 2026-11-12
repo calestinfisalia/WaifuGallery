@@ -206,7 +206,7 @@ def create_payload(settings, sections: tuple[str, ...] | None = None) -> dict:
     included = set(selected_sections)
     allow_nsfw = bool(settings.get("search/allow_nsfw", False))
     theme = str(settings.get("appearance/theme", "Dark"))
-    if theme not in {"Dark", "Light", "System"}:
+    if theme not in {"Dark", "Light", "System", "OLED Dark"}:
         theme = "Dark"
     payload = {
         "schema": SCHEMA,

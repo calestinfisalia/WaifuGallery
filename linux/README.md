@@ -4,7 +4,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 
 ## Status
 
-The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, and startup release checks. Linux-specific runtime behavior has not been validated on a Linux desktop yet; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
+The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 
@@ -17,15 +17,18 @@ The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `Q
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.
 - Downloads history, including saved file paths, is retained locally across app restarts and can be cleared from the Downloads window.
 - Optional process-local DoH using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom RFC 8484 endpoint.
+- Safety & Privacy settings with an optional guardian PIN, maximum rating and allowed-tag policy, plus a separate PIN lock for Favorites. PINs are salted and hashed locally; failed attempts trigger a cooldown.
+- Dark, Light, System, and OLED Dark themes.
 - Encrypted, cross-platform user data export/import for favorites, provider credentials, and portable preferences.
 
 The application filters content only by provider metadata and tags. Follow each provider's usage rules. Credentials are stored in the user's QSettings profile and are not encrypted by the application.
+Parental controls and the Favorites lock are in-app restrictions, not tamper-proof OS controls. Rating and allowed-tag rules depend on provider metadata and cannot guarantee that every post is correctly labeled or protect files downloaded outside the app.
 
 ## Encrypted user data backup
 
 Open Settings → Backup & Restore to export or import a `.wgbak` file. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Imports respect the sections selected in a backup and leave unselected data unchanged. Download folders, safety PINs/policies, and window state are excluded.
 
-The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. Unsupported desktop themes are identified in the import summary and left unchanged. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
+The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. PINs and parental policy are device-local and excluded from backups. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
 
 ## UI behavior and troubleshooting
@@ -49,9 +52,11 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 
 ### New features
 
+- **Safety & Privacy:** optional guardian PIN, parental maximum-rating and allowed-tag controls, plus a separate PIN lock for Favorites.
+- **Themes:** OLED Dark is available alongside Dark, Light, and System.
 - **Downloads:** history retains each saved file's path across restarts and can be cleared from the Downloads window.
 - **Encrypted backups:** version 2 exports include section metadata and the current theme; imports can preserve unselected sections and still accept version 1 backups.
-- Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
+- Linux 0.1.11 release assets include AppImage and Flatpak bundles for x86_64. Verify playback and resizing on the target desktop; codec support depends on the system/runtime.
 
 ## Linux 0.1.8
 
@@ -87,7 +92,7 @@ The script creates `.venv`, installs `requirements.txt`, and starts the applicat
 ## Packaging
 
 Build AppImage and Flatpak packages from a Linux environment. The build host
-needs Python 3.10+, `python3-venv`, Flatpak, Flatpak Builder, and `appimagetool`.
+needs Python 3.10+, `python3-venv`, Flatpak, Flatpak Builder, `appimagetool`, and ImageMagick (`magick`).
 Before the first Flatpak build, configure Flathub and install its 24.08 runtime
 and SDK (use your distribution's package manager for the build tools):
 

@@ -51,10 +51,13 @@ from .. import __version__
 from ..models import ImagePost, SearchPage
 from ..providers import BooruCatalog, ProviderError
 from ..settings import AppSettings
+from .backup_prompts import BackupMessageDialog
 from .downloads import DownloadsDialog
 from .credits import ImageCreditsDialog, rating_label
 from .favorites import FavoritesDialog, favorite_key
 from .indicators import CircularProgressIndicator
+from ..pin_security import has_pin, verify_pin
+from .pin_prompts import PinPromptDialog
 from .preferences import PreferencesDialog
 from .updates import ReleaseNotesDialog, UpdateCheckTask, version_parts
 from .video import VideoPlayerWidget
@@ -250,7 +253,7 @@ class MainWindow(QMainWindow):
         self._windowed_geometry = None
         self.card_buttons: dict[str, QPushButton] = {}
         self.current_theme = str(self.settings.get("appearance/theme", "Dark"))
-        if self.current_theme not in ("Dark", "Light", "System"):
+        if self.current_theme not in ("Dark", "Light", "System", "OLED Dark"):
             self.current_theme = "Dark"
         self._icon_cache: dict[tuple[str, str], QIcon] = {}
         self._icon_buttons: list[QPushButton] = []
@@ -748,7 +751,7 @@ class MainWindow(QMainWindow):
         theme_group.setExclusive(True)
         theme_menu = menu.addMenu("Theme")
         theme_menu.setMinimumWidth(180)
-        for theme in ("Dark", "Light", "System"):
+        for theme in ("Dark", "Light", "System", "OLED Dark"):
             action = theme_menu.addAction(theme)
             action.setCheckable(True)
             action.setChecked(theme == self.current_theme)
@@ -966,7 +969,22 @@ class MainWindow(QMainWindow):
             self.favorites_dialog.raise_()
             self.favorites_dialog.activateWindow()
             return
-        posts = self._favorite_posts()
+        if self.settings.get_bool("favorites_lock/enabled"):
+            if not has_pin(self.settings, "favorites_lock"):
+                BackupMessageDialog.notify(
+                    self, "Favorites locked",
+                    "The Favorites PIN is unavailable. Reset it from Safety & Privacy.",
+                )
+                return
+            pin_dialog = PinPromptDialog(
+                title="Unlock Favorites",
+                description="Enter your Favorites PIN to continue.",
+                verify_current=lambda value: verify_pin(self.settings, "favorites_lock", value),
+                parent=self,
+            )
+            if pin_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+        posts = [post for post in self._favorite_posts() if self._parent_allows_post(post)]
         token = str(uuid4())
         dialog = FavoritesDialog(posts, self._open_favorite, self._remove_favorite, self)
         self.favorites_dialog = dialog
@@ -991,6 +1009,7 @@ class MainWindow(QMainWindow):
             self.favorites_dialog_token = ""
 
     def _refresh_favorites_dialog(self, posts: list[ImagePost]) -> None:
+        posts = [post for post in posts if self._parent_allows_post(post)]
         self._favorite_navigation_posts = list(posts)
         dialog = self.favorites_dialog
         if dialog:
@@ -1028,6 +1047,12 @@ class MainWindow(QMainWindow):
             self._update_detail_navigation()
 
     def _open_favorite(self, post: ImagePost) -> None:
+        if not self._parent_allows_post(post):
+            BackupMessageDialog.notify(
+                self, "Parental control",
+                "This favorite is above the guardian's content limits.",
+            )
+            return
         dialog = self.favorites_dialog
         if dialog:
             self._favorite_navigation_posts = list(dialog.posts)
@@ -1080,7 +1105,7 @@ class MainWindow(QMainWindow):
         return button
 
     def change_theme(self, theme: str) -> None:
-        if theme not in ("Dark", "Light", "System"):
+        if theme not in ("Dark", "Light", "System", "OLED Dark"):
             return
         self.current_theme = theme
         self.settings.set("appearance/theme", theme)
@@ -1110,6 +1135,15 @@ class MainWindow(QMainWindow):
                 "DISABLED": "#EEF0F6", "MENU_SELECTED": "#E5E9F6",
                 "SEARCH_BG": "#FFFFFF", "SEARCH_BORDER": "#B9C1D5",
             }
+        elif theme == "OLED Dark":
+            palette = {
+                "BG": "#000000", "SIDEBAR": "#08090D", "PANEL": "#101116",
+                "TEXT": "#B6BCD2", "STRONG": "#E2E6F4", "MUTED": "#81879D",
+                "BORDER": "#292B35", "HOVER": "#1A1B22", "ACCENT": "#C4A1FF",
+                "BLUE": "#8DB4FF", "ACTIVE": "#171820", "PRESSED": "#101116",
+                "DISABLED": "#111217", "MENU_SELECTED": "#252633",
+                "SEARCH_BG": "#000000", "SEARCH_BORDER": "#41434F",
+            }
         else:
             palette = {
                 "BG": "#171923", "SIDEBAR": "#1B1D2A", "PANEL": "#222638",
@@ -1125,6 +1159,10 @@ class MainWindow(QMainWindow):
             QMainWindow { background: transparent; border: 1px solid __BORDER__; border-radius: 12px; }
             QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
             QDialog#settingsDialog { background: transparent; border: 0; }
+            QDialog#pinPromptDialog { background: transparent; border: 0; }
+            QWidget#pinPromptSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLineEdit#pinPromptCurrent, QLineEdit#pinPromptNew, QLineEdit#pinPromptConfirm { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
+            QLabel#pinPromptError { color: #F7768E; }
             QWidget#settingsSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
             QDialog#backupFileDialog { background: transparent; border: 0; }
             QWidget#backupFileSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
@@ -1178,6 +1216,22 @@ class MainWindow(QMainWindow):
             QWidget#settingsPage { background: __PANEL__; color: __TEXT__; border-radius: 18px; }
             QWidget#settingsPage QLabel { background: transparent; }
             QWidget#settingsPage QFrame { background: transparent; border-color: __BORDER__; }
+            QWidget#settingsPage QFrame#settingsSection { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QLabel#settingsSectionTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#settingsHelpText { color: __MUTED__; }
+            QPushButton#settingsSubmenuButton, QPushButton#safetyMenuButton { text-align: left; background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 10px; padding: 10px 14px; }
+            QPushButton#settingsSubmenuButton:hover, QPushButton#safetyMenuButton:hover { background: __HOVER__; border-color: __MUTED__; }
+            QPushButton#settingsBackButton { background: transparent; border: 0; border-radius: 17px; padding: 0; }
+            QPushButton#settingsBackButton:hover { background: __HOVER__; }
+            QPushButton#themePreviewCard { text-align: left; background: __PANEL__; border: 1px solid __BORDER__; border-radius: 8px; padding: 0; }
+            QPushButton#themePreviewCard:hover { border-color: __MUTED__; }
+            QPushButton#themePreviewCard[selectedTheme="true"] { border: 2px solid __ACCENT__; }
+            QCheckBox#settingsSafetyToggle { spacing: 0; padding: 0; background: transparent; border: 0; }
+            QCheckBox#settingsSafetyToggle::indicator { width: 0; height: 0; }
+            QScrollArea#safetySettingsScroll { background: transparent; border: 0; }
+            QWidget#aboutMascot, QWidget#updateMascot { background: transparent; }
+            QFrame#releaseNotesCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 18px; }
+            QLabel#releaseNotesSubheading { color: __MUTED__; font-weight: 600; }
             QWidget#customTermRow { background: transparent; border: 0; }
             QPushButton#removeCustomTermButton { background: transparent; border: 0; border-radius: 14px; padding: 0; }
             QPushButton#removeCustomTermButton:hover { background: #4A3042; }
@@ -1264,8 +1318,18 @@ class MainWindow(QMainWindow):
         checkmark = str(Path(__file__).resolve().parent.parent / "assets" / "check.svg").replace("\\", "/")
         stylesheet = stylesheet.replace("__CHECKMARK__", checkmark)
         self.setStyleSheet(stylesheet)
+        for player in (
+            getattr(self, "random_video", None),
+            getattr(self, "detail_video", None),
+        ):
+            if player is not None:
+                player.set_accent_color(palette["ACCENT"])
 
     def _catalog(self) -> BooruCatalog:
+        parent_enabled = self.settings.get_bool("parent/enabled")
+        allowed_tags = self.settings.get("parent/allowed_tags", []) if parent_enabled else []
+        if isinstance(allowed_tags, str):
+            allowed_tags = allowed_tags.split(",")
         return BooruCatalog(
             self.settings.gelbooru_credentials,
             bool(self.settings.get("search/exclude_male", True)),
@@ -1275,7 +1339,28 @@ class MainWindow(QMainWindow):
             tuple(self.settings.get("search/custom_block_tags", []) or []),
             str(self.settings.get("search/media_filter", "image")),
             self.settings.doh_endpoint,
+            str(self.settings.get("parent/max_rating", "s")) if parent_enabled else None,
+            tuple(map(str, allowed_tags)) if isinstance(allowed_tags, (list, tuple)) else (),
         )
+
+    def _parent_allows_post(self, post: ImagePost) -> bool:
+        if not self.settings.get_bool("parent/enabled"):
+            return True
+        maximum = str(self.settings.get("parent/max_rating", "s"))
+        rating_rank = {"s": 0, "q": 1, "e": 2}
+        post_rank = rating_rank.get(post.rating)
+        if post_rank is None or post_rank > rating_rank.get(maximum, 0):
+            return False
+        allowed_tags = self.settings.get("parent/allowed_tags", [])
+        if isinstance(allowed_tags, str):
+            allowed_tags = allowed_tags.split(",")
+        allowed_tags = allowed_tags or []
+        normalized = {
+            str(value).strip().casefold().replace(" ", "_")
+            for value in allowed_tags
+            if str(value).strip()
+        }
+        return not normalized or bool(post.tags.intersection(normalized))
 
     @staticmethod
     def _create_ambient_layer(page: QWidget) -> QLabel:
@@ -1720,9 +1805,30 @@ class MainWindow(QMainWindow):
             target.set_loading_progress(value)
 
     def _active_rating(self) -> str:
+        if self.settings.get_bool("parent/enabled") and str(
+            self.settings.get("parent/max_rating", "s")
+        ) == "s":
+            return "sfw"
         return self.selected_rating
 
     def _rating_allowed(self) -> bool:
+        if self.settings.get_bool("parent/enabled"):
+            maximum_rank = {"s": 0, "q": 1, "e": 2}.get(
+                str(self.settings.get("parent/max_rating", "s")), 0
+            )
+            requested_rank = {"sfw": 0, "nsfw": 2, "all": 2}.get(self.selected_rating, 2)
+            if requested_rank > maximum_rank:
+                BackupMessageDialog.notify(
+                    self, "Parental control",
+                    "This rating is above the maximum selected by the guardian.",
+                )
+                replacement = "sfw" if maximum_rank == 0 else "all"
+                self.selected_rating = replacement
+                self.settings.set("search/rating", replacement)
+                if replacement in self.rating_actions:
+                    self.rating_actions[replacement].setChecked(True)
+                self._update_filter_tooltip()
+                return False
         if self._active_rating() == "sfw" or bool(self.settings.get("search/allow_nsfw", False)):
             return True
         QMessageBox.information(self, "NSFW filter", "Enable 'Allow NSFW results' in Settings before selecting this rating.")
@@ -2715,15 +2821,35 @@ class MainWindow(QMainWindow):
             "rating": previous_rating,
             "filters": previous_filter_settings,
             "favorites": self._favorite_posts(),
+            "parent_policy": (
+                self.settings.get_bool("parent/enabled"),
+                str(self.settings.get("parent/max_rating", "s")),
+                tuple(self.settings.get("parent/allowed_tags", []) or []),
+            ),
+            "favorites_lock": self.settings.get_bool("favorites_lock/enabled"),
         }
 
         def preferences_changed() -> None:
             favorites = self._favorite_posts()
+            parent_policy = (
+                self.settings.get_bool("parent/enabled"),
+                str(self.settings.get("parent/max_rating", "s")),
+                tuple(self.settings.get("parent/allowed_tags", []) or []),
+            )
+            parent_policy_changed = parent_policy != preference_state["parent_policy"]
+            preference_state["parent_policy"] = parent_policy
+            favorites_lock_enabled = self.settings.get_bool("favorites_lock/enabled")
+            favorites_lock_just_enabled = favorites_lock_enabled and not preference_state["favorites_lock"]
+            preference_state["favorites_lock"] = favorites_lock_enabled
             imported_theme = str(self.settings.get("appearance/theme", self.current_theme))
-            if imported_theme in {"Dark", "Light", "System"} and imported_theme != self.current_theme:
+            if imported_theme in {"Dark", "Light", "System", "OLED Dark"} and imported_theme != self.current_theme:
                 self.change_theme(imported_theme)
+            if favorites_lock_just_enabled and self.favorites_dialog:
+                self.favorites_dialog.close()
             if favorites != preference_state["favorites"]:
                 preference_state["favorites"] = favorites
+                self._refresh_favorites_dialog(favorites)
+            elif parent_policy_changed:
                 self._refresh_favorites_dialog(favorites)
             self._preferences_updated(
                 preference_state["provider"],
@@ -2737,6 +2863,11 @@ class MainWindow(QMainWindow):
                 bool(self.settings.get("search/filter_gore", True)),
                 tuple(self.settings.get("search/custom_block_tags", []) or []),
             )
+            if parent_policy_changed:
+                if self.current_query:
+                    self.load_page(self.current_page)
+                else:
+                    self.show_random()
 
         dialog.settings_changed.connect(preferences_changed)
         dialog.finished.connect(
