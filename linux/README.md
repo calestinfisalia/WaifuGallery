@@ -7,6 +7,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing and multimedia codec availability under the target Wayland/X11 desktop before packaging a release.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
+On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
 
 ## Features
 
