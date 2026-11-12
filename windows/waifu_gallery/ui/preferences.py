@@ -49,6 +49,7 @@ from .backup_prompts import (
 )
 from .dialog_chrome import FramelessResizableDialog
 from .pin_prompts import PinPromptDialog
+from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 from .updates import UpdateCheckTask, version_parts
 from .themes import THEME_DESCRIPTIONS, THEME_NAMES, THEME_PALETTES, THEME_SAMPLE_COLORS
 
@@ -989,6 +990,7 @@ class PreferencesDialog(FramelessResizableDialog):
         parent_scroll.setFrameShape(QFrame.Shape.NoFrame)
         parent_scroll.setWidgetResizable(True)
         parent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        parent_scroll.verticalScrollBar().setStyleSheet(CAPSULE_SCROLLBAR_STYLE)
         parent_content = QWidget()
         parent_content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         parent_content_layout = QVBoxLayout(parent_content)
@@ -1032,6 +1034,7 @@ class PreferencesDialog(FramelessResizableDialog):
         favorites_scroll.setFrameShape(QFrame.Shape.NoFrame)
         favorites_scroll.setWidgetResizable(True)
         favorites_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        favorites_scroll.verticalScrollBar().setStyleSheet(CAPSULE_SCROLLBAR_STYLE)
         favorites_content = QWidget()
         favorites_content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         favorites_content_layout = QVBoxLayout(favorites_content)
