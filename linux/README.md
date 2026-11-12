@@ -47,6 +47,7 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 
 ### Fixes
 
+- **Fullscreen:** use the Linux window manager's fullscreen state and active-screen geometry so image and video views fill the monitor.
 - **Video player:** improved playback controls and buffering feedback.
 - **Settings UI:** fixed desktop Settings layout and ambient-mode toggle behavior.
 

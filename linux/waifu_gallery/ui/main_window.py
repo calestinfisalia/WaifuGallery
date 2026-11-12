@@ -746,21 +746,6 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked, selected=value: self.rating_changed(selected) if checked else None)
             self.rating_actions[value] = action
 
-        self.theme_actions = {}
-        theme_group = QActionGroup(menu)
-        theme_group.setExclusive(True)
-        theme_menu = menu.addMenu("Theme")
-        theme_menu.setMinimumWidth(180)
-        for theme in ("Dark", "Light", "System", "OLED Dark"):
-            action = theme_menu.addAction(theme)
-            action.setCheckable(True)
-            action.setChecked(theme == self.current_theme)
-            theme_group.addAction(action)
-            action.triggered.connect(
-                lambda checked, selected=theme: self.change_theme(selected) if checked else None
-            )
-            self.theme_actions[theme] = action
-
         self.media_actions = {}
         media_group = QActionGroup(menu)
         media_group.setExclusive(True)
@@ -1117,9 +1102,6 @@ class MainWindow(QMainWindow):
                 button.setIcon(self._icon(icon_name))
         self.title_bar.refresh_icons()
         self.title_bar.refresh_search_icon()
-        for name, action in self.theme_actions.items():
-            action.setChecked(name == theme)
-
     def _apply_theme(self, theme: str | None = None) -> None:
         theme = theme or self.current_theme
         if theme == "System":
@@ -2581,15 +2563,20 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.hide()
         self.detail_previous_button.hide()
         self.detail_next_button.hide()
-        # Use a borderless monitor-sized normal window instead of Qt's native
-        # fullscreen state. On Windows the native state can composite video
-        # above screenshot overlays and other top-level windows.
         screen = self.screen()
         if screen is None and self.windowHandle() is not None:
             screen = self.windowHandle().screen()
-        self.showNormal()
-        if screen is not None:
-            self.setGeometry(screen.geometry())
+        if sys.platform == "win32":
+            # Native Windows fullscreen can composite video above overlays.
+            self.showNormal()
+            if screen is not None:
+                self.setGeometry(screen.geometry())
+        else:
+            # Let Wayland/X11 apply fullscreen through the window manager;
+            # also apply the active screen geometry for X11 and fallback WMs.
+            self.showFullScreen()
+            if screen is not None:
+                self.setGeometry(screen.geometry())
         active_player._schedule_reflow()
         self._sync_favorite_buttons()
         self._show_fullscreen_controls()
