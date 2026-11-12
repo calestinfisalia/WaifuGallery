@@ -41,28 +41,69 @@ if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
     exit 1
 fi
 
+BUILD_SDK="org.freedesktop.Sdk//24.08"
+if ! flatpak info --user "$BUILD_SDK" >/dev/null 2>&1; then
+    echo "The user Flatpak SDK $BUILD_SDK is required to build portable Linux binaries." >&2
+    exit 1
+fi
+
 BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/waifu-gallery-release.XXXXXX")"
 trap 'rm -rf "$BUILD_ROOT"' EXIT
+
+GSSAPI_LIB_DIR="$BUILD_ROOT/gssapi-libs"
+mkdir -p "$GSSAPI_LIB_DIR"
+for library in \
+    libgssapi_krb5.so.2 \
+    libkrb5.so.3 \
+    libk5crypto.so.3 \
+    libkrb5support.so.0 \
+    libcom_err.so.2 \
+    libkeyutils.so.1; do
+    library_path="$(ldconfig -p | awk -v name="$library" '$1 == name && !found {print $NF; found=1}')"
+    if [[ -z "$library_path" ]]; then
+        echo "Required Kerberos library not found: $library" >&2
+        exit 1
+    fi
+    cp -L "$library_path" "$GSSAPI_LIB_DIR/$library"
+done
 
 OUTPUT_DIR="${RELEASE_OUTPUT_DIR:-$HOME/releases/waifu-gallery}"
 mkdir -p "$OUTPUT_DIR"
 
-python3 -m venv "$BUILD_ROOT/venv"
-PIP_CACHE_DIR="$BUILD_ROOT/pip-cache" \
-    "$BUILD_ROOT/venv/bin/python" -m pip install --upgrade pip
-PIP_CACHE_DIR="$BUILD_ROOT/pip-cache" \
-    "$BUILD_ROOT/venv/bin/python" -m pip install -r requirements.txt pyinstaller
-
-"$BUILD_ROOT/venv/bin/python" -m PyInstaller \
-    --noconfirm \
-    --clean \
-    --windowed \
-    --name WaifuGallery \
-    --add-data "waifu_gallery/assets:waifu_gallery/assets" \
-    --collect-all PySide6.QtMultimedia \
-    --distpath "$BUILD_ROOT/dist" \
-    --workpath "$BUILD_ROOT/pyinstaller" \
-    launcher.py
+flatpak run --user \
+    --share=network \
+    --filesystem="$SCRIPT_DIR" \
+    --filesystem="$BUILD_ROOT" \
+    --filesystem="$GSSAPI_LIB_DIR" \
+    --command=sh \
+    "$BUILD_SDK" \
+    -ec '
+        build_root="$1"
+        source_dir="$2"
+        gssapi_lib_dir="$3"
+        python3 -m venv "$build_root/venv"
+        PIP_CACHE_DIR="$build_root/pip-cache" \
+            "$build_root/venv/bin/python" -m pip install --upgrade pip
+        PIP_CACHE_DIR="$build_root/pip-cache" \
+            "$build_root/venv/bin/python" -m pip install -r "$source_dir/requirements.txt" pyinstaller
+        LD_LIBRARY_PATH="$gssapi_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$build_root/venv/bin/python" -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --windowed \
+            --name WaifuGallery \
+            --add-data "$source_dir/waifu_gallery/assets:waifu_gallery/assets" \
+            --collect-all PySide6.QtMultimedia \
+            --add-binary "$gssapi_lib_dir/libgssapi_krb5.so.2:PySide6/Qt/lib" \
+            --add-binary "$gssapi_lib_dir/libkrb5.so.3:PySide6/Qt/lib" \
+            --add-binary "$gssapi_lib_dir/libk5crypto.so.3:PySide6/Qt/lib" \
+            --add-binary "$gssapi_lib_dir/libkrb5support.so.0:PySide6/Qt/lib" \
+            --add-binary "$gssapi_lib_dir/libcom_err.so.2:PySide6/Qt/lib" \
+            --add-binary "$gssapi_lib_dir/libkeyutils.so.1:PySide6/Qt/lib" \
+            --distpath "$build_root/dist" \
+            --workpath "$build_root/pyinstaller" \
+            "$source_dir/launcher.py"
+    ' sh "$BUILD_ROOT" "$SCRIPT_DIR" "$GSSAPI_LIB_DIR"
 
 APP_ID="com.fisalia.WaifuGallery"
 APP_NAME="Waifu Gallery"
@@ -135,6 +176,7 @@ mkdir -p "$BUILD_ROOT/flatpak"
 cp "$SCRIPT_DIR/flatpak/$APP_ID.yml" "$BUILD_ROOT/flatpak/$APP_ID.yml"
 flatpak-builder \
     --force-clean \
+    --user \
     --state-dir="$BUILD_ROOT/flatpak-state" \
     --default-branch=stable \
     --repo="$FLATPAK_REPO" \

@@ -92,13 +92,15 @@ The script creates `.venv`, installs `requirements.txt`, and starts the applicat
 ## Packaging
 
 Build AppImage and Flatpak packages from a Linux environment. The build host
-needs Python 3.10+, `python3-venv`, Flatpak, Flatpak Builder, `appimagetool`, and ImageMagick (`magick`).
-Before the first Flatpak build, configure Flathub and install its 24.08 runtime
-and SDK (use your distribution's package manager for the build tools):
+needs Python 3.10+, `python3-venv`, Flatpak, Flatpak Builder, `appimagetool`,
+ImageMagick (`magick`), `ldconfig`, and the Kerberos runtime libraries (`krb5`).
+PyInstaller runs inside Flatpak SDK 24.08 so its Python extensions use a glibc
+compatible with the app runtime. Before the first build, configure Flathub and
+install the 24.08 runtime and SDK in the user installation:
 
 ```bash
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 ```
 
 From this directory, run:
