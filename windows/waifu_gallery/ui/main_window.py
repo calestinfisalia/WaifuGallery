@@ -1,5 +1,6 @@
 import ctypes
 from ctypes import wintypes
+import os
 import re
 from pathlib import Path
 import subprocess
@@ -231,6 +232,10 @@ class MainWindow(QMainWindow):
         self._update_download_task = None
         self._update_notice_dialog = None
         self.request_id = 0
+        self._random_provider = "All"
+        self._random_rating = "sfw"
+        self._random_query = ""
+        self._random_failed_preview_providers: set[str] = set()
         self.gallery_generation = 0
         self.current_query = ""
         self.current_page = 1
@@ -250,6 +255,7 @@ class MainWindow(QMainWindow):
         self._full_image_loaded = False
         self.favorites_dialog: FavoritesDialog | None = None
         self.favorites_dialog_token = ""
+        self._favorites_catalog: BooruCatalog | None = None
         self.preferences_dialog: PreferencesDialog | None = None
         self._opening_favorite = False
         self._fullscreen_active = False
@@ -435,7 +441,7 @@ class MainWindow(QMainWindow):
         random_layout.addWidget(self.random_media_stack, 1)
         self.random_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.random_video.fullscreen_toggle = self.random_video_fullscreen_button
-        self.random_video.add_control_action(self.random_video_fullscreen_button)
+        self.random_video.add_control_action(self.random_video_fullscreen_button, index=5)
         self.random_video_fullscreen_button.clicked.connect(self._toggle_fullscreen)
 
         self.random_fullscreen_toolbar = QFrame(self.random_page)
@@ -465,13 +471,13 @@ class MainWindow(QMainWindow):
         self.random_video_favorite_action = self._icon_button("heart", "Add to favorites")
         self.random_video_download_action = self._icon_button("download", "Download video")
         self.random_video_exit_action = self._icon_button("restore", "Exit fullscreen")
-        for action in (
-            self.random_video_refresh_action,
-            self.random_video_favorite_action,
-            self.random_video_download_action,
-            self.random_video_exit_action,
+        for action, index in (
+            (self.random_video_refresh_action, 0),
+            (self.random_video_favorite_action, 1),
+            (self.random_video_download_action, 2),
+            (self.random_video_exit_action, 9),
         ):
-            self.random_video.add_fullscreen_action(action)
+            self.random_video.add_fullscreen_action(action, index)
         self.random_video_refresh_action.clicked.connect(self.refresh)
         self.random_video_favorite_action.clicked.connect(self.toggle_favorite)
         self.random_video_download_action.clicked.connect(self.download_active_image)
@@ -609,7 +615,7 @@ class MainWindow(QMainWindow):
         self.detail_media_stack.addWidget(self.detail_video)
         self.detail_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.detail_video.fullscreen_toggle = self.detail_video_fullscreen_button
-        self.detail_video.add_control_action(self.detail_video_fullscreen_button)
+        self.detail_video.add_control_action(self.detail_video_fullscreen_button, index=5)
         self.detail_video_fullscreen_button.clicked.connect(self._toggle_fullscreen)
 
         self.detail_previous_button = self._icon_button("chevron-left", "Previous image")
@@ -665,8 +671,8 @@ class MainWindow(QMainWindow):
             self.fullscreen_previous_button,
             self.fullscreen_favorite_button,
             self.fullscreen_download_button,
-            self.fullscreen_next_button,
             self.fullscreen_exit_button,
+            self.fullscreen_next_button,
         ):
             fullscreen_layout.addWidget(button)
         self.fullscreen_previous_button.clicked.connect(lambda: self._swipe_detail(-1))
@@ -679,14 +685,14 @@ class MainWindow(QMainWindow):
         self.detail_video_previous_action = self._icon_button("chevron-left", "Previous video")
         self.detail_video_next_action = self._icon_button("chevron-right", "Next video")
         self.detail_video_exit_action = self._icon_button("restore", "Exit fullscreen")
-        for action in (
-            self.detail_video_favorite_action,
-            self.detail_video_download_action,
-            self.detail_video_previous_action,
-            self.detail_video_next_action,
-            self.detail_video_exit_action,
+        for action, index in (
+            (self.detail_video_previous_action, 0),
+            (self.detail_video_favorite_action, 1),
+            (self.detail_video_download_action, 2),
+            (self.detail_video_exit_action, 9),
+            (self.detail_video_next_action, 11),
         ):
-            self.detail_video.add_fullscreen_action(action)
+            self.detail_video.add_fullscreen_action(action, index)
         self.detail_video_favorite_action.clicked.connect(self.toggle_favorite)
         self.detail_video_download_action.clicked.connect(self.download_active_image)
         self.detail_video_previous_action.clicked.connect(lambda: self._swipe_detail(-1))
@@ -749,6 +755,8 @@ class MainWindow(QMainWindow):
         provider_menu.setMinimumWidth(180)
         for name in ("All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"):
             action = provider_menu.addAction(name)
+            if name == "All":
+                action.setToolTip("Search combines provider results; Random uses the first provider response.")
             action.setCheckable(True)
             action.setChecked(name == self.selected_provider)
             provider_group.addAction(action)
@@ -999,15 +1007,21 @@ class MainWindow(QMainWindow):
         dialog = FavoritesDialog(posts, self._open_favorite, self._remove_favorite, self)
         self.favorites_dialog = dialog
         self.favorites_dialog_token = token
+        self._favorites_catalog = self._catalog()
+        dialog.downloadRequested.connect(self._download_favorite)
+        dialog.deleteSelectedRequested.connect(self._remove_favorites)
+        dialog.downloadSelectedRequested.connect(self._download_selected_favorites)
+        dialog.thumbnailRequested.connect(
+            lambda favorite_id, current=token: self._request_favorite_thumbnail(
+                current, favorite_id
+            )
+        )
         dialog.finished.connect(lambda _result, current=token: self._clear_favorites_dialog(current))
         for post in posts:
             key = favorite_key(post)
             cached = self.thumbnail_cache.get(post.post_id)
             if cached:
                 dialog.set_thumbnail(key, cached)
-            else:
-                candidates = post.preview_urls or (post.image_url,)
-                self._submit(f"favorite-thumbnail:{token}/{key}", self._fetch_decoded_candidates, candidates)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.show()
         dialog.raise_()
@@ -1017,6 +1031,7 @@ class MainWindow(QMainWindow):
         if self.favorites_dialog_token == token:
             self.favorites_dialog = None
             self.favorites_dialog_token = ""
+            self._favorites_catalog = None
 
     def _refresh_favorites_dialog(self, posts: list[ImagePost]) -> None:
         posts = [post for post in posts if self._parent_allows_post(post)]
@@ -1029,32 +1044,124 @@ class MainWindow(QMainWindow):
                 key: pixmap for key, pixmap in dialog.thumbnail_cache.items() if key in keys
             }
             dialog.thumbnail_errors.intersection_update(keys)
+            dialog.thumbnail_error_details = {
+                key: details
+                for key, details in dialog.thumbnail_error_details.items()
+                if key in keys
+            }
             dialog._rebuild()
             for post in posts:
                 key = favorite_key(post)
                 cached = self.thumbnail_cache.get(post.post_id)
                 if cached:
                     dialog.set_thumbnail(key, cached)
-                elif key not in dialog.thumbnail_errors:
-                    candidates = post.preview_urls or (post.image_url,)
-                    self._submit(
-                        f"favorite-thumbnail:{self.favorites_dialog_token}/{key}",
-                        self._fetch_decoded_candidates,
-                        candidates,
-                    )
         self._sync_favorite_buttons()
         if self.detail_origin == "favorites":
             self._update_detail_navigation()
 
+    def _request_favorite_thumbnail(self, token: str, favorite_id: str) -> None:
+        dialog = self.favorites_dialog
+        if token != self.favorites_dialog_token or dialog is None:
+            return
+        if favorite_id in dialog.thumbnail_cache or favorite_id in dialog.thumbnail_errors:
+            return
+        post = next(
+            (item for item in dialog.posts if favorite_key(item) == favorite_id),
+            None,
+        )
+        if post is None:
+            return
+        cached = self.thumbnail_cache.get(post.post_id)
+        if cached:
+            dialog.set_thumbnail(favorite_id, cached)
+            return
+        task_key = f"favorite-thumbnail:{token}/{favorite_id}"
+        if task_key in self.tasks:
+            return
+        catalog = self._favorites_catalog or self._catalog()
+        self._submit(task_key, self._fetch_decoded_favorite_thumbnail, post, catalog)
+
     def _remove_favorite(self, key: str) -> None:
-        posts = [post for post in self._favorite_posts() if favorite_key(post) != key]
+        self._remove_favorites([key])
+
+    def _remove_favorites(self, keys: list[str]) -> None:
+        selected = set(keys)
+        if not selected:
+            return
+        current_posts = self._favorite_posts()
+        posts = [
+            post for post in current_posts
+            if favorite_key(post) not in selected
+        ]
+        if len(posts) == len(current_posts):
+            return
         self._save_favorite_posts(posts)
-        self._favorite_navigation_posts = [post for post in self._favorite_navigation_posts if favorite_key(post) != key]
         if self.favorites_dialog:
-            self.favorites_dialog.remove_favorite(key)
-        self._sync_favorite_buttons()
-        if self.detail_origin == "favorites":
-            self._update_detail_navigation()
+            self._refresh_favorites_dialog(posts)
+        else:
+            self._favorite_navigation_posts = [
+                post for post in self._favorite_navigation_posts
+                if favorite_key(post) not in selected
+            ]
+            self._sync_favorite_buttons()
+            if self.detail_origin == "favorites":
+                self._update_detail_navigation()
+
+    def _download_favorite(self, key: str) -> None:
+        post = next(
+            (item for item in self._favorite_posts() if favorite_key(item) == key),
+            None,
+        )
+        if post is not None:
+            self._queue_favorite_downloads([post])
+
+    def _download_selected_favorites(self, keys: list[str]) -> None:
+        selected = set(keys)
+        posts = [
+            post for post in self._favorite_posts()
+            if favorite_key(post) in selected
+        ]
+        self._queue_favorite_downloads(posts)
+
+    def _queue_favorite_downloads(self, posts: list[ImagePost]) -> None:
+        queued_paths = {
+            os.path.normcase(os.path.abspath(os.fspath(task.destination)))
+            for task in self.tasks.values()
+            if isinstance(task, FileDownloadTask)
+        }
+        scheduled_paths = set(queued_paths)
+        seen_favorites = set()
+        queued = 0
+        skipped = 0
+        blocked = 0
+        catalog = None
+        for post in posts:
+            favorite_id = favorite_key(post)
+            if favorite_id in seen_favorites:
+                continue
+            seen_favorites.add(favorite_id)
+            if not self._parent_allows_post(post):
+                blocked += 1
+                continue
+            path = self._default_download_path(post)
+            path_key = os.path.normcase(os.path.abspath(os.fspath(path)))
+            if path.exists() or path_key in scheduled_paths:
+                skipped += 1
+                continue
+            if catalog is None:
+                catalog = self._catalog()
+            self._start_download(post, path, catalog)
+            scheduled_paths.add(path_key)
+            queued += 1
+
+        if queued:
+            self.downloads.show()
+            self.downloads.raise_()
+        self.statusBar().showMessage(
+            f"Queued {queued} favorite downloads; skipped {skipped} existing or queued files"
+            + (f"; blocked {blocked} by parental controls." if blocked else "."),
+            7000,
+        )
 
     def _open_favorite(self, post: ImagePost) -> None:
         if not self._parent_allows_post(post):
@@ -1170,18 +1277,21 @@ class MainWindow(QMainWindow):
             QPushButton#downloadsCloseButton:hover { background: #F7768E; }
             QListWidget#downloadsList { background: transparent; border: 0; outline: 0; }
             QListWidget#downloadsList::item, QListWidget#downloadsList::item:selected { background: transparent; border: 0; padding: 0; }
-            QWidget#downloadItemCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
-            QLabel#downloadItemIcon { background: __PANEL__; border-radius: 8px; }
-            QLabel#downloadFilename { color: __STRONG__; font-size: 10pt; font-weight: 600; }
+            QWidget#downloadItemRow { background: transparent; border-bottom: 1px solid __BORDER__; }
+            QLabel#downloadItemIcon { background: transparent; }
+            QLabel#downloadFilename { color: __ACCENT__; font-size: 10pt; font-weight: 500; }
             QLabel#downloadStatus { color: __MUTED__; font-size: 9pt; }
             QProgressBar#downloadProgress, QProgressBar#releaseDownloadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
             QProgressBar#downloadProgress::chunk, QProgressBar#releaseDownloadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
-            QPushButton#downloadCancelButton { background: transparent; border: 0; border-radius: 8px; }
-            QPushButton#downloadCancelButton:hover { background: __ACTIVE__; }
+            QPushButton#downloadCancelButton, QPushButton#downloadOpenFolderButton { background: transparent; border: 0; border-radius: 8px; padding: 2px; }
+            QPushButton#downloadCancelButton:hover, QPushButton#downloadOpenFolderButton:hover { background: __ACTIVE__; }
             QPushButton#downloadCancelButton:disabled { background: transparent; }
             QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 700; }
             QLabel#releaseNotesVersion { color: __MUTED__; }
             QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QPushButton#favoritesSelectAllButton, QPushButton#favoritesDeleteSelectedButton, QPushButton#favoritesDownloadSelectedButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
+            QPushButton#favoritesSelectAllButton:hover, QPushButton#favoritesDeleteSelectedButton:hover, QPushButton#favoritesDownloadSelectedButton:hover { background: __HOVER__; }
+            QPushButton#favoritesSelectAllButton:checked { background: __ACTIVE__; border: 1px solid __ACCENT__; }
             QPushButton#favoritesCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#favoritesCloseButton:hover { background: #F7768E; }
             QDialog#mediaInfoDialog { background: transparent; border: 0; }
@@ -1561,18 +1671,27 @@ class MainWindow(QMainWindow):
         self.downloads.update_download(download_key, "Cancelled")
 
     def _task_succeeded(self, key: str, result) -> None:
-        self.tasks.pop(key, None)
+        task = self.tasks.pop(key, None)
         category, _, identifier = key.partition(":")
         if category == "search" and int(identifier) == self.request_id:
             self._show_search_results(result)
-        elif category == "random" and int(identifier) == self.request_id:
-            self.random_post, self.random_content = result
+        elif category in {"random", "random-fallback"} and int(identifier) == self.request_id:
+            self.random_post = result
+            self.random_content = None
             self._update_image_credits(self.random_post)
             if self.random_post.media_type == "video":
                 self._show_random_video(self.random_post)
             else:
-                self._submit(f"random-image:{identifier}", decode_image_bytes, self.random_content)
+                self._submit(
+                    f"random-preview:{identifier}",
+                    self._catalog().fetch_post_preview,
+                    self.random_post,
+                    progress_callback=self._update_load_progress,
+                )
             self._sync_favorite_buttons()
+        elif category == "random-preview" and int(identifier) == self.request_id:
+            self.random_content = result
+            self._submit(f"random-image:{identifier}", decode_image_bytes, result)
         elif category == "random-image" and int(identifier) == self.request_id:
             self._show_random_image(QPixmap.fromImage(result))
         elif category == "post-detail" and identifier == self.active_detail_id:
@@ -1629,13 +1748,24 @@ class MainWindow(QMainWindow):
                 self._set_card_image(index, post, pixmap)
         elif category == "favorite-thumbnail":
             token, favorite_id = identifier.split("/", 1)
+            pixmap = QPixmap.fromImage(result)
+            post = (
+                task.args[0]
+                if isinstance(task, BackgroundTask)
+                and task.args
+                and isinstance(task.args[0], ImagePost)
+                else None
+            )
+            if not pixmap.isNull() and post:
+                self.thumbnail_cache[post.post_id] = pixmap
             if token != self.favorites_dialog_token or not self.favorites_dialog:
                 return
-            pixmap = QPixmap.fromImage(result)
             if not pixmap.isNull():
                 self.favorites_dialog.set_thumbnail(favorite_id, pixmap)
             else:
-                self.favorites_dialog.set_thumbnail_error(favorite_id)
+                self.favorites_dialog.set_thumbnail_error(
+                    favorite_id, "Preview contained invalid image data."
+                )
         elif category == "download":
             self.downloads.update_download(identifier, f"Saved: {result}")
             self.statusBar().showMessage(f"Saved image to {result}", 5000)
@@ -1681,7 +1811,23 @@ class MainWindow(QMainWindow):
                 self.pages.setCurrentWidget(self.gallery_page)
                 self.back_button.hide()
             self.statusBar().clearMessage()
-        elif category in {"random", "random-image"} and int(identifier) == self.request_id:
+        elif (
+            category in {"random-preview", "random-image"}
+            and int(identifier) == self.request_id
+            and self._random_provider == "All"
+            and self.random_post is not None
+        ):
+            self._random_failed_preview_providers.add(self.random_post.provider)
+            self.statusBar().showMessage("Preview unavailable; trying another provider...")
+            self._submit(
+                f"random-fallback:{identifier}",
+                self._catalog().random_post,
+                self._random_rating,
+                "All",
+                self._random_query,
+                frozenset(self._random_failed_preview_providers),
+            )
+        elif category in {"random", "random-preview", "random-image", "random-fallback"} and int(identifier) == self.request_id:
             self._finish_loading()
             self.random_media_stack.setCurrentWidget(self.random_scroll)
             self.random_video.clear()
@@ -1717,7 +1863,7 @@ class MainWindow(QMainWindow):
         elif category == "favorite-thumbnail":
             token, favorite_id = identifier.split("/", 1)
             if token == self.favorites_dialog_token and self.favorites_dialog:
-                self.favorites_dialog.set_thumbnail_error(favorite_id)
+                self.favorites_dialog.set_thumbnail_error(favorite_id, error)
         elif category == "download":
             self.downloads.update_download(identifier, f"Failed: {error}")
         elif category == "full-image":
@@ -1838,8 +1984,8 @@ class MainWindow(QMainWindow):
             return
         if not self._fullscreen_active:
             self.statusBar().show()
-        self._set_normal_video_actions("random", False)
-        self._set_normal_video_actions("detail", False)
+        self._hide_normal_video_actions("random")
+        self._hide_normal_video_actions("detail")
         self._set_ambient_image(self.random_ambient, QPixmap(), self.random_page)
         self.detail_video.clear()
         self.random_video.clear()
@@ -1861,6 +2007,10 @@ class MainWindow(QMainWindow):
             self.settings.set("search/custom_term_index", index + 1)
         self.random_post = None
         self.random_content = None
+        self._random_provider = provider
+        self._random_rating = self._active_rating()
+        self._random_query = query
+        self._random_failed_preview_providers.clear()
         self.random_pixmap = None
         self._full_image_loaded = False
         self.footer_meta.clear()
@@ -1876,9 +2026,8 @@ class MainWindow(QMainWindow):
         self._begin_loading()
         self._sync_favorite_buttons()
         self._submit(
-            f"random:{identifier}", self._catalog().random_image,
-            self._active_rating(), provider, query,
-            progress_callback=self._update_load_progress,
+            f"random:{identifier}", self._catalog().random_post,
+            self._random_rating, provider, query,
         )
 
     def go_home(self) -> None:
@@ -1930,7 +2079,6 @@ class MainWindow(QMainWindow):
         self.random_video.set_deferred_source(post.image_url)
         if not self._fullscreen_active:
             QTimer.singleShot(0, self._ensure_status_bar_visible)
-        self._set_normal_video_actions("random", True)
         if post.preview_urls:
             self._submit(
                 f"random-video-preview:{self.request_id}",
@@ -1974,6 +2122,7 @@ class MainWindow(QMainWindow):
         self.detail_video.clear()
         self._open_detail_after_page = detail_index
         if detail_index is None:
+            self.download_button.hide()
             self._set_image_credits_visible(False)
             if self._fullscreen_active:
                 self._exit_fullscreen()
@@ -2010,6 +2159,7 @@ class MainWindow(QMainWindow):
                      self.selected_provider, self.current_page, 50)
 
     def _show_search_results(self, page: SearchPage) -> None:
+        self.download_button.hide()
         if not self._fullscreen_active:
             self.statusBar().show()
             self.statusBar().raise_()
@@ -2247,11 +2397,14 @@ class MainWindow(QMainWindow):
         else:
             self._submit(key, self._fetch_decoded_candidates, post.preview_urls)
 
-    def _fetch_preview(self, candidates: tuple[str, ...]) -> bytes:
+    def _fetch_preview(
+        self, candidates: tuple[str, ...], catalog: BooruCatalog | None = None
+    ) -> bytes:
         failures = []
+        catalog = catalog or self._catalog()
         for url in candidates:
             try:
-                return self._catalog().fetch_image(url)
+                return catalog.fetch_image(url, timeout=(3, 8), retry=False)
             except ProviderError as error:
                 failures.append(str(error))
         raise ProviderError(failures[-1] if failures else "No thumbnail URL was supplied.")
@@ -2262,6 +2415,17 @@ class MainWindow(QMainWindow):
 
     def _fetch_decoded_candidates(self, candidates: tuple[str, ...]):
         return decode_image_bytes(self._fetch_preview(candidates), max_dimension=560)
+
+    def _fetch_decoded_favorite_thumbnail(
+        self, post: ImagePost, catalog: BooruCatalog
+    ):
+        candidates = tuple(
+            url for url in post.preview_urls if url != post.image_url
+        )[:2] or (post.image_url,)
+        return decode_image_bytes(
+            self._fetch_preview(candidates, catalog),
+            max_dimension=560,
+        )
 
     def _fetch_decoded_video_preview(self, post: ImagePost):
         return decode_image_bytes(
@@ -2331,8 +2495,8 @@ class MainWindow(QMainWindow):
         self.footer_meta.clear()
         self.random_video.clear()
         self.detail_video.clear()
-        self._set_normal_video_actions("random", False)
-        self._set_normal_video_actions("detail", False)
+        self._hide_normal_video_actions("random")
+        self._hide_normal_video_actions("detail")
         self._set_ambient_image(self.detail_ambient, QPixmap(), self.detail_page)
         self.detail_post = post
         self._full_image_loaded = False
@@ -2344,7 +2508,6 @@ class MainWindow(QMainWindow):
                 self.statusBar().show()
                 self.statusBar().raise_()
             self.full_image_button.hide()
-            self._set_normal_video_actions("detail", True)
         elif not self._fullscreen_active:
             self.statusBar().show()
         self._set_image_credits_visible(False)
@@ -2356,6 +2519,7 @@ class MainWindow(QMainWindow):
         self.detail_origin = "favorites" if self._opening_favorite else (
             "search" if self.detail_from_search else "random"
         )
+        self.download_button.show()
         self.title_bar.home_button.setVisible(self.detail_origin in {"search", "favorites"})
         self.fullscreen_button.hide()
         show_navigation = self._detail_has_navigation()
@@ -2570,6 +2734,7 @@ class MainWindow(QMainWindow):
             self.title_bar.home_button.show()
             self.show_favorites()
         elif self.detail_origin == "search":
+            self.download_button.hide()
             self.pages.setCurrentWidget(self.gallery_page)
             self.full_image_button.hide()
             self.title_bar.home_button.show()
@@ -2618,17 +2783,27 @@ class MainWindow(QMainWindow):
         screen = self.screen()
         if screen is None and self.windowHandle() is not None:
             screen = self.windowHandle().screen()
-        self.showNormal()
-        if screen is not None:
-            self.setGeometry(screen.geometry())
-        active_player._schedule_reflow()
+        updates_were_enabled = self.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        try:
+            self.showNormal()
+            if screen is not None:
+                self.setGeometry(screen.geometry())
+        finally:
+            self.setUpdatesEnabled(updates_were_enabled)
+        if updates_were_enabled:
+            self.update()
         self._sync_favorite_buttons()
         self._show_fullscreen_controls()
-        if fullscreen_post is None or fullscreen_post.media_type != "video":
+        if fullscreen_post is not None and fullscreen_post.media_type == "video":
+            active_player._reflow_timer.stop()
+            active_player._reflow()
+        else:
+            active_player._schedule_reflow()
             image = self.random_image if self._fullscreen_source == "random" else self.detail_image
             QTimer.singleShot(0, image._fit_to_viewport)
 
-    def _set_normal_video_actions(self, source: str, visible: bool) -> None:
+    def _hide_normal_video_actions(self, source: str) -> None:
         if source == "random":
             actions = (
                 self.random_video_refresh_action,
@@ -2636,20 +2811,16 @@ class MainWindow(QMainWindow):
             )
             favorite_action = self.random_video_favorite_action
             exit_action = self.random_video_exit_action
-            player = self.random_video
         else:
             actions = (
                 self.detail_video_download_action,
             )
             favorite_action = self.detail_video_favorite_action
             exit_action = self.detail_video_exit_action
-            player = self.detail_video
         for action in actions:
-            action.setVisible(visible)
+            action.hide()
         favorite_action.hide()
         exit_action.hide()
-        if visible:
-            player.controls_frame.raise_()
 
     def _check_for_startup_update(self) -> None:
         if self._startup_update_task is not None:
@@ -2767,9 +2938,6 @@ class MainWindow(QMainWindow):
         current_page = self.pages.currentWidget()
         current_post = self.random_post if current_page is self.random_page else self.detail_post
         if current_post is not None and current_post.media_type == "video":
-            self._set_normal_video_actions(
-                "random" if current_page is self.random_page else "detail", True
-            )
             player = self._active_video_player()
             if player and player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                 player.set_controls_visible(True)
@@ -2810,7 +2978,7 @@ class MainWindow(QMainWindow):
             return
         self.random_video.set_fullscreen_actions_visible(False)
         self.detail_video.set_fullscreen_actions_visible(False)
-        width, height = (230 if source == "random" else 280), 58
+        width, height = toolbar.sizeHint().width(), 58
         toolbar.setGeometry(
             (parent.width() - width) // 2,
             parent.height() - height - 24,
@@ -3018,11 +3186,7 @@ class MainWindow(QMainWindow):
                 "This media is above the guardian's content limits.",
             )
             return
-        folder = str(self.settings.get("downloads/folder", "")).strip()
-        if not folder:
-            folder = str(Path.home() / "Pictures" / "Waifu Gallery")
-        extension = Path(post.image_url.split("?", 1)[0]).suffix or ".jpg"
-        suggested = str(Path(folder) / f"waifu_{post.post_id}{extension}")
+        suggested = str(self._default_download_path(post))
         is_video = post.media_type == "video"
         title = "Save video" if is_video else "Save image"
         file_types = (
@@ -3032,10 +3196,21 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, title, suggested, file_types)
         if not filename:
             return
+        self._start_download(post, Path(filename))
+
+    def _default_download_path(self, post: ImagePost) -> Path:
+        folder = str(self.settings.get("downloads/folder", "")).strip()
+        if not folder:
+            folder = str(Path.home() / "Pictures" / "Waifu Gallery")
+        extension = Path(post.image_url.split("?", 1)[0]).suffix or ".jpg"
+        return Path(folder) / f"waifu_{post.post_id}{extension}"
+
+    def _start_download(
+        self, post: ImagePost, path: Path, catalog: BooruCatalog | None = None
+    ) -> None:
         key = str(uuid4())
-        path = Path(filename)
         self.downloads.add_download(key, path.name, str(path))
-        task = FileDownloadTask(key, self._catalog(), post, path)
+        task = FileDownloadTask(key, catalog or self._catalog(), post, path)
         task.signals.result.connect(lambda download_key, result: self._task_succeeded(f"download:{download_key}", result))
         task.signals.error.connect(lambda download_key, error: self._task_failed(f"download:{download_key}", error))
         task.signals.cancelled.connect(self._task_cancelled)

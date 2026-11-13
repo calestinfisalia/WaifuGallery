@@ -3,6 +3,7 @@ from threading import Event
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QRunnable, QSize, Signal
 from PySide6.QtGui import QImage, QImageReader
+from shiboken6 import isValid
 
 from ..providers import BooruCatalog, DownloadCancelled
 
@@ -12,6 +13,16 @@ class TaskSignals(QObject):
     error = Signal(str, str)
     progress = Signal(str, int)
     cancelled = Signal(str)
+
+
+def _emit_if_valid(signals: TaskSignals, name: str, *args) -> None:
+    if not isValid(signals):
+        return
+    try:
+        getattr(signals, name).emit(*args)
+    except RuntimeError:
+        if isValid(signals):
+            raise
 
 
 def decode_image_bytes(content: bytes, max_dimension: int | None = 2560) -> QImage:
@@ -47,9 +58,11 @@ class BackgroundTask(QRunnable):
 
     def run(self) -> None:
         try:
-            self.signals.result.emit(self.key, self.operation(*self.args, **self.kwargs))
+            result = self.operation(*self.args, **self.kwargs)
         except Exception as error:
-            self.signals.error.emit(self.key, str(error))
+            _emit_if_valid(self.signals, "error", self.key, str(error))
+        else:
+            _emit_if_valid(self.signals, "result", self.key, result)
 
 
 class FileDownloadTask(QRunnable):
@@ -70,11 +83,14 @@ class FileDownloadTask(QRunnable):
             result = self.catalog.save_image(
                 self.post,
                 self.destination,
-                lambda percentage: self.signals.progress.emit(self.key, percentage),
+                lambda percentage: _emit_if_valid(
+                    self.signals, "progress", self.key, percentage
+                ),
                 self._cancel_event.is_set,
             )
-            self.signals.result.emit(self.key, result)
         except DownloadCancelled:
-            self.signals.cancelled.emit(self.key)
+            _emit_if_valid(self.signals, "cancelled", self.key)
         except Exception as error:
-            self.signals.error.emit(self.key, str(error))
+            _emit_if_valid(self.signals, "error", self.key, str(error))
+        else:
+            _emit_if_valid(self.signals, "result", self.key, result)

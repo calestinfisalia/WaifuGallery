@@ -9,21 +9,22 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 ## Features
 
 - Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider.
-- Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key.
+- Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key. Settings → Providers can test each API connection and show its HTTP status or concise timeout, TLS, DNS, and connection error.
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
+- Auto search and random requests run eligible providers concurrently, return the first provider with results, and cancel slower requests. If an Auto random request gets provider errors without a result, it retries once before reporting failure.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
-- Download queue with progress and retry states; download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
-- Local favorites with image/video badges and separate totals; search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
+- Compact download cards show progress and retry states; cancel an active transfer with the X button. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
+- Local favorites with image/video badges and separate totals; long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
 - Safety & Privacy controls with PIN-protected Favorites and parental maximum-rating/allowed-tag filters. PINs are salted and hashed locally and are excluded from encrypted user-data backups; parental filtering relies on provider metadata and is not OS-level supervision.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
 - Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. You can also check manually in **Settings → Updates**. Update downloads show determinate or indeterminate progress and verify the APK checksum before installation. About and update dialogs feature the Iro-chan mascot.
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
-Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Safety & Privacy, Backup & Restore, Updates, and About. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
+Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Safety & Privacy, Backup & Restore, Updates, and About. **Settings → Providers** opens a submenu with separate pages for the default provider, provider accounts, and connection status, following the Safety & Privacy navigation pattern. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers → Provider accounts**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
 The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL.
 
 ## Encrypted user data backup
@@ -35,6 +36,11 @@ The version 2 format is interoperable with Windows and Linux, records included s
 ## Android 0.1.12
 
 - **Updates:** the app now checks the Android-specific release entry in the repository update manifest, independent of Windows and Linux releases.
+- **Favorites:** long-press actions, multi-select, bulk removal, and deduplicated bulk downloads are available.
+- **Provider selection:** Auto search and random browsing use the first provider that returns results instead of waiting for every provider.
+- **Provider diagnostics:** Settings → Providers can test all provider endpoints and report HTTP status or connection errors.
+- **SFW random recovery:** Auto retries once when provider errors prevent a random result; HTML responses are identified separately from malformed API data.
+- **Downloads:** download cards are more compact, and the X action cancels an active transfer without stopping the remaining queue.
 - Android source version: `0.1.12`; `versionCode`: `10`.
 
 ## Android 0.1.11

@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.ImagePost
+import com.fisalia.waifugallery.data.ProviderConnectionStatus
 import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.ReleaseUpdate
 import com.fisalia.waifugallery.data.ReleaseUpdateChecker
@@ -27,6 +28,8 @@ import org.json.JSONObject
 import java.io.IOException
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
+import okhttp3.Call
 import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -39,7 +42,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class AppScreen { RANDOM, GALLERY, FAVORITES, DETAIL }
-enum class DownloadStatus { QUEUED, DOWNLOADING, SAVED, FAILED }
+enum class DownloadStatus { QUEUED, DOWNLOADING, SAVED, FAILED, CANCELLED }
+
+private class DownloadCancelledException : IOException("Download cancelled")
 
 data class DownloadItem(
     val id: String,
@@ -62,6 +67,9 @@ data class UiState(
     val galleryQuery: String = "",
     val gallery: List<ImagePost> = emptyList(),
     val galleryProviderErrors: List<String> = emptyList(),
+    val providerConnectionStatuses: List<ProviderConnectionStatus> = emptyList(),
+    val isTestingProviderConnections: Boolean = false,
+    val providerConnectionError: String? = null,
     val favorites: List<ImagePost> = emptyList(),
     val favoritesLockEnabled: Boolean = false,
     val favoritesPinSet: Boolean = false,
@@ -162,6 +170,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var downloadJob: Job? = null
+    @Volatile private var activeDownloadId: String? = null
+    @Volatile private var activeDownloadCall: Call? = null
+    private val cancelledDownloadIds = ConcurrentHashMap.newKeySet<String>()
     private var releaseDownloadJob: Job? = null
     private var pendingGalleryFilters: Pair<String, RatingFilter>? = null
 
@@ -644,14 +655,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeFavorite(post: ImagePost) {
-        val updated = _state.value.favorites.filterNot { it.id == post.id }
+        removeFavorites(listOf(post))
+    }
+
+    fun removeFavorites(posts: List<ImagePost>) {
+        val selectedIds = posts.mapTo(mutableSetOf()) { it.id }
+        if (selectedIds.isEmpty()) return
+        val currentFavorites = _state.value.favorites
+        val updated = currentFavorites.filterNot { it.id in selectedIds }
+        val removedCount = currentFavorites.size - updated.size
+        if (removedCount == 0) return
         preferences.setFavoritePosts(updated)
         _state.update { current ->
             current.copy(
-                favorites = updated,
-                detailPosts = if (current.detailOrigin == AppScreen.FAVORITES) current.detailPosts.filterNot { it.id == post.id } else current.detailPosts,
-                detailImage = if (current.detailOrigin == AppScreen.FAVORITES && current.detailImage?.id == post.id) null else current.detailImage,
-                notice = "Removed from favorites",
+                favorites = current.favorites.filterNot { it.id in selectedIds },
+                detailPosts = if (current.detailOrigin == AppScreen.FAVORITES) {
+                    current.detailPosts.filterNot { it.id in selectedIds }
+                } else current.detailPosts,
+                detailImage = if (
+                    current.detailOrigin == AppScreen.FAVORITES &&
+                    current.detailImage?.id in selectedIds
+                ) null else current.detailImage,
+                notice = if (removedCount == 1) {
+                    "Removed from favorites"
+                } else {
+                    "Removed $removedCount favorites"
+                },
             )
         }
     }
@@ -823,6 +852,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun hasRule34Credentials(): Boolean = preferences.rule34UserId.isNotBlank() && preferences.rule34ApiKey.isNotBlank()
 
+    fun testProviderConnections() {
+        if (_state.value.isTestingProviderConnections) return
+        _state.update {
+            it.copy(
+                isTestingProviderConnections = true,
+                providerConnectionStatuses = emptyList(),
+                providerConnectionError = null,
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val statuses = api.testProviderConnections()
+                _state.update {
+                    it.copy(
+                        isTestingProviderConnections = false,
+                        providerConnectionStatuses = statuses,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: IOException) {
+                _state.update {
+                    it.copy(
+                        isTestingProviderConnections = false,
+                        providerConnectionError = "Provider test failed: ${error.message ?: "Network request failed"}",
+                    )
+                }
+            } catch (error: IllegalArgumentException) {
+                _state.update {
+                    it.copy(
+                        isTestingProviderConnections = false,
+                        providerConnectionError = "Provider test failed: ${error.message ?: "Invalid request"}",
+                    )
+                }
+            }
+        }
+    }
+
     fun logoutProvider(provider: String) {
         when (provider) {
             "Gelbooru" -> { preferences.gelbooruUserId = ""; preferences.gelbooruApiKey = "" }
@@ -919,15 +986,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveCurrentImage() {
         val post = _state.value.detailImage ?: _state.value.image ?: return
-        val pending = _state.value.downloads.any {
-            it.post.id == post.id && it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING)
+        queueDownloads(listOf(post))
+    }
+
+    fun queueFavoriteDownloads(posts: List<ImagePost>) {
+        queueDownloads(posts)
+    }
+
+    private fun queueDownloads(posts: List<ImagePost>) {
+        val uniquePosts = posts.distinctBy { it.dedupeKey.ifBlank { it.id } }
+        val existingPosts = _state.value.downloads
+            .filter { it.status != DownloadStatus.FAILED && it.status != DownloadStatus.CANCELLED }
+            .map { it.post }
+        val existingIds = existingPosts.mapTo(mutableSetOf()) { it.id }
+        val existingDedupeKeys = existingPosts.mapNotNullTo(mutableSetOf()) {
+            it.dedupeKey.takeIf { key -> key.isNotBlank() }
         }
-        if (pending) {
-            _state.update { it.copy(notice = "This image is already in the download queue") }
+        val newPosts = uniquePosts.filterNot { post ->
+            post.id in existingIds || (post.dedupeKey.isNotBlank() && post.dedupeKey in existingDedupeKeys)
+        }
+        val skipped = uniquePosts.size - newPosts.size
+        if (newPosts.isEmpty()) {
+            _state.update {
+                it.copy(notice = "Selected media are already saved or queued")
+            }
             return
         }
-        val item = DownloadItem(java.util.UUID.randomUUID().toString(), post, DownloadStatus.QUEUED)
-        _state.update { it.copy(downloads = it.downloads + item, error = null, notice = "Added to download queue") }
+        val newItems = newPosts.map { post ->
+            DownloadItem(java.util.UUID.randomUUID().toString(), post, DownloadStatus.QUEUED)
+        }
+        val notice = "Added ${newItems.size} media to the download queue" +
+            if (skipped > 0) "; skipped $skipped already saved or queued" else ""
+        _state.update {
+            it.copy(downloads = it.downloads + newItems, error = null, notice = notice)
+        }
         persistDownloadHistory()
         processDownloadQueue()
     }
@@ -938,6 +1030,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         persistDownloadHistory()
         processDownloadQueue()
+    }
+
+    fun cancelDownload(id: String) {
+        if (activeDownloadId != id) return
+        cancelledDownloadIds.add(id)
+        activeDownloadCall?.cancel()
     }
 
     fun openSavedDownload(id: String) {
@@ -986,10 +1084,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.DOWNLOADING, error = null, progress = 0f) else it }) }
                 persistDownloadHistory()
                 try {
-                    val downloaded = withContext(Dispatchers.IO) { downloadToCache(next.post) { progress ->
-                        _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(progress = progress) else it }) }
-                    } }
+                    activeDownloadId = next.id
+                    val downloaded = withContext(Dispatchers.IO) {
+                        downloadToCache(
+                            next.post,
+                            reportProgress = { progress ->
+                                _state.update { state ->
+                                    state.copy(downloads = state.downloads.map {
+                                        if (it.id == next.id) it.copy(progress = progress) else it
+                                    })
+                                }
+                            },
+                            onCallCreated = { activeDownloadCall = it },
+                            isCancelled = { next.id in cancelledDownloadIds },
+                        )
+                    }
+                    activeDownloadCall = null
+                    activeDownloadId = null
                     val savedDownload = try {
+                        if (cancelledDownloadIds.remove(next.id)) throw DownloadCancelledException()
                         withContext(Dispatchers.IO) { writeImage(next.post, downloaded) }
                     } finally {
                         downloaded.delete()
@@ -1008,11 +1121,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     persistDownloadHistory()
+                } catch (_: DownloadCancelledException) {
+                    cancelledDownloadIds.remove(next.id)
+                    _state.update { state ->
+                        state.copy(downloads = state.downloads.map {
+                            if (it.id == next.id) it.copy(
+                                status = DownloadStatus.CANCELLED,
+                                error = null,
+                                progress = null,
+                            ) else it
+                        })
+                    }
+                    persistDownloadHistory()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     _state.update { state -> state.copy(downloads = state.downloads.map { if (it.id == next.id) it.copy(status = DownloadStatus.FAILED, error = error.message ?: "Download failed") else it }) }
                     persistDownloadHistory()
+                } finally {
+                    activeDownloadCall = null
+                    if (activeDownloadId == next.id) activeDownloadId = null
+                    cancelledDownloadIds.remove(next.id)
                 }
             }
         }
@@ -1130,7 +1259,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
     }.orEmpty()
 
-    private fun downloadToCache(post: ImagePost, reportProgress: (Float?) -> Unit): File {
+    private fun downloadToCache(
+        post: ImagePost,
+        reportProgress: (Float?) -> Unit,
+        onCallCreated: (Call) -> Unit,
+        isCancelled: () -> Boolean,
+    ): File {
         val temp = File.createTempFile("waifu-download-", ".tmp", getApplication<Application>().cacheDir)
         try {
             val request = Request.Builder()
@@ -1141,8 +1275,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var lastError: Exception? = null
             repeat(3) { attempt ->
                 try {
+                    if (isCancelled()) throw DownloadCancelledException()
                     if (attempt > 0) reportProgress(0f)
-                    api.imageClient().newCall(request).execute().use { response ->
+                    val call = api.imageClient().newCall(request)
+                    onCallCreated(call)
+                    call.execute().use { response ->
                         if (!response.isSuccessful) {
                             val retryable = response.code == 408 || response.code == 429 || response.code >= 500
                             if (!retryable || attempt == 2) throw IOException("HTTP ${response.code}")
@@ -1158,6 +1295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 var copied = 0L
                                 var lastReportAt = System.nanoTime()
                                 while (true) {
+                                    if (isCancelled()) throw DownloadCancelledException()
                                     val read = input.read(buffer)
                                     if (read < 0) break
                                     output.write(buffer, 0, read)
@@ -1169,13 +1307,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     }
                                 }
                                 output.flush()
-                                reportProgress(if (contentLength > 0) 1f else null)
+                                reportProgress(1f)
                             }
                         }
+                        if (isCancelled()) throw DownloadCancelledException()
                         if (temp.length() == 0L) throw IOException("Empty image response")
                         return temp
                     }
+                } catch (cancelled: DownloadCancelledException) {
+                    throw cancelled
                 } catch (error: IOException) {
+                    if (isCancelled()) throw DownloadCancelledException()
                     lastError = error
                     if (attempt == 2) throw error
                     Thread.sleep((attempt + 1L) * 700L)

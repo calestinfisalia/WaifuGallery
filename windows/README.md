@@ -7,7 +7,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 ## Current features
 
 - Windows desktop interface implemented with Python and PySide6.
-- Random image browsing and tag search across Danbooru and yande.re; Gelbooru and Rule34.xxx can be enabled with your own API credentials. Selecting a provider searches only that provider. Choosing All combines available providers for search and tries providers in order for Random until an image loads.
+- Random image browsing and tag search across Danbooru and yande.re; Gelbooru and Rule34.xxx can be enabled with your own API credentials. Selecting a provider keeps requests on that provider. Choosing All merges deduplicated results from eligible providers for each Search page; Random selects by the first successful metadata response and loads the preview asynchronously, trying another provider if that preview fails.
 - Rating choices for SFW, NSFW, or all results. NSFW results require enabling the option in Settings.
   - Optional tag-based gore filtering, male-only tag exclusion, and custom blocked tags configured in Settings. These filters depend on provider tags and cannot detect untagged content.
 - Search gallery with 50 results per page and provider filters.
@@ -15,6 +15,9 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
 - Optional ambient background blur, which can be turned off in Settings.
 - The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts and can be cleared from the app menu.
+- Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
+- Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
+- Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
 - User-defined search terms used by Random.
 - Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms and the download folder are under General; the default rating is under Filters.
 - Display settings include Dark, Light, System, and OLED Dark themes with color previews.
@@ -44,11 +47,12 @@ Export and import use the native Windows file picker to open or save backup file
 ## UI behavior and troubleshooting
 
 - Search result cards display the media only, with no post title. Changing pages clears the previous cards while the new page loads.
+- The toolbar download action is hidden on Search results until a media item is opened.
 - Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
 - Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
 - Video buffering shows a centered spinner without a surrounding card. Compact player controls use the active theme's purple accent; buffered media uses a brighter solid segment.
 - The bottom media footer shows `16 images, 4 videos`-style counts on Search results; for a loaded image in Random or a Search/Favorites detail, it shows provider, rating, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
-- Download history entries retain a readable row height and show the full status in a tooltip when it does not fit.
+- Download history uses compact, unboxed rows with newest downloads at the top, progress/status, a cancel action for active transfers, and a folder action for saved files. The application icon is retained, and the full path remains available in the filename tooltip.
 - Provider notices use a gray capsule background without the purple outline.
 - The update dialog uses the full `assets/Iro-chan-update-pose.png` artwork in a clear right-side column; the release notes and download status stay readable beside/below it. Download percentage is a separate label beside a thin progress bar.
 

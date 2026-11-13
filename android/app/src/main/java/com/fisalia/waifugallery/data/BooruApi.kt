@@ -1,23 +1,103 @@
 package com.fisalia.waifugallery.data
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.dnsoverhttps.DnsOverHttps
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.InetAddress
+import java.net.ConnectException
+import java.net.UnknownHostException
+import java.io.InterruptedIOException
 import java.io.IOException
 import java.io.StringReader
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import javax.net.ssl.SSLException
 import kotlin.random.Random
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+
+data class ProviderConnectionStatus(val providerName: String, val message: String)
+
+internal fun formatProviderHttpStatus(code: Int, reason: String = ""): String {
+    val message = when (code) {
+        200 -> "Connection healthy"
+        401 -> "API authentication required or rejected"
+        403 -> "Access denied by the provider or network protection"
+        404 -> "API endpoint not found"
+        408 -> "Provider request timed out"
+        429 -> "Rate limited; retry later"
+        500 -> "Provider server error"
+        502 -> "Provider gateway unavailable"
+        503 -> "Provider temporarily unavailable"
+        504 -> "Provider gateway timed out"
+        else -> if (code in 200..299) "Connection healthy" else reason.ifBlank { "Unexpected HTTP response" }
+    }
+    return "HTTP $code - $message"
+}
+
+internal suspend fun <P, T> firstSuccessfulProviderResponse(
+    providers: List<P>,
+    request: suspend (P) -> T,
+    hasResult: (T) -> Boolean,
+    onFailure: (P, Throwable) -> Unit,
+): Pair<P, T>? = coroutineScope {
+    val responses = Channel<Pair<P, Result<T>>>(Channel.UNLIMITED)
+    val jobs = providers.map { provider ->
+        launch(Dispatchers.IO) {
+            val result = try {
+                Result.success(request(provider))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            responses.send(provider to result)
+        }
+    }
+
+    try {
+        repeat(providers.size) {
+            val (provider, result) = responses.receive()
+            val value = result.getOrNull()
+            if (value != null && hasResult(value)) return@coroutineScope provider to value
+            result.exceptionOrNull()?.let { onFailure(provider, it) }
+        }
+        null
+    } finally {
+        jobs.forEach { it.cancel() }
+        responses.cancel()
+    }
+}
+
+private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            continuation.resumeWith(Result.failure(e))
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            continuation.resume(response) { _, value, _ -> value.close() }
+        }
+    })
+}
 
 class BooruApi(
     private val useDoh: () -> Boolean,
@@ -101,6 +181,64 @@ class BooruApi(
     fun imageClient(): OkHttpClient = if (useDoh()) dohImageClient else standardImageClient
     private fun apiClient(): OkHttpClient = if (useDoh()) dohClient else standardClient
 
+    suspend fun testProviderConnections(): List<ProviderConnectionStatus> = coroutineScope {
+        listOf(danbooru, yandere, gelbooru, rule34).map { provider ->
+            async(Dispatchers.IO) { checkProviderConnection(provider) }
+        }.awaitAll()
+    }
+
+    private suspend fun checkProviderConnection(provider: Provider): ProviderConnectionStatus {
+        val params = mutableMapOf("tags" to "", "limit" to "1", "page" to "1")
+        if (provider.yandere) params["api_version"] = "2"
+
+        val urlBuilder = provider.endpoint.toHttpUrl().newBuilder()
+        params.forEach { (key, value) ->
+            val apiKey = if (provider.name in setOf("Gelbooru", "Rule34.xxx") && key == "page") "pid" else key
+            val apiValue = if (provider.name in setOf("Gelbooru", "Rule34.xxx") && key == "page") {
+                (value.toIntOrNull()?.minus(1) ?: 0).coerceAtLeast(0).toString()
+            } else value
+            urlBuilder.addQueryParameter(apiKey, apiValue)
+        }
+        if (provider.name == "Gelbooru" || provider.name == "Rule34.xxx") {
+            urlBuilder.addQueryParameter("json", "1")
+                .addQueryParameter("page", "dapi")
+                .addQueryParameter("s", "post")
+                .addQueryParameter("q", "index")
+            val credentials = if (provider.name == "Gelbooru") gelbooruCredentials() else rule34Credentials()
+            if (credentials.first.isNotBlank() && credentials.second.isNotBlank()) {
+                urlBuilder.addQueryParameter("user_id", credentials.first)
+                    .addQueryParameter("api_key", credentials.second)
+            }
+        }
+        val requestBuilder = Request.Builder()
+            .url(urlBuilder.build())
+            .header("User-Agent", "Waifu Gallery/0.1 (provider status)")
+            .header("Accept", "application/json")
+        if (provider.name == "Danbooru") requestBuilder.header("Accept-Version", "v7")
+
+        val message = try {
+            val call = apiClient().newCall(requestBuilder.build())
+            call.timeout().timeout(12, TimeUnit.SECONDS)
+            call.awaitResponse().use { response -> formatProviderHttpStatus(response.code, response.message) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: InterruptedIOException) {
+            "TIMEOUT (RTO) - Request timed out before an HTTP response."
+        } catch (_: SSLException) {
+            "TLS_ERROR - TLS certificate verification failed."
+        } catch (error: UnknownHostException) {
+            val dohContext = if (useDoh()) " with the configured DoH resolver" else ""
+            "DNS_ERROR - DNS lookup failed$dohContext: ${error.message ?: "Host could not be resolved"}"
+        } catch (error: ConnectException) {
+            "CONNECTION_ERROR - Could not establish a network connection: ${error.message ?: "Connection failed"}"
+        } catch (error: IOException) {
+            "CONNECTION_ERROR - ${error.message ?: "Provider request failed"}"
+        } catch (error: IllegalArgumentException) {
+            "REQUEST_ERROR - ${error.message ?: "Invalid provider request"}"
+        }
+        return ProviderConnectionStatus(provider.name, message)
+    }
+
     suspend fun randomImage(
         nsfw: Boolean,
         searchTerm: String,
@@ -121,16 +259,32 @@ class BooruApi(
                     add(danbooru)
                 }
             }
-            val errors = mutableListOf<String>()
-            for (provider in providers) {
-                try {
-                    val candidates = randomCandidates(provider, nsfw, searchTerm, parentalMaximumRating)
-                    if (candidates.isNotEmpty()) return@withContext chooseNonRecent(provider, nsfw, searchTerm, candidates)
-                } catch (error: Exception) {
-                    errors += "${provider.name}: ${error.message ?: "Request failed"}"
+            val attempts = if (selectedProvider == "Auto") 2 else 1
+            for (attempt in 0 until attempts) {
+                val errors = ConcurrentLinkedQueue<String>()
+                val result = firstSuccessfulProviderResponse(
+                    providers = providers,
+                    request = { provider -> randomCandidates(provider, nsfw, searchTerm, parentalMaximumRating) },
+                    hasResult = { it.isNotEmpty() },
+                    onFailure = { provider, error ->
+                        errors.add("${provider.name}: ${error.message ?: "Request failed"}")
+                    },
+                )
+                if (result != null) {
+                    val (provider, candidates) = result
+                    return@withContext chooseNonRecent(provider, nsfw, searchTerm, candidates)
                 }
+                if (attempt + 1 < attempts && errors.isNotEmpty()) {
+                    delay(300)
+                    continue
+                }
+                if (errors.isNotEmpty()) {
+                    throw IllegalStateException(
+                        "No matching images were returned. Provider errors: ${errors.joinToString(" | ")}",
+                    )
+                }
+                throw IllegalStateException("The providers returned no matching images.")
             }
-            if (errors.isNotEmpty()) throw IllegalStateException("All providers failed: ${errors.joinToString(" | ")}")
             throw IllegalStateException("The providers returned no matching images.")
         }
 
@@ -165,49 +319,27 @@ class BooruApi(
                 add(danbooru)
             }
         }
-        val results = providers.map { provider ->
-            async(Dispatchers.IO) {
-                val result: Result<ProviderSearchResult> = try {
-                    Result.success(searchProvider(provider, query, rating, page, limit))
-                } catch (error: Exception) {
-                    Result.failure(error)
-                }
-                provider.name to result
-            }
-        }.awaitAll()
-
-        val successes = results.mapNotNull { (name, result) ->
-            result.getOrNull()?.let { name to it.posts }
-        }.toMap()
-        val totalCount = results.mapNotNull { (_, result) -> result.getOrNull()?.totalCount }.takeIf { it.size == providers.size }?.sum()
-        val errors = results.mapNotNull { (name, result) ->
-            result.exceptionOrNull()?.let { "$name: ${it.message ?: "Request failed"}" }
-        }
-        if (successes.values.all { it.isEmpty() } && errors.size == providers.size) {
+        val errors = mutableListOf<String>()
+        val result = firstSuccessfulProviderResponse(
+            providers = providers,
+            request = { provider ->
+                searchProvider(provider, query, rating, page, limit, includeCount = providerName != "All")
+            },
+            hasResult = { it.posts.isNotEmpty() || it.hasMore },
+            onFailure = { provider, error ->
+                errors += "${provider.name}: ${error.message ?: "Request failed"}"
+            },
+        )
+        if (result == null && errors.size == providers.size && errors.isNotEmpty()) {
             throw IllegalStateException("All providers failed: ${errors.joinToString(" | ")}")
         }
-
-        val posts = if (providerName == "All") {
-            val merged = mutableListOf<ImagePost>()
-            val seen = mutableSetOf<String>()
-            val lists = providers.map { successes[it.name].orEmpty() }
-            for (index in 0 until (lists.maxOfOrNull { it.size } ?: 0)) {
-                for (list in lists) {
-                    list.getOrNull(index)?.let { post ->
-                        if (seen.add(post.dedupeKey)) merged += post
-                        if (merged.size == limit) break
-                    }
-                }
-                if (merged.size == limit) break
-            }
-            merged
-        } else successes[providerName].orEmpty().take(limit)
-        val providerHasMore = results.any { (_, result) -> result.getOrNull()?.hasMore == true }
+        val pageResult = result?.second
         SearchPage(
-            posts = posts,
-            totalPages = totalCount?.let { ((it + limit - 1) / limit).coerceAtLeast(1) },
-            totalResults = totalCount,
-            hasMore = totalCount?.let { page * limit < it } ?: (posts.size >= limit || providerHasMore),
+            posts = pageResult?.posts.orEmpty().take(limit),
+            totalPages = pageResult?.totalCount?.let { ((it + limit - 1) / limit).coerceAtLeast(1) },
+            totalResults = pageResult?.totalCount,
+            hasMore = pageResult?.totalCount?.let { page * limit < it }
+                ?: (pageResult?.posts.orEmpty().size >= limit || pageResult?.hasMore == true),
             providerErrors = errors,
         )
     }
@@ -218,6 +350,7 @@ class BooruApi(
         rating: RatingFilter,
         page: Int,
         limit: Int,
+        includeCount: Boolean,
     ): ProviderSearchResult {
         if (mediaFilter() == "video" && provider.yandere) {
             return ProviderSearchResult(emptyList(), 0)
@@ -248,11 +381,13 @@ class BooruApi(
                     ratingMatches(it, rating) && (!excludeMale() || acceptableGender(it)) &&
                     (rating != RatingFilter.SFW || safeForSfw(it)) && acceptedPost(it)
             }
-            val count = countMatches(
-                provider,
-                tags + listOfNotNull(if (mediaFilter() == "video") "video" else null),
-                rating,
-            )
+            val count = if (includeCount) {
+                countMatches(
+                    provider,
+                    tags + listOfNotNull(if (mediaFilter() == "video") "video" else null),
+                    rating,
+                )
+            } else null
             if (count != null && knownTotal == null) knownTotal = count
             if (filtered.isNotEmpty()) return ProviderSearchResult(filtered.distinctBy { it.id }.take(limit), count, hasMore)
             if (count != null && count > 0) return ProviderSearchResult(emptyList(), count, hasMore)
@@ -260,16 +395,24 @@ class BooruApi(
         return ProviderSearchResult(emptyList(), knownTotal ?: 0)
     }
 
-    private fun countMatches(provider: Provider, tags: List<String>, rating: RatingFilter): Int? {
+    private suspend fun countMatches(provider: Provider, tags: List<String>, rating: RatingFilter): Int? {
         if (provider.name == "Rule34.xxx") return null
-        val perRatingCounts = ratings(rating).map { ratingTag ->
+        var total = 0
+        for (ratingTag in ratings(rating)) {
             val queryTags = tags + listOfNotNull(ratingTag?.let { "rating:${providerRatingTag(provider, it)}" })
-            runCatching { requestCount(provider, queryTags.joinToString(" ")) }.getOrNull() ?: return null
+            val count = try {
+                requestCount(provider, queryTags.joinToString(" "))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return null
+            }
+            total += count
         }
-        return perRatingCounts.sum()
+        return total
     }
 
-    private fun requestCount(provider: Provider, tags: String): Int {
+    private suspend fun requestCount(provider: Provider, tags: String): Int {
         val cacheKey = "${provider.endpoint}|$tags"
         countCache[cacheKey]?.let { cached ->
             if (System.currentTimeMillis() - cached.storedAt < 60_000) return cached.value
@@ -296,7 +439,7 @@ class BooruApi(
             .header("User-Agent", "Waifu Gallery/0.1 (search count)")
             .header("Accept", if (provider.name == "Danbooru" || provider.name == "Gelbooru" || provider.name == "Rule34.xxx") "application/json" else "application/xml")
             .build()
-        apiClient().newCall(request).execute().use { response ->
+        apiClient().newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
             val body = response.body ?: throw IOException("Empty count response")
             if (provider.name == "Danbooru") {
@@ -376,7 +519,7 @@ class BooruApi(
         return emptyList()
     }
 
-    private fun requestPosts(provider: Provider, params: Map<String, String>): List<JSONObject> {
+    private suspend fun requestPosts(provider: Provider, params: Map<String, String>): List<JSONObject> {
         val urlBuilder = provider.endpoint.toHttpUrl().newBuilder()
         params.forEach { (key, value) ->
             val apiKey = if (provider.name in setOf("Gelbooru", "Rule34.xxx") && key == "page") "pid" else key
@@ -402,13 +545,13 @@ class BooruApi(
         var lastError: Exception? = null
         repeat(3) { attempt ->
             try {
-                apiClient().newCall(request).execute().use { response ->
+                apiClient().newCall(request).awaitResponse().use { response ->
                     if (!response.isSuccessful) {
                         val retryable = response.code == 408 || response.code == 429 || response.code >= 500
                         if (!retryable || attempt == 2) throw IOException("HTTP ${response.code}")
                         lastError = IOException("HTTP ${response.code}")
                         val retryAfter = response.header("Retry-After")?.toLongOrNull()?.coerceIn(1, 3)
-                        Thread.sleep((retryAfter ?: (attempt + 1L)) * 500L)
+                        delay((retryAfter ?: (attempt + 1L)) * 500L)
                         return@repeat
                     }
                     var body = response.body?.string().orEmpty()
@@ -419,7 +562,7 @@ class BooruApi(
                             .url(request.url.newBuilder().removeAllQueryParameters("json").build())
                             .header("Accept", "application/xml")
                             .build()
-                        apiClient().newCall(xmlRequest).execute().use { xmlResponse ->
+                        apiClient().newCall(xmlRequest).awaitResponse().use { xmlResponse ->
                             if (xmlResponse.isSuccessful) body = xmlResponse.body?.string().orEmpty()
                         }
                     }
@@ -428,7 +571,7 @@ class BooruApi(
             } catch (error: IOException) {
                 lastError = error
                 if (attempt == 2) throw error
-                Thread.sleep((attempt + 1L) * 500L)
+                delay((attempt + 1L) * 500L)
             }
         }
         throw lastError ?: IOException("Request failed")
@@ -459,6 +602,8 @@ class BooruApi(
             } catch (error: Exception) {
                 val hint = if (provider.name == "Rule34.xxx") {
                     "Rule34.xxx returned neither JSON nor DAPI XML. Verify the account credentials and retry later."
+                } else if (body.startsWith("<")) {
+                    "${provider.name} returned an HTML page instead of API data. Retry or test the provider connection."
                 } else {
                     "${provider.name} returned an unreadable response"
                 }

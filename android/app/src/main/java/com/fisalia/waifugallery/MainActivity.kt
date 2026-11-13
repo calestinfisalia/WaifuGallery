@@ -20,12 +20,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,10 +65,13 @@ import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.NavigateBefore
 import androidx.compose.material.icons.filled.NavigateNext
 import androidx.compose.material.icons.filled.Info
@@ -76,14 +82,19 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SystemUpdateAlt
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -606,6 +617,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             downloads = state.downloads,
             onOpen = model::openSavedDownload,
             onRetry = model::retryDownload,
+            onCancel = model::cancelDownload,
             onClearFinished = model::clearFinishedDownloads,
             onDismiss = model::closeDownloadQueue,
         )
@@ -979,6 +991,7 @@ private fun GalleryFiltersDialog(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FavoritesScreen(
     state: UiState,
@@ -991,6 +1004,21 @@ private fun FavoritesScreen(
     val visibleFavorites = state.favorites.filter(model::parentalAllows)
     val imageCount = visibleFavorites.count { it.mediaType != "video" }
     val videoCount = visibleFavorites.size - imageCount
+    val visibleIds = visibleFavorites.mapTo(mutableSetOf()) { it.id }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var menuPostId by remember { mutableStateOf<String?>(null) }
+    var confirmSelectedRemoval by remember { mutableStateOf(false) }
+    val selectedPosts = visibleFavorites.filter { it.id in selectedIds }
+    val selectionActive = selectedIds.isNotEmpty()
+
+    LaunchedEffect(visibleIds) {
+        val retained = selectedIds intersect visibleIds
+        if (retained != selectedIds) {
+            selectedIds = retained
+            if (retained.isEmpty()) menuPostId = null
+        }
+    }
+
     Surface(modifier.fillMaxSize(), color = AppBackground) {
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -1000,13 +1028,33 @@ private fun FavoritesScreen(
                 IconButton(onClick = onClose) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to gallery")
                 }
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("Favorites", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "$imageCount images, $videoCount videos",
+                        if (selectionActive) "${selectedIds.size} selected"
+                        else "$imageCount images, $videoCount videos",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (selectionActive) {
+                    IconButton(
+                        onClick = {
+                            selectedIds = if (selectedIds.size == visibleIds.size) {
+                                emptySet()
+                            } else {
+                                visibleIds
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.SelectAll, contentDescription = "Select all images")
+                    }
+                    IconButton(onClick = { confirmSelectedRemoval = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Remove selected favorites")
+                    }
+                    IconButton(onClick = { model.queueFavoriteDownloads(selectedPosts) }) {
+                        Icon(Icons.Default.Download, contentDescription = "Download selected images")
+                    }
                 }
             }
             if (visibleFavorites.isEmpty()) {
@@ -1028,12 +1076,23 @@ private fun FavoritesScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(visibleFavorites, key = { it.id }) { post ->
+                        val isSelected = post.id in selectedIds
                         Box(Modifier.fillMaxWidth().aspectRatio(0.95f)) {
                             ImageFrame(
                                 post.thumbnailUrl,
                                 post,
                                 imageLoader,
-                                Modifier.fillMaxSize().clickable { model.openDetail(post) },
+                                Modifier.fillMaxSize().combinedClickable(
+                                    onClick = {
+                                        if (selectionActive) {
+                                            selectedIds = if (isSelected) selectedIds - post.id else selectedIds + post.id
+                                        } else {
+                                            model.openDetail(post)
+                                        }
+                                    },
+                                    onLongClick = { menuPostId = post.id },
+                                    onLongClickLabel = "Favorite actions",
+                                ),
                                 allowThumbnailFallback = true,
                                 showMetadata = false,
                             )
@@ -1049,11 +1108,71 @@ private fun FavoritesScreen(
                             ) {
                                 Icon(Icons.Default.Favorite, "Remove from favorites", tint = Accent)
                             }
+                            if (selectionActive) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = { checked ->
+                                        selectedIds = if (checked) selectedIds + post.id else selectedIds - post.id
+                                    },
+                                    modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuPostId == post.id,
+                                onDismissRequest = { menuPostId = null },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Download") },
+                                    leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
+                                    onClick = {
+                                        model.queueFavoriteDownloads(listOf(post))
+                                        menuPostId = null
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (isSelected) "Deselect image" else "Select image") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (isSelected) Icons.Default.Check else Icons.Default.SelectAll,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedIds = if (isSelected) selectedIds - post.id else selectedIds + post.id
+                                        menuPostId = null
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Remove from favorites") },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                    onClick = {
+                                        menuPostId = null
+                                        onRequestRemoval(post)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+    if (confirmSelectedRemoval) {
+        AlertDialog(
+            onDismissRequest = { confirmSelectedRemoval = false },
+            title = { Text("Remove selected favorites?") },
+            text = { Text("Remove ${selectedPosts.size} selected media from your favorites?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.removeFavorites(selectedPosts)
+                    selectedIds = emptySet()
+                    confirmSelectedRemoval = false
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSelectedRemoval = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -1836,6 +1955,7 @@ private fun SettingsScreen(
     fun navigateBack() {
         selectedPage = when (selectedPage) {
             "favoritesLock", "parentalControl" -> "safety"
+            "providerDefault", "providerAccounts", "providerStatus" -> "providers"
             else -> ""
         }
     }
@@ -1863,6 +1983,9 @@ private fun SettingsScreen(
     val pageTitle = when (selectedPage) {
         "browsing" -> "Browsing"
         "providers" -> "Providers"
+        "providerDefault" -> "Default provider"
+        "providerAccounts" -> "Provider accounts"
+        "providerStatus" -> "Connection status"
         "network" -> "Network"
         "filters" -> "Filters"
         "display" -> "Display"
@@ -1889,6 +2012,7 @@ private fun SettingsScreen(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = when (selectedPage) {
                             "favoritesLock", "parentalControl" -> "Back to Safety & privacy"
+                            "providerDefault", "providerAccounts", "providerStatus" -> "Back to Providers"
                             "" -> "Back to gallery"
                             else -> "Back to settings"
                         },
@@ -1907,17 +2031,17 @@ private fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (selectedPage.isEmpty()) {
-                    SettingsCategoryRow("Browsing", "Default provider and search terms", Icons.Default.Search) {
+                    SettingsCategoryRow("Browsing", "Custom random search terms", Icons.Default.Search) {
                         navigateToPage("browsing")
                     }
-                    SettingsCategoryRow("Providers", "Provider account credentials", Icons.Default.Info) { navigateToPage("providers") }
-                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Refresh) { navigateToPage("network") }
-                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.Check) { navigateToPage("filters") }
+                    SettingsCategoryRow("Providers", "Choose a source, manage accounts, and test connections", Icons.Default.Cloud) { navigateToPage("providers") }
+                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Wifi) { navigateToPage("network") }
+                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.FilterList) { navigateToPage("filters") }
                     SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen) { navigateToPage("display") }
                     SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download) { navigateToPage("downloads") }
-                    SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Info) { navigateToPage("safety") }
-                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Check) { navigateToPage("backup") }
-                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.Refresh) { navigateToPage("updates") }
+                    SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Security) { navigateToPage("safety") }
+                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Backup) { navigateToPage("backup") }
+                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.SystemUpdateAlt) { navigateToPage("updates") }
                     SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info) { navigateToPage("about") }
                 } else {
                     when (selectedPage) {
@@ -1929,18 +2053,24 @@ private fun SettingsScreen(
                                 selectedPage = "parentalControl"
                             }
                         }
+                        "providers" -> {
+                            SettingsCategoryRow(
+                                "Default provider",
+                                "Select which source is used for browsing",
+                                Icons.Default.Search,
+                            ) { selectedPage = "providerDefault" }
+                            SettingsCategoryRow(
+                                "Provider accounts",
+                                "Sign in to providers that require API credentials",
+                                Icons.Default.Cloud,
+                            ) { selectedPage = "providerAccounts" }
+                            SettingsCategoryRow(
+                                "Connection status",
+                                "Check API response status for each provider",
+                                Icons.Default.Wifi,
+                            ) { selectedPage = "providerStatus" }
+                        }
                         "browsing" -> {
-                            Box {
-                                SettingsValueRow("Default provider", state.provider) { providerMenu = true }
-                                DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                                    listOf("Auto", "yande.re", "Gelbooru", "Rule34.xxx", "Danbooru").forEach { provider ->
-                                        DropdownMenuItem(
-                                            text = { Text(provider) },
-                                            onClick = { providerMenu = false; model.setProvider(provider) },
-                                        )
-                                    }
-                                }
-                            }
                             SettingsValueRow(
                                 "Custom search terms",
                                 "${state.customTerms.size} saved",
@@ -1987,20 +2117,110 @@ private fun SettingsScreen(
                                 )
                             }
                         }
-                        "providers" -> {
-                            Text("Provider accounts", fontWeight = FontWeight.SemiBold)
-                            ProviderAccountRow(
-                                "Gelbooru",
-                                model.hasGelbooruCredentials(),
-                                model::openGelbooruCredentials,
-                                { model.logoutProvider("Gelbooru") },
-                            )
-                            ProviderAccountRow(
-                                "Rule34.xxx",
-                                model.hasRule34Credentials(),
-                                model::openRule34Credentials,
-                                { model.logoutProvider("Rule34.xxx") },
-                            )
+                        "providerDefault" -> {
+                            SettingsSectionCard(
+                                title = "Default provider",
+                                description = "Select which source is used for browsing.",
+                            ) {
+                                Text("Search provider", style = MaterialTheme.typography.labelMedium)
+                                Box {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth().clickable { providerMenu = true },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = AppBackground,
+                                    ) {
+                                        Row(
+                                            Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(state.provider, Modifier.weight(1f))
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose provider")
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = providerMenu,
+                                        onDismissRequest = { providerMenu = false },
+                                    ) {
+                                        listOf("Auto", "yande.re", "Gelbooru", "Rule34.xxx", "Danbooru").forEach { provider ->
+                                            DropdownMenuItem(
+                                                text = { Text(provider) },
+                                                onClick = { providerMenu = false; model.setProvider(provider) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "providerAccounts" -> {
+                            SettingsSectionCard(
+                                title = "Provider accounts",
+                                description = "Sign in to providers that require API credentials.",
+                            ) {
+                                ProviderAccountRow(
+                                    "Gelbooru",
+                                    model.hasGelbooruCredentials(),
+                                    model::openGelbooruCredentials,
+                                    { model.logoutProvider("Gelbooru") },
+                                )
+                                ProviderAccountRow(
+                                    "Rule34.xxx",
+                                    model.hasRule34Credentials(),
+                                    model::openRule34Credentials,
+                                    { model.logoutProvider("Rule34.xxx") },
+                                )
+                            }
+                        }
+                        "providerStatus" -> {
+                            SettingsSectionCard(
+                                title = "Status connection",
+                                description = "Check API response status for each provider. A reachable API does not guarantee its search service is available.",
+                            ) {
+                                Button(
+                                    onClick = model::testProviderConnections,
+                                    enabled = !state.isTestingProviderConnections,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    if (state.isTestingProviderConnections) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    } else {
+                                        Icon(Icons.Default.Refresh, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(if (state.isTestingProviderConnections) "Testing providers..." else "Test providers")
+                                }
+                                state.providerConnectionError?.let { error ->
+                                    Text(error, color = MaterialTheme.colorScheme.error)
+                                }
+                                state.providerConnectionStatuses.forEach { status ->
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = AppBackground,
+                                    ) {
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                                        ) {
+                                            Text(status.providerName, fontWeight = FontWeight.Medium)
+                                            Text(
+                                                status.message,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (status.message.startsWith("HTTP 2")) {
+                                                    Color(0xFF72D392)
+                                                } else {
+                                                    MaterialTheme.colorScheme.error
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                         "network" -> {
                             SettingSwitch(
@@ -2734,6 +2954,32 @@ private fun SettingsValueRow(
 }
 
 @Composable
+private fun SettingsSectionCard(
+    title: String,
+    description: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Panel,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            content()
+        }
+    }
+}
+
+@Composable
 private fun UserDataBackupSection(model: MainViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -3014,10 +3260,27 @@ private fun UserDataBackupSection(model: MainViewModel) {
 
 @Composable
 private fun ProviderAccountRow(name: String, signedIn: Boolean, onSignIn: () -> Unit, onLogout: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(name, Modifier.weight(1f))
-        Text(if (signedIn) "Signed in" else "Signed out", style = MaterialTheme.typography.labelMedium)
-        TextButton(onClick = if (signedIn) onLogout else onSignIn) { Text(if (signedIn) "Logout" else "Sign in") }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = AppBackground,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
+                Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    if (signedIn) "Signed in" else "Not signed in",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = if (signedIn) onLogout else onSignIn) {
+                Text(if (signedIn) "Log out" else "Sign in")
+            }
+        }
     }
 }
 
@@ -3152,10 +3415,15 @@ private fun DownloadQueueScreen(
     downloads: List<DownloadItem>,
     onOpen: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onCancel: (String) -> Unit,
     onClearFinished: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val hasFinished = downloads.any { it.status == DownloadStatus.SAVED || it.status == DownloadStatus.FAILED }
+    val hasFinished = downloads.any {
+        it.status == DownloadStatus.SAVED ||
+            it.status == DownloadStatus.FAILED ||
+            it.status == DownloadStatus.CANCELLED
+    }
     BackHandler(onBack = onDismiss)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize()) {
@@ -3189,7 +3457,7 @@ private fun DownloadQueueScreen(
                 Column(
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                         .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     downloads.forEach { item ->
                         Card(
@@ -3199,14 +3467,33 @@ private fun DownloadQueueScreen(
                             colors = CardDefaults.cardColors(containerColor = Panel),
                         ) {
                             Column(
-                                Modifier.fillMaxWidth().padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                Modifier.fillMaxWidth().padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
-                                Text(
-                                    "waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}",
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}",
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                    )
+                                    if (
+                                        item.status == DownloadStatus.DOWNLOADING &&
+                                        item.progress != 1f
+                                    ) {
+                                        IconButton(
+                                            onClick = { onCancel(item.id) },
+                                            modifier = Modifier.size(32.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Cancel download",
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    }
+                                }
                                 Text(
                                     "${item.post.provider} - ${item.post.artists.joinToString().ifBlank { "Artist info unavailable" }}",
                                     style = MaterialTheme.typography.bodySmall,
@@ -3227,6 +3514,7 @@ private fun DownloadQueueScreen(
                                                 if (item.progress != null) "Downloading ${(item.progress * 100).toInt()}%" else "Downloading"
                                             DownloadStatus.SAVED -> "Completed"
                                             DownloadStatus.FAILED -> "Failed: ${item.error ?: "Unknown error"}"
+                                            DownloadStatus.CANCELLED -> "Cancelled"
                                         },
                                         Modifier.weight(1f),
                                         style = MaterialTheme.typography.bodySmall,

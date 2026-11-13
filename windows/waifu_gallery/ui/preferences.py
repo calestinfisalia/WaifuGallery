@@ -1,7 +1,16 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSignalBlocker, QSize, Qt, QThreadPool, Signal
+from PySide6.QtCore import (
+    QPoint,
+    QObject,
+    QRunnable,
+    QSignalBlocker,
+    QSize,
+    Qt,
+    QThreadPool,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -42,6 +51,7 @@ from ..data_backup import create_payload, decrypt_payload, encrypt_payload
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
 from ..settings import AppSettings
 from ..pin_security import has_pin, set_pin, verify_pin
+from ..providers import BooruCatalog, PROVIDERS
 from .backup_prompts import (
     BackupMessageDialog,
     BackupPassphraseDialog,
@@ -59,6 +69,24 @@ def _themed_icon(widget: QWidget, name: str) -> QIcon:
     if callable(icon_factory):
         return icon_factory(name)
     return QIcon(str(Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"))
+
+
+class ProviderConnectionSignals(QObject):
+    finished = Signal(str, str)
+
+
+class ProviderConnectionTask(QRunnable):
+    def __init__(self, provider: str, catalog: BooruCatalog) -> None:
+        super().__init__()
+        self.provider = provider
+        self.catalog = catalog
+        self.signals = ProviderConnectionSignals()
+
+    def run(self) -> None:
+        self.signals.finished.emit(
+            self.provider,
+            self.catalog.check_provider_connection(self.provider),
+        )
 
 
 class SafetySwitch(QCheckBox):
@@ -305,6 +333,7 @@ class PreferencesDialog(FramelessResizableDialog):
         self.settings = settings
         self._update_pool = QThreadPool.globalInstance()
         self._update_check_task = None
+        self._provider_connection_tasks: dict[str, ProviderConnectionTask] = {}
         self.setObjectName("settingsDialog")
         self.setWindowTitle("Settings")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
@@ -503,7 +532,7 @@ class PreferencesDialog(FramelessResizableDialog):
                 ("Downloads", "Choose where downloaded files are saved.", "download", download_section),
             ),
         )
-        self._add_page(page, "General", "dices")
+        self._add_page(page, "General", "search")
 
     def _build_provider_tab(self) -> None:
         page = QWidget()
@@ -530,15 +559,68 @@ class PreferencesDialog(FramelessResizableDialog):
             row.addWidget(button)
             account_layout.addLayout(row)
             self._update_provider_button(name)
+        status_section, status_layout = self._settings_section("Status connection")
+        status_section_description = QLabel(
+            "Check the API connection and response status for each provider."
+        )
+        status_section_description.setWordWrap(True)
+        status_layout.addWidget(status_section_description)
+        self.provider_connection_button = QPushButton("Check connections")
+        self.provider_connection_button.clicked.connect(self._check_provider_connections)
+        self.provider_connection_status_labels = {}
+        for name in PROVIDERS:
+            row = QHBoxLayout()
+            provider_label = QLabel(name)
+            provider_label.setMinimumWidth(110)
+            status_label = QLabel("Not checked")
+            status_label.setObjectName("providerConnectionStatus")
+            status_label.setWordWrap(True)
+            self.provider_connection_status_labels[name] = status_label
+            row.addWidget(provider_label)
+            row.addWidget(status_label, 1)
+            status_layout.addLayout(row)
+        status_layout.addWidget(self.provider_connection_button)
         page = self._section_menu_page(
             "Providers",
-            "Choose a provider and manage optional provider accounts.",
+            "Choose a provider, manage optional accounts, and check API availability.",
             (
                 ("Default provider", "Select which source is used for browsing.", "images", default_section),
                 ("Provider accounts", "Sign in to providers that require API credentials.", "settings-2", account_section),
+                ("Status connection", "Check API response status for each provider.", "network", status_section),
             ),
         )
-        self._add_page(page, "Providers", "images")
+        self._add_page(page, "Providers", "cloud")
+
+    def _check_provider_connections(self) -> None:
+        if self._provider_connection_tasks:
+            return
+        catalog = BooruCatalog(
+            credentials=self.settings.gelbooru_credentials,
+            use_doh=self.settings.use_doh,
+            rule34_credentials=self.settings.rule34_credentials,
+            doh_endpoint=self.settings.doh_endpoint,
+        )
+        self.provider_connection_button.setEnabled(False)
+        self.provider_connection_button.setText("Checking…")
+        for provider in PROVIDERS:
+            status_label = self.provider_connection_status_labels[provider]
+            status_label.setText("Checking…")
+            status_label.setStyleSheet("")
+            task = ProviderConnectionTask(provider, catalog)
+            task.signals.finished.connect(self._provider_connection_checked)
+            self._provider_connection_tasks[provider] = task
+            self._update_pool.start(task)
+
+    def _provider_connection_checked(self, provider: str, status: str) -> None:
+        status_label = self.provider_connection_status_labels[provider]
+        status_label.setText(status)
+        status_label.setStyleSheet(
+            "color: #9ECE6A;" if status.startswith("HTTP 2") else "color: #F7768E;"
+        )
+        self._provider_connection_tasks.pop(provider, None)
+        if not self._provider_connection_tasks:
+            self.provider_connection_button.setEnabled(True)
+            self.provider_connection_button.setText("Check connections")
 
     def _build_filter_tab(self) -> None:
         page = QWidget()
@@ -599,7 +681,7 @@ class PreferencesDialog(FramelessResizableDialog):
                 ("Custom blocked tags", "Hide posts containing selected tags.", "x", tags_section),
             ),
         )
-        self._add_page(page, "Filters", "settings-2")
+        self._add_page(page, "Filters", "filter")
 
     def _build_network_tab(self) -> None:
         page = QWidget()
@@ -1046,7 +1128,7 @@ class PreferencesDialog(FramelessResizableDialog):
         self.safety_pages.addWidget(favorites_page)
 
         self._refresh_safety_status()
-        self._safety_page_index = self._add_page(page, "Safety & Privacy", "settings-2")
+        self._safety_page_index = self._add_page(page, "Safety & Privacy", "shield")
 
     def _safety_menu_button(
         self,

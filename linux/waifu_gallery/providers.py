@@ -44,6 +44,9 @@ GORE_BLOCK_TAGS = frozenset({
 VIDEO_EXTENSIONS = frozenset({".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi"})
 _RANDOM_HISTORY: dict[tuple[str, str, str, str], deque[str]] = {}
 _RANDOM_HISTORY_LOCK = threading.Lock()
+_PREVIEW_HOST_FAILURES: dict[str, tuple[float, str]] = {}
+_PREVIEW_HOST_FAILURES_LOCK = threading.Lock()
+_PREVIEW_HOST_FAILURE_TTL = 10.0
 # The initial segment is about four to five seconds for typical 25-30 Mbps
 # clips. The remainder is streamed directly to Qt as it is requested.
 VIDEO_PREBUFFER_BYTES = 16 * 1024 * 1024
@@ -268,149 +271,231 @@ class BooruCatalog:
     def _search_all(self, query: str, rating: str, providers: list[str], page: int, page_size: int) -> SearchPage:
         results: dict[str, tuple[list[ImagePost], bool]] = {}
         errors: list[str] = []
-        provider_limit = page_size
-        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
-            jobs = {
-                executor.submit(self._search_provider, name, query, rating, page, provider_limit): name
-                for name in providers
-            }
+        executor = ThreadPoolExecutor(max_workers=len(providers))
+        jobs = {
+            executor.submit(self._search_provider, name, query, rating, page, page_size): name
+            for name in providers
+        }
+        try:
             for job in as_completed(jobs):
                 name = jobs[job]
                 try:
-                    results[name] = job.result()
+                    result = job.result()
                 except ProviderError as error:
                     errors.append(f"{name}: {error}")
+                    continue
+                results[name] = result
+        finally:
+            executor.shutdown(wait=True)
 
-        combined: list[ImagePost] = []
+        if not results and errors:
+            raise ProviderError(" | ".join(errors))
+
+        merged: list[ImagePost] = []
         seen: set[str] = set()
-        available_posts = [results.get(name, ([], False))[0] for name in providers]
-        for row in range(max((len(items) for items in available_posts), default=0)):
-            for posts in available_posts:
-                if row < len(posts):
-                    item = posts[row]
-                    key = item.checksum or item.image_url
-                    if key not in seen:
-                        seen.add(key)
-                        combined.append(item)
-                        if len(combined) >= page_size:
-                            break
-            if len(combined) >= page_size:
+        max_provider_results = max(
+            (len(posts) for posts, _has_more in results.values()),
+            default=0,
+        )
+        for index in range(max_provider_results):
+            for name in providers:
+                posts = results.get(name, ([], False))[0]
+                if index >= len(posts):
+                    continue
+                post = posts[index]
+                key = post.checksum or post.image_url
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(post)
+                if len(merged) >= page_size:
+                    break
+            if len(merged) >= page_size:
                 break
 
-        has_more = any(value[1] for value in results.values())
-        if not combined and errors:
-            raise ProviderError(" | ".join(errors))
-        return SearchPage(tuple(combined), has_more, tuple(errors))
+        return SearchPage(
+            tuple(merged),
+            any(has_more for _posts, has_more in results.values()),
+            tuple(errors),
+        )
 
     def random_image(self, rating: str, provider: str, query: str = "", report_progress=None) -> tuple[ImagePost, bytes]:
+        post = self.random_post(rating, provider, query)
+        if post.media_type == "video":
+            return post, b""
+        try:
+            return post, self.fetch_post_preview(post, report_progress)
+        except ProviderError:
+            raise
+        except requests.RequestException as error:
+            raise ProviderError(self._request_error_message(error)) from error
+
+    def random_post(
+        self,
+        rating: str,
+        provider: str,
+        query: str = "",
+        excluded_providers: frozenset[str] = frozenset(),
+    ) -> ImagePost:
         if provider == "Gelbooru" and not (self.user_id and self.api_key):
             raise ProviderError("Gelbooru needs your user ID and API key. Add them in Settings.")
         if provider == "Rule34.xxx" and not (self.rule34_user_id and self.rule34_api_key):
             raise ProviderError("Rule34.xxx needs your user ID and API key. Add them in Settings.")
 
-        available = ["yande.re"]
+        available = [] if self.media_filter == "video" else ["yande.re"]
         if self.user_id and self.api_key:
             available.append("Gelbooru")
         if self.rule34_user_id and self.rule34_api_key:
             available.append("Rule34.xxx")
         available.append("Danbooru")
-        sources = available if provider == "All" else [provider]
         failures: list[str] = []
-
-        for source in sources:
+        if provider == "All":
+            available = [source for source in available if source not in excluded_providers]
+            if not available:
+                raise ProviderError("All providers failed: No untried providers remain.")
+            executor = ThreadPoolExecutor(max_workers=len(available))
+            jobs = {
+                executor.submit(self._random_post_from_provider, rating, source, query): source
+                for source in available
+            }
             try:
-                history_key = (source, rating, query.strip().casefold(), self.media_filter)
-                with _RANDOM_HISTORY_LOCK:
-                    history = _RANDOM_HISTORY.setdefault(history_key, deque(maxlen=160))
-                    recent = set(history)
-
-                # A random page can contain only one matching video. Try several
-                # independently sampled pages before considering a recently
-                # shown post again; otherwise sparse video pages immediately
-                # cycle back to the same clip.
-                posts: list[ImagePost] = []
-                candidates: list[ImagePost] = []
-                pages_seen: set[int] = set()
-                page_one_tried = False
-                for _ in range(3):
-                    if source in {"yande.re", "Gelbooru", "Rule34.xxx"}:
-                        sample_page = random.randint(1, 120)
-                        while sample_page in pages_seen and len(pages_seen) < 120:
-                            sample_page = random.randint(1, 120)
-                        pages_seen.add(sample_page)
+                for job in as_completed(jobs):
+                    source = jobs[job]
+                    try:
+                        post = job.result()
+                    except ProviderError as error:
+                        failures.append(f"{source}: {error}")
                     else:
-                        sample_page = 1
+                        self._remember_random_post(post, rating, query)
+                        return post
+            finally:
+                for job in jobs:
+                    if not job.done():
+                        job.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+            raise ProviderError("All providers failed: " + " | ".join(failures))
 
-                    sampled, _ = self._search_provider(source, query, rating, sample_page, 100, random_order=True)
-                    # For a sparse tag query, retry page one as a fallback, but
-                    # keep sampling other pages on subsequent rounds.
-                    if not sampled and sample_page != 1 and not page_one_tried:
-                        page_one_tried = True
-                        sampled, _ = self._search_provider(source, query, rating, 1, 100, random_order=True)
-                    posts.extend(sampled)
-                    unique_posts = list({post.post_id: post for post in posts}.values())
-                    candidates = [post for post in unique_posts if post.post_id not in recent]
-                    if candidates:
-                        break
+        post = self._random_post_from_provider(rating, provider, query)
+        self._remember_random_post(post, rating, query)
+        return post
 
-                if not posts:
-                    media_name = {"image": "image", "video": "video", "all": "media"}[self.media_filter]
-                    raise ProviderError(f"No matching {media_name} was returned.")
+    def _random_post_from_provider(self, rating: str, source: str, query: str) -> ImagePost:
+        history_key = (source, rating, query.strip().casefold(), self.media_filter)
+        with _RANDOM_HISTORY_LOCK:
+            history = _RANDOM_HISTORY.setdefault(history_key, deque(maxlen=160))
+            recent = set(history)
 
-                if not candidates:
-                    # If the sampled pool is exhausted, avoid an immediate
-                    # repeat whenever there is any other item to choose from.
-                    # Keep history intact so the next refresh can sample again.
-                    with _RANDOM_HISTORY_LOCK:
-                        last_post_id = history[-1] if history else None
-                    candidates = [post for post in unique_posts if post.post_id != last_post_id]
-                    if not candidates:
-                        candidates = unique_posts
+        posts: list[ImagePost] = []
+        candidates: list[ImagePost] = []
+        pages_seen: set[int] = set()
+        page_one_tried = False
+        for _ in range(3):
+            if source in {"yande.re", "Gelbooru", "Rule34.xxx"}:
+                sample_page = random.randint(1, 120)
+                while sample_page in pages_seen and len(pages_seen) < 120:
+                    sample_page = random.randint(1, 120)
+                pages_seen.add(sample_page)
+            else:
+                sample_page = 1
 
-                with _RANDOM_HISTORY_LOCK:
-                    post = random.choice(candidates)
-                try:
-                    if post.media_type == "video":
-                        with _RANDOM_HISTORY_LOCK:
-                            _RANDOM_HISTORY[history_key].append(post.post_id)
-                        return post, b""
-                    content = self.fetch_post_preview(post, report_progress)
-                    with _RANDOM_HISTORY_LOCK:
-                        _RANDOM_HISTORY[history_key].append(post.post_id)
-                    return post, content
-                except ProviderError:
-                    raise
-                except requests.RequestException as error:
-                    raise ProviderError(self._request_error_message(error)) from error
-            except ProviderError as error:
-                if provider != "All":
-                    raise
-                failures.append(f"{source}: {error}")
+            sampled, _ = self._search_provider(source, query, rating, sample_page, 100, random_order=True)
+            if not sampled and sample_page != 1 and not page_one_tried:
+                page_one_tried = True
+                sampled, _ = self._search_provider(source, query, rating, 1, 100, random_order=True)
+            posts.extend(sampled)
+            unique_posts = list({post.post_id: post for post in posts}.values())
+            candidates = [post for post in unique_posts if post.post_id not in recent]
+            if candidates:
+                break
 
-        raise ProviderError("All providers failed: " + " | ".join(failures))
+        if not posts:
+            media_name = {"image": "image", "video": "video", "all": "media"}[self.media_filter]
+            raise ProviderError(f"No matching {media_name} was returned.")
 
-    def fetch_image(self, url: str, report_progress=None) -> bytes:
-        with self._session().get(url, headers=self._image_headers(url), timeout=(5, 40), stream=True) as response:
-            if not response.ok:
-                raise ProviderError(f"Image server returned HTTP {response.status_code}.")
-            kind = response.headers.get("Content-Type", "").lower()
-            if kind and not (kind.startswith("image/") or "octet-stream" in kind):
-                raise ProviderError("The provider returned a response that is not an image.")
-            total = int(response.headers.get("Content-Length", "0") or 0)
-            received = 0
-            chunks = []
-            if report_progress:
-                report_progress(0 if total else -1)
-            for block in response.iter_content(chunk_size=128 * 1024):
-                if not block:
-                    continue
-                chunks.append(block)
-                received += len(block)
+        if not candidates:
+            with _RANDOM_HISTORY_LOCK:
+                last_post_id = history[-1] if history else None
+            candidates = [post for post in unique_posts if post.post_id != last_post_id] or unique_posts
+
+        return random.choice(candidates)
+
+    def _remember_random_post(self, post: ImagePost, rating: str, query: str) -> None:
+        history_key = (post.provider, rating, query.strip().casefold(), self.media_filter)
+        with _RANDOM_HISTORY_LOCK:
+            _RANDOM_HISTORY.setdefault(history_key, deque(maxlen=160)).append(post.post_id)
+
+    def fetch_image(
+        self,
+        url: str,
+        report_progress=None,
+        *,
+        timeout: tuple[float, float] = (5, 40),
+        retry: bool = True,
+    ) -> bytes:
+        host = (urlparse(url).hostname or "").casefold()
+        if not retry:
+            self._raise_if_preview_host_failed(host)
+        try:
+            with self._session(retry=retry).get(
+                url, headers=self._image_headers(url), timeout=timeout, stream=True
+            ) as response:
+                if not retry:
+                    self._clear_preview_host_failure(host)
+                if not response.ok:
+                    raise ProviderError(f"Image server returned HTTP {response.status_code}.")
+                kind = response.headers.get("Content-Type", "").lower()
+                if kind and not (kind.startswith("image/") or "octet-stream" in kind):
+                    raise ProviderError("The provider returned a response that is not an image.")
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                received = 0
+                chunks = []
                 if report_progress:
-                    report_progress(min(99, int(received * 100 / total)) if total else -1)
-            if report_progress:
-                report_progress(100)
-            return b"".join(chunks)
+                    report_progress(0 if total else -1)
+                for block in response.iter_content(chunk_size=128 * 1024):
+                    if not block:
+                        continue
+                    chunks.append(block)
+                    received += len(block)
+                    if report_progress:
+                        report_progress(min(99, int(received * 100 / total)) if total else -1)
+                if report_progress:
+                    report_progress(100)
+                return b"".join(chunks)
+        except requests.RequestException as error:
+            message = self._request_error_message(error)
+            if not retry:
+                self._record_preview_host_failure(host, message)
+            raise ProviderError(message) from error
+
+    @staticmethod
+    def _raise_if_preview_host_failed(host: str) -> None:
+        if not host:
+            return
+        message = ""
+        with _PREVIEW_HOST_FAILURES_LOCK:
+            failure = _PREVIEW_HOST_FAILURES.get(host)
+            if failure:
+                expires_at, message = failure
+                if expires_at <= time.monotonic():
+                    _PREVIEW_HOST_FAILURES.pop(host, None)
+                    message = ""
+        if message:
+            raise ProviderError(f"{message} Skipping this host after a recent failure.")
+
+    @staticmethod
+    def _record_preview_host_failure(host: str, message: str) -> None:
+        if host:
+            with _PREVIEW_HOST_FAILURES_LOCK:
+                _PREVIEW_HOST_FAILURES[host] = (
+                    time.monotonic() + _PREVIEW_HOST_FAILURE_TTL,
+                    message,
+                )
+
+    @staticmethod
+    def _clear_preview_host_failure(host: str) -> None:
+        if host:
+            with _PREVIEW_HOST_FAILURES_LOCK:
+                _PREVIEW_HOST_FAILURES.pop(host, None)
 
     def fetch_post_preview(self, post: ImagePost, report_progress=None) -> bytes:
         """Fetch the provider's lightweight sample for on-screen display.
@@ -427,7 +512,7 @@ class BooruCatalog:
         failures = []
         for url in dict.fromkeys(candidates):
             try:
-                return self.fetch_image(url, report_progress)
+                return self.fetch_image(url, report_progress, timeout=(3, 8), retry=False)
             except ProviderError as error:
                 failures.append(str(error))
         raise ProviderError(failures[-1] if failures else "No image preview URL was supplied.")
@@ -676,6 +761,75 @@ class BooruCatalog:
                         f"{provider} request timed out. Its API may be overloaded; retry later."
                     ) from error
                 raise
+
+    def check_provider_connection(self, provider: str) -> str:
+        headers = {"Accept": "application/json"}
+        params = {"tags": "", "limit": 1, "page": 1}
+        if provider == "Danbooru":
+            endpoint = "https://danbooru.donmai.us/posts.json"
+            headers["Accept-Version"] = "v7"
+        elif provider == "yande.re":
+            endpoint = "https://yande.re/post.json"
+            params["api_version"] = 2
+        elif provider == "Gelbooru":
+            endpoint = "https://gelbooru.com/index.php"
+            params.update({
+                "page": "dapi",
+                "s": "post",
+                "q": "index",
+                "pid": 0,
+                "json": 1,
+                "user_id": self.user_id,
+                "api_key": self.api_key,
+            })
+        elif provider == "Rule34.xxx":
+            endpoint = "https://api.rule34.xxx/index.php"
+            params.update({
+                "page": "dapi",
+                "s": "post",
+                "q": "index",
+                "pid": 0,
+                "json": 1,
+                "user_id": self.rule34_user_id,
+                "api_key": self.rule34_api_key,
+            })
+        else:
+            return "PROVIDER_ERROR - Unknown provider."
+
+        try:
+            response = self._session(retry=False).get(
+                endpoint,
+                params=params,
+                headers=headers,
+                timeout=(4, 10),
+            )
+        except requests.Timeout:
+            return "TIMEOUT (RTO) - Request timed out before an HTTP response."
+        except requests.exceptions.SSLError:
+            return "TLS_ERROR - TLS certificate verification failed."
+        except requests.ConnectionError as error:
+            return f"CONNECTION_ERROR - {self._request_error_message(error)}"
+        except requests.RequestException as error:
+            return f"REQUEST_ERROR - {self._request_error_message(error)}"
+
+        status_messages = {
+            200: "Connection healthy",
+            401: "API authentication required or rejected",
+            403: "Access denied by the provider or network protection",
+            404: "API endpoint not found",
+            408: "Provider request timed out",
+            429: "Rate limited; retry later",
+            500: "Provider server error",
+            502: "Provider gateway unavailable",
+            503: "Provider temporarily unavailable",
+            504: "Provider gateway timed out",
+        }
+        message = status_messages.get(
+            response.status_code,
+            "Connection healthy" if 200 <= response.status_code < 300
+            else response.reason or "Unexpected HTTP response",
+        )
+        return f"HTTP {response.status_code} - {message}"
 
     def _request_error_message(self, error: requests.RequestException) -> str:
         cause = getattr(error, "__cause__", None)
