@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.12` with `versionCode` `10`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.12` with `versionCode` `11`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -41,7 +41,7 @@ The version 2 format is interoperable with Windows and Linux, records included s
 - **Provider diagnostics:** Settings → Providers can test all provider endpoints and report HTTP status or connection errors.
 - **SFW random recovery:** Auto retries once when provider errors prevent a random result; HTML responses are identified separately from malformed API data.
 - **Downloads:** download cards are more compact, and the X action cancels an active transfer without stopping the remaining queue.
-- Android source version: `0.1.12`; `versionCode`: `10`.
+- Android source version: `0.1.12`; `versionCode`: `11`.
 
 ## Android 0.1.11
 
