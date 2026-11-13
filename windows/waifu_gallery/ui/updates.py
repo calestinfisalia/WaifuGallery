@@ -2,6 +2,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 import requests
@@ -24,7 +25,10 @@ from .. import __version__
 from .dialog_chrome import DialogTitleBar, FramelessResizableDialog
 
 
-GITHUB_LATEST_RELEASE = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
+UPDATE_MANIFEST_URL = (
+    "https://raw.githubusercontent.com/calestinfisalia/WaifuGallery/main/updates.json"
+)
+GITHUB_RELEASE_API = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/tags/"
 RELEASE_PAGE = "https://github.com/calestinfisalia/WaifuGallery/releases"
 WINDOWS_INSTALLER = "WaifuGallery-Setup-x64.exe"
 MAX_UPDATE_SIZE = 512 * 1024 * 1024
@@ -80,13 +84,38 @@ class UpdateCheckTask(QRunnable):
     def run(self) -> None:
         try:
             with requests.get(
-                GITHUB_LATEST_RELEASE,
+                UPDATE_MANIFEST_URL,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
+                timeout=(5, 12),
+            ) as response:
+                response.raise_for_status()
+                manifest = response.json()
+            if manifest.get("schema_version") != 1:
+                raise ValueError("The update manifest version is not supported.")
+            entry = manifest.get("platforms", {}).get("windows", {})
+            version = str(entry.get("version", "")).strip()
+            tag = str(entry.get("release_tag", "")).strip()
+            if not re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
+                raise ValueError("The Windows update version is invalid.")
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
+                raise ValueError("The Windows release tag is invalid.")
+            if version_parts(version) <= version_parts(__version__):
+                self.signals.finished.emit(version, "", "", "", "", "")
+                return
+
+            with requests.get(
+                f"{GITHUB_RELEASE_API}{quote(tag, safe='')}",
                 headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
                 timeout=(5, 12),
             ) as response:
                 response.raise_for_status()
                 release = response.json()
-            tag = str(release.get("tag_name", "")).strip()
+            if (
+                str(release.get("tag_name", "")).strip() != tag
+                or release.get("draft")
+                or release.get("prerelease")
+            ):
+                raise ValueError("The Windows release is unavailable or unstable.")
             url = str(release.get("html_url", "")).strip()
             notes = str(release.get("body", "")).strip()
             installer = next(
@@ -99,16 +128,17 @@ class UpdateCheckTask(QRunnable):
             )
             download_url = str(installer.get("browser_download_url", "")).strip()
             digest = str(installer.get("digest", "")).strip()
+            release_url = (
+                f"https://github.com/calestinfisalia/WaifuGallery/releases/download/"
+                f"{quote(tag, safe='')}/"
+            )
             if (
-                not tag
-                or not url.startswith("https://github.com/")
-                or not download_url.startswith(
-                    "https://github.com/calestinfisalia/WaifuGallery/releases/download/"
-                )
+                not url.startswith("https://github.com/calestinfisalia/WaifuGallery/releases/tag/")
+                or not download_url.startswith(release_url)
                 or not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest)
             ):
-                raise ValueError("The latest release is missing a verified Windows installer.")
-            self.signals.finished.emit(tag, url, notes, download_url, digest[7:], "")
+                raise ValueError("The Windows release is missing a verified installer.")
+            self.signals.finished.emit(version, url, notes, download_url, digest[7:], "")
         except Exception as error:
             self.signals.finished.emit("", "", "", "", "", str(error))
 
@@ -200,8 +230,9 @@ class UpdateDownloadTask(QRunnable):
 
 
 def version_parts(value: str) -> tuple[int, ...]:
-    numbers = re.findall(r"\d+", value)
-    return tuple(int(number) for number in numbers) or (0,)
+    if not re.fullmatch(r"\d+(?:\.\d+){0,3}", value.strip()):
+        return (0,)
+    return tuple(int(number) for number in value.strip().split("."))
 
 
 class ReleaseNotesDialog(FramelessResizableDialog):

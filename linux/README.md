@@ -1,6 +1,6 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.12 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.13 while Linux launch and packaging files remain separate.
 
 ## Status
 
@@ -68,6 +68,11 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Favorites and media details:** search results show separate image/video totals; favorite details no longer show a redundant Back button, and image details include rating and resolution.
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
+
+## Linux 0.1.13
+
+- **Updates:** the app now checks the Linux-specific release entry in the repository update manifest, independent of Windows and Android versions.
+- The source version is 0.1.13. Publish Linux packages and update the Linux entry in the repository `updates.json` before distributing this build.
 
 ## Linux 0.1.12
 

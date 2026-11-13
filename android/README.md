@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The Android release version is aligned with the desktop projects (`0.1.11`). Android's `versionCode` is `9` and continues to increase independently for each Android update.
+Android's source version is `0.1.12` with `versionCode` `10`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -31,6 +31,11 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+
+## Android 0.1.12
+
+- **Updates:** the app now checks the Android-specific release entry in the repository update manifest, independent of Windows and Linux releases.
+- Android source version: `0.1.12`; `versionCode`: `10`.
 
 ## Android 0.1.11
 

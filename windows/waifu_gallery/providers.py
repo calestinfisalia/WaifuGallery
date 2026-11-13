@@ -631,7 +631,43 @@ class BooruCatalog:
                 except ValueError as error:
                     body_text = response.text.strip()
                     body = body_text.casefold()
-                    if provider == "Rule34.xxx":
+                    if provider == "Gelbooru":
+                        if any(
+                            message in body
+                            for message in ("missing authentication", "invalid api key", "invalid user_id")
+                        ):
+                            raise ProviderError(
+                                "Gelbooru rejected API authentication. Check your user ID and API key in Settings."
+                            ) from error
+                        try:
+                            root = ET.fromstring(body_text)
+                            if root.tag.casefold() == "posts":
+                                xml_status = " ".join(root.attrib.values()).casefold()
+                                if (
+                                    root.attrib.get("success", "").casefold() in {"false", "0"}
+                                    or "search down" in xml_status
+                                ):
+                                    raise ProviderError(
+                                        "Gelbooru search is temporarily unavailable. Retry in a little while."
+                                    )
+                                payload = [dict(post.attrib) for post in root.findall("post")]
+                            elif root.tag.casefold() == "error":
+                                raise ProviderError(
+                                    "Gelbooru returned a DAPI error. Check API access and retry."
+                                )
+                            elif root.tag.casefold() == "html":
+                                raise ProviderError(
+                                    "Gelbooru returned an HTML page instead of JSON or DAPI XML. "
+                                    "Check the credentials or retry later."
+                                )
+                            else:
+                                raise ProviderError("Gelbooru returned unexpected DAPI data.")
+                        except ET.ParseError:
+                            raise ProviderError(
+                                "Gelbooru returned neither JSON nor DAPI XML. Check the credentials "
+                                "or retry later if the provider is having an issue."
+                            ) from error
+                    elif provider == "Rule34.xxx":
                         if any(message in body for message in ("missing authentication", "invalid api key", "invalid user_id")):
                             raise ProviderError("Rule34.xxx rejected API authentication. Check your user ID and API key in Settings.") from error
                         # Rule34's DAPI can return the legacy XML document even
@@ -780,10 +816,11 @@ class BooruCatalog:
         media_type = "video" if is_video else "image"
         preview_file_url = cls._absolute(cls._first(raw, "preview_file_url", "preview_url"))
         sample_url = cls._absolute(cls._first(raw, "sample_url", "jpeg_url"))
+        large_file_url = cls._absolute(cls._first(raw, "large_file_url"))
         preview_candidates = (
             (sample_url, preview_file_url, image_url)
             if is_video
-            else (preview_file_url, sample_url, image_url)
+            else (preview_file_url, sample_url, large_file_url, image_url)
         )
         previews = tuple(dict.fromkeys(
             url for url in preview_candidates

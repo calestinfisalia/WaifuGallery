@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 from PySide6.QtCore import QObject, QPoint, QRunnable, QSize, Qt, QUrl, Signal
@@ -20,7 +21,10 @@ from .. import __version__
 from .dialog_chrome import DialogTitleBar, FramelessResizableDialog
 
 
-GITHUB_LATEST_RELEASE = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
+UPDATE_MANIFEST_URL = (
+    "https://raw.githubusercontent.com/calestinfisalia/WaifuGallery/main/updates.json"
+)
+GITHUB_RELEASE_API = "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/tags/"
 RELEASE_PAGE = "https://github.com/calestinfisalia/WaifuGallery/releases"
 
 
@@ -36,18 +40,56 @@ class UpdateCheckTask(QRunnable):
     def run(self) -> None:
         try:
             response = requests.get(
-                GITHUB_LATEST_RELEASE,
+                UPDATE_MANIFEST_URL,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
+                timeout=(5, 12),
+            )
+            response.raise_for_status()
+            manifest = response.json()
+            if manifest.get("schema_version") != 1:
+                raise ValueError("The update manifest version is not supported.")
+            entry = manifest.get("platforms", {}).get("linux", {})
+            version = str(entry.get("version", "")).strip()
+            tag = str(entry.get("release_tag", "")).strip()
+            if not re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
+                raise ValueError("The Linux update version is invalid.")
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
+                raise ValueError("The Linux release tag is invalid.")
+            if version_parts(version) <= version_parts(__version__):
+                self.signals.finished.emit(version, "", "", "")
+                return
+
+            response = requests.get(
+                f"{GITHUB_RELEASE_API}{quote(tag, safe='')}",
                 headers={"Accept": "application/vnd.github+json", "User-Agent": "Waifu-Gallery"},
                 timeout=(5, 12),
             )
             response.raise_for_status()
             release = response.json()
-            tag = str(release.get("tag_name", "")).strip()
+            if (
+                str(release.get("tag_name", "")).strip() != tag
+                or release.get("draft")
+                or release.get("prerelease")
+            ):
+                raise ValueError("The Linux release is unavailable or unstable.")
             url = str(release.get("html_url", "")).strip()
             notes = str(release.get("body", "")).strip()
-            if not tag or not url:
-                raise ValueError("The latest release response is missing its tag or URL.")
-            self.signals.finished.emit(tag, url, notes, "")
+            release_assets = {
+                str(asset.get("name", ""))
+                for asset in release.get("assets", [])
+                if isinstance(asset, dict)
+            }
+            expected_assets = {
+                f"Waifu-Gallery-{version}-x86_64.AppImage",
+                f"Waifu-Gallery-{version}-x86_64.flatpak",
+            }
+            if not url.startswith(
+                "https://github.com/calestinfisalia/WaifuGallery/releases/tag/"
+            ):
+                raise ValueError("The Linux release URL is invalid.")
+            if not release_assets.intersection(expected_assets):
+                raise ValueError("The Linux release is missing an AppImage or Flatpak package.")
+            self.signals.finished.emit(version, url, notes, "")
         except Exception as error:
             self.signals.finished.emit("", "", "", str(error))
 
@@ -88,8 +130,9 @@ class _UpdateMascotOverlay(QWidget):
 
 
 def version_parts(value: str) -> tuple[int, ...]:
-    numbers = re.findall(r"\d+", value)
-    return tuple(int(number) for number in numbers) or (0,)
+    if not re.fullmatch(r"\d+(?:\.\d+){0,3}", value.strip()):
+        return (0,)
+    return tuple(int(number) for number in value.strip().split("."))
 
 
 class ReleaseNotesDialog(FramelessResizableDialog):

@@ -6,11 +6,25 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (version 0.1.11).
-- [Linux](linux/README.md) — Python and PySide6 desktop port (version 0.1.11), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (version 0.1.11).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.13).
+- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.13), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.12).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
+
+## Platform-specific updates
+
+Windows, Linux, and Android versions advance independently. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform; update only the affected platform after its GitHub release has been published.
+
+Platform release tags use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`. Android also increments `versionCode` for every APK. When migrating existing installations from the old shared `releases/latest` checker, publish one compatibility release containing all three platform packages before switching to platform-only releases; old clients cannot read the manifest.
+
+See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, manifest-update, migration, and validation procedure.
+
+## Version 0.1.12
+
+- **Windows:** refined Settings scrollbars; Windows Setup and portable x64 release builds.
+- **Linux:** published x86_64 AppImage and Flatpak packages with Flatpak runtime compatibility and legacy-profile data migration.
+- See the platform READMEs for release-specific details.
 
 ## Version 0.1.11
 

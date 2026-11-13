@@ -107,6 +107,17 @@ The preview displays a mock 57% progress value; its disabled button cannot start
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
 
+## Windows 0.1.13
+
+- **Updates:** the app now checks the Windows-specific release entry in the repository update manifest, so Linux and Android releases do not change the Windows update version.
+- **Settings:** refined the capsule scrollbar styling.
+- The source version is 0.1.13. Publish a Windows release and update the Windows entry in the repository `updates.json` before distributing this build.
+
+## Windows 0.1.12
+
+- **Settings:** refined the scrollbar styling.
+- Release artifacts: `WaifuGallery-Portable-x64.exe` and `WaifuGallery-Setup-x64.exe`.
+
 ## Windows 0.1.11
 
 ### Fixes

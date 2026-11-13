@@ -29,10 +29,20 @@ data class ReleaseUpdateCheckResult(
     val error: String? = null,
 )
 
+internal data class UpdateTarget(
+    val version: String,
+    val releaseTag: String,
+)
+
 object ReleaseUpdateChecker {
-    private const val RELEASE_URL =
-        "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/latest"
+    private const val UPDATE_MANIFEST_URL =
+        "https://raw.githubusercontent.com/calestinfisalia/WaifuGallery/main/updates.json"
+    private const val GITHUB_RELEASE_API =
+        "https://api.github.com/repos/calestinfisalia/WaifuGallery/releases/tags/"
+    private const val GITHUB_RELEASE_DOWNLOAD =
+        "https://github.com/calestinfisalia/WaifuGallery/releases/download/"
     private val versionPattern = Regex("^v?(\\d+(?:\\.\\d+){0,3})$", RegexOption.IGNORE_CASE)
+    private val releaseTagPattern = Regex("[A-Za-z0-9._-]+")
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
@@ -57,7 +67,7 @@ object ReleaseUpdateChecker {
                 .versionName
                 .orEmpty()
             val request = Request.Builder()
-                .url(RELEASE_URL)
+                .url(UPDATE_MANIFEST_URL)
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "WaifuGallery-Android/$currentVersionName")
@@ -69,21 +79,45 @@ object ReleaseUpdateChecker {
                         "GitHub returned HTTP ${response.code}.",
                     )
                 }
-                val release = response.body?.string()?.let(::JSONObject)
-                    ?: return@withContext ReleaseUpdateCheckResult(null, "GitHub returned an empty response.")
-                if (release.optBoolean("draft", true) || release.optBoolean("prerelease", true)) {
-                    return@withContext ReleaseUpdateCheckResult(null)
-                }
-
-                val tag = release.optString("tag_name")
+                val manifest = response.body?.string()?.let(::JSONObject)
+                    ?: return@withContext ReleaseUpdateCheckResult(null, "GitHub returned an empty update manifest.")
+                val target = parseUpdateTarget(manifest, "android")
+                val releaseVersionName = target.version
+                val tag = target.releaseTag
                 val currentVersion = parseVersion(currentVersionName)
                     ?: return@withContext ReleaseUpdateCheckResult(null, "The installed app version is invalid.")
-                val releaseVersion = parseVersion(tag)
-                    ?: return@withContext ReleaseUpdateCheckResult(null, "The latest release version is invalid.")
+                val releaseVersion = parseVersion(releaseVersionName)
+                    ?: return@withContext ReleaseUpdateCheckResult(null, "The Android update version is invalid.")
                 if (compareVersions(releaseVersion, currentVersion) <= 0) {
                     return@withContext ReleaseUpdateCheckResult(null)
                 }
 
+                val releaseRequest = Request.Builder()
+                    .url("$GITHUB_RELEASE_API$tag")
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .header("User-Agent", "WaifuGallery-Android/$currentVersionName")
+                    .build()
+                val release = client.newCall(releaseRequest).execute().use { releaseResponse ->
+                    if (!releaseResponse.isSuccessful) {
+                        return@withContext ReleaseUpdateCheckResult(
+                            null,
+                            "GitHub returned HTTP ${releaseResponse.code} for Android release $tag.",
+                        )
+                    }
+                    releaseResponse.body?.string()?.let(::JSONObject)
+                        ?: return@withContext ReleaseUpdateCheckResult(
+                            null,
+                            "GitHub returned an empty Android release.",
+                        )
+                }
+                if (
+                    release.optString("tag_name") != tag ||
+                    release.optBoolean("draft", true) ||
+                    release.optBoolean("prerelease", true)
+                ) {
+                    return@withContext ReleaseUpdateCheckResult(null, "The Android release is unavailable or unstable.")
+                }
                 val apkUrl = release.optJSONArray("assets")
                     ?.let { assets ->
                         (0 until assets.length())
@@ -98,7 +132,12 @@ object ReleaseUpdateChecker {
                 val url = apkUrl.optString("browser_download_url")
                 val digest = apkUrl.optString("digest")
                 val checksum = digest.removePrefix("sha256:")
-                if (!isTrustedReleaseUrl(url) || !checksum.matches(Regex("[a-fA-F0-9]{64}"))) {
+                val releaseAssetPrefix = "$GITHUB_RELEASE_DOWNLOAD$tag/"
+                if (
+                    !url.startsWith(releaseAssetPrefix) ||
+                    !isTrustedReleaseUrl(url) ||
+                    !checksum.matches(Regex("[a-fA-F0-9]{64}"))
+                ) {
                     return@withContext ReleaseUpdateCheckResult(
                         null,
                         "The latest release APK is missing a trusted URL or SHA-256 checksum.",
@@ -107,7 +146,7 @@ object ReleaseUpdateChecker {
 
                 ReleaseUpdateCheckResult(
                     ReleaseUpdate(
-                        version = tag,
+                        version = releaseVersionName,
                         notes = release.optString("body").trim(),
                         apkUrl = url,
                         apkSha256 = checksum,
@@ -209,12 +248,26 @@ object ReleaseUpdateChecker {
         }
     }
 
-    private fun parseVersion(value: String): List<Long>? {
+    internal fun parseUpdateTarget(manifest: JSONObject, platformName: String): UpdateTarget {
+        require(manifest.optInt("schema_version", -1) == 1) {
+            "The update manifest version is not supported."
+        }
+        val platform = manifest.optJSONObject("platforms")
+            ?.optJSONObject(platformName)
+            ?: throw IOException("The $platformName update entry is missing.")
+        val version = platform.optString("version")
+        require(parseVersion(version) != null) { "The $platformName update version is invalid." }
+        val tag = platform.optString("release_tag")
+        require(releaseTagPattern.matches(tag)) { "The $platformName release tag is invalid." }
+        return UpdateTarget(version, tag)
+    }
+
+    internal fun parseVersion(value: String): List<Long>? {
         val match = versionPattern.matchEntire(value.trim()) ?: return null
         return match.groupValues[1].split('.').map { it.toLongOrNull() ?: return null }
     }
 
-    private fun compareVersions(left: List<Long>, right: List<Long>): Int {
+    internal fun compareVersions(left: List<Long>, right: List<Long>): Int {
         for (index in 0 until maxOf(left.size, right.size)) {
             val comparison = (left.getOrElse(index) { 0L }).compareTo(right.getOrElse(index) { 0L })
             if (comparison != 0) return comparison
