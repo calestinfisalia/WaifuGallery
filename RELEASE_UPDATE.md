@@ -40,16 +40,17 @@ Windows `0.1.15` and Android `0.1.15` (`versionCode` `13`) are the next release 
 
    | Platform | Version in this compatibility release | Assets |
    | --- | --- | --- |
-   | Windows | `0.1.15` | `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe` |
+   | Windows | `0.1.15` | `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `LICENSE-GPL-3.0.txt` |
    | Linux (reused; not rebuilt) | `0.1.12` | `Waifu-Gallery-0.1.12-x86_64.AppImage`, `Waifu-Gallery-0.1.12-x86_64.flatpak` |
    | Android | `0.1.15` (`versionCode` `13`) | `app-release.apk` |
 
-3. Generate `SHA256SUMS-0.1.15.txt` for the staged files, verify the Windows and Android app versions and all file hashes, then create the stable compatibility release:
+3. Generate `SHA256SUMS-0.1.15.txt` containing SHA-256 hashes for all six payload assets (not the checksum file itself), verify the Windows and Android app versions and all file hashes, then create the stable compatibility release:
 
    ```powershell
    gh release create v0.1.15 `
      "$ASSET_DIR\WaifuGallery-Setup-x64.exe" `
      "$ASSET_DIR\WaifuGallery-Portable-x64.exe" `
+     "$ASSET_DIR\LICENSE-GPL-3.0.txt" `
      "$ASSET_DIR\Waifu-Gallery-0.1.12-x86_64.AppImage" `
      "$ASSET_DIR\Waifu-Gallery-0.1.12-x86_64.flatpak" `
      "$ASSET_DIR\app-release.apk" `
