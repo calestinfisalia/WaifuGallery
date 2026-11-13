@@ -13,26 +13,27 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`; Windows and Android have platform releases, while Linux remains at its last published version until its next package is ready.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.14`; the feed points to Windows `0.1.14`, Linux `0.1.12`, and Android `0.1.14`, all via compatibility release `v0.1.14`.
 
-## Current handoff: complete compatibility release `v0.1.14`
+## Current compatibility release: `v0.1.14`
 
-Windows `0.1.14` (`windows-v0.1.14`) and Android `0.1.12` (`android-v0.1.12`) have been published as platform releases with `--latest=false`. The compatibility release `v0.1.13` remains GitHub's **Latest** for legacy clients. `updates.json` points Windows and Android to their new platform releases; Linux remains at `0.1.12` on `v0.1.13`. Do not publish the compatibility release until the Linux `0.1.13` build is ready.
+Compatibility release `v0.1.14` is published and is GitHub's **Latest**. It contains Windows `0.1.14`, Android `0.1.14` (`versionCode` `12`), and the latest published Linux packages, `0.1.12`. The Linux `0.1.13` source build is not included yet. Legacy Linux clients that compare the global tag with their app version may continue to show an update notice until a newer Linux build is packaged.
 
-The next compatibility release is expected to contain:
+The Android version intentionally matches the compatibility tag. Legacy Android clients query `/releases/latest`, parse the release tag as the app version, and install `app-release.apk`. The old `v0.1.13` release contained Android `0.1.11` (`versionCode` `9`), so clients on that version repeatedly installed the same APK. Version `0.1.14`/code `12` fixes this and prevents the old updater from offering the same update again.
+
+The `v0.1.14` compatibility release contains:
 
 | Platform | App version | Required release assets |
 | --- | --- | --- |
 | Windows | `0.1.14` | `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe` |
-| Linux | `0.1.13` | `Waifu-Gallery-0.1.13-x86_64.AppImage`, `Waifu-Gallery-0.1.13-x86_64.flatpak` |
-| Android | `0.1.12` (`versionCode` `11`) | `app-release.apk` |
+| Linux | `0.1.12` (latest published) | `Waifu-Gallery-0.1.12-x86_64.AppImage`, `Waifu-Gallery-0.1.12-x86_64.flatpak` |
+| Android | `0.1.14` (`versionCode` `12`) | `app-release.apk` |
 
-The Windows and Android binaries are available from the platform releases above. Do not substitute binaries from `v0.1.13` or rebuild them with older source.
+The Windows and Android assets were built from current source; the Linux assets are reused from the previous complete compatibility release. All are available under the `v0.1.14` tag. The Android platform-only release `android-v0.1.12` remains available, but the update manifest points to the compatibility APK.
 
-### Linux-agent steps
+### Next Linux update
 
-1. Inspect `git status` before syncing; preserve any local work. Fetch/pull the source and verify the checked-out versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12` with Android `versionCode` `11`. Confirm `updates.json` points Windows to `windows-v0.1.14`, Android to `android-v0.1.12`, and Linux to `v0.1.13`. If anything differs, stop and ask the maintainer. Do not reset or discard local changes.
-2. On a **native x86_64 Linux host** (not Windows or WSL), from `linux`, run:
+Linux `0.1.13` is still pending. On a **native x86_64 Linux host** (not Windows or WSL), inspect `git status`, preserve local work, sync the release-preparation commit, then from `linux` run:
 
    ```bash
    python3 -m unittest discover -s tests -v
@@ -40,40 +41,9 @@ The Windows and Android binaries are available from the platform releases above.
    bash ./release.sh
    ```
 
-   The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. The exact asset names above assume an x86_64 host; stop and ask before substituting a different architecture. Build directly into a staging directory outside Git, then download the already published Windows and Android assets:
+The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. Confirm the generated files are `Waifu-Gallery-0.1.13-x86_64.AppImage` and `Waifu-Gallery-0.1.13-x86_64.flatpak`. Do not replace the packages inside the published `v0.1.14` release.
 
-   ```bash
-   export ASSET_DIR="$HOME/releases/waifu-gallery/compatibility-v0.1.14"
-   mkdir -p "$ASSET_DIR"
-   RELEASE_OUTPUT_DIR="$ASSET_DIR" bash ./release.sh
-   gh release download windows-v0.1.14 --repo calestinfisalia/WaifuGallery \
-     --pattern WaifuGallery-Setup-x64.exe --pattern WaifuGallery-Portable-x64.exe \
-     --dir "$ASSET_DIR"
-   gh release download android-v0.1.12 --repo calestinfisalia/WaifuGallery \
-     --pattern app-release.apk --dir "$ASSET_DIR"
-   ```
-
-3. Confirm all five assets are in `ASSET_DIR` with the exact names in the table. Stop and ask the maintainer if any asset is missing or its app version does not match the table.
-4. Confirm `v0.1.14` is unused, then create **one stable compatibility release** (not another platform-only release), so legacy apps using GitHub's `releases/latest` still see every platform:
-
-   ```bash
-   gh auth status
-   gh release create v0.1.14 \
-     "$ASSET_DIR/WaifuGallery-Setup-x64.exe" \
-     "$ASSET_DIR/WaifuGallery-Portable-x64.exe" \
-     "$ASSET_DIR/Waifu-Gallery-0.1.13-x86_64.AppImage" \
-     "$ASSET_DIR/Waifu-Gallery-0.1.13-x86_64.flatpak" \
-     "$ASSET_DIR/app-release.apk" \
-     --title "Waifu Gallery 0.1.14 Compatibility Release" \
-     --notes "Compatibility release: Windows 0.1.14, Linux 0.1.13, Android 0.1.12." \
-     --latest \
-     --repo calestinfisalia/WaifuGallery
-   ```
-
-   Do not mark the release as a draft or prerelease. The explicit `--latest` makes this complete release the legacy update channel.
-5. Verify the exact tag with `gh release view v0.1.14 --repo calestinfisalia/WaifuGallery --json tagName,isDraft,isPrerelease,assets`. Confirm all five filenames are present and GitHub reports a SHA-256 digest for `WaifuGallery-Setup-x64.exe` and `app-release.apk`. Confirm `v0.1.14` is the latest release.
-6. Only after verification, change all three `updates.json` entries to Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`, setting every `release_tag` to `v0.1.14`. Commit and push that feed update. Never advertise an artifact before its release exists.
-7. Verify the public `updates.json` and release once more. Keep the compatibility release as `releases/latest` while supporting old clients.
+After Linux `0.1.13` passes validation, publish a platform release `linux-v0.1.13` with `--latest=false` and update only the Linux feed entry. When a new compatibility release is needed, include assets for every platform and keep the Android APK's `versionName` equal to the numeric compatibility tag (increment `versionCode`) while legacy clients remain in use. Legacy Linux clients also compare the global compatibility tag numerically, so include a Linux package whose app version matches that tag to prevent repeated notices.
 
 ## Version files
 
@@ -83,7 +53,7 @@ Update all version declarations for the target platform:
 - **Linux:** `linux/waifu_gallery/__init__.py` and `linux/pyproject.toml`. `linux/release.sh` uses the project version to name both packages.
 - **Android:** `android/app/build.gradle.kts` (`versionName` and a strictly increasing `versionCode`).
 
-Do not bump versions for unaffected platforms. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`.
+Do not bump versions for unaffected platforms. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`. For Android compatibility releases specifically, older clients compare the global compatibility tag directly with `versionName`, so make those two numeric versions match.
 
 ## Release a platform update
 
@@ -118,7 +88,7 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions inside it may differ by platform. Point all three manifest entries at their latest app versions but at this compatibility release tag. The latest complete compatibility release is `v0.1.13`, with Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`. Until `v0.1.14` is complete, newer Windows and Android clients use their platform-specific releases while Linux continues to use `v0.1.13`. See the current handoff above before preparing the next release.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.14`, with Windows `0.1.14`, Linux `0.1.12`, and Android `0.1.14`. See the current handoff above before preparing the next release.
 
 If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 
