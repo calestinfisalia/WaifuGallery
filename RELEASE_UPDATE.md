@@ -13,7 +13,7 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. At this checkout, source versions are Windows `0.1.13`, Linux `0.1.13`, and Android `0.1.12`; the feed intentionally still points to the published Windows/Linux `0.1.12` and Android `0.1.11` packages.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. At this checkout, source versions are Windows `0.1.13`, Linux `0.1.13`, and Android `0.1.12`; the feed points to Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`, all via compatibility release `v0.1.13`.
 
 ## Version files
 
@@ -58,9 +58,9 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-Before moving to platform-only releases, publish one **compatibility release** using the conventional tag `vX.Y.Z` that contains the Windows installer and portable EXE, Linux packages, and Android APK. The package versions inside it may differ by platform. Point all three manifest entries at their own app versions but at this compatibility release tag. This lets old clients find their platform package once; newly updated clients then use the manifest.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions inside it may differ by platform. Point all three manifest entries at their latest app versions but at this compatibility release tag. The current compatibility release is `v0.1.13`, with Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`; all three feed entries reference it.
 
-After migration, note that GitHub's global `releases/latest` can point at a platform-only release. Remaining old clients may not find their asset there. Do not promise automatic updates for those clients once platform-only releases begin; provide a manual update path or retain a compatibility-release policy until legacy clients are no longer supported.
+If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 
 ## Validation checklist
 
