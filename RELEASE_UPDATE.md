@@ -13,11 +13,11 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. At this checkout, source versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`; the feed points to Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`, all via compatibility release `v0.1.13`.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`; Windows and Android have platform releases, while Linux remains at its last published version until its next package is ready.
 
-## Current handoff: compatibility release `v0.1.14`
+## Current handoff: complete compatibility release `v0.1.14`
 
-The latest published release is still `v0.1.13`. Do not change `updates.json` or publish `v0.1.14` until all three platform builds are ready.
+Windows `0.1.14` (`windows-v0.1.14`) and Android `0.1.12` (`android-v0.1.12`) have been published as platform releases with `--latest=false`. The compatibility release `v0.1.13` remains GitHub's **Latest** for legacy clients. `updates.json` points Windows and Android to their new platform releases; Linux remains at `0.1.12` on `v0.1.13`. Do not publish the compatibility release until the Linux `0.1.13` build is ready.
 
 The next compatibility release is expected to contain:
 
@@ -27,17 +27,11 @@ The next compatibility release is expected to contain:
 | Linux | `0.1.13` | `Waifu-Gallery-0.1.13-x86_64.AppImage`, `Waifu-Gallery-0.1.13-x86_64.flatpak` |
 | Android | `0.1.12` (`versionCode` `11`) | `app-release.apk` |
 
-Windows and Android have already been built from the current source on the Windows machine:
-
-- `windows/dist-release/WaifuGallery-Setup-x64.exe`
-- `windows/dist-release/WaifuGallery-Portable-x64.exe`
-- `android/app/build/outputs/apk/release/app-release.apk`
-
-Build outputs are local/ignored files, not Git source. A Linux agent on another machine will not automatically have them; have the maintainer transfer them into an asset staging directory before publishing. Do not substitute binaries from `v0.1.13` or rebuild them with older source.
+The Windows and Android binaries are available from the platform releases above. Do not substitute binaries from `v0.1.13` or rebuild them with older source.
 
 ### Linux-agent steps
 
-1. Inspect `git status` before syncing; preserve any local work. Fetch/pull the source and verify the checked-out versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12` with Android `versionCode` `11`. If these values or the release notes are missing, stop and ask the maintainer to sync the release-preparation commit first. Do not reset or discard local changes.
+1. Inspect `git status` before syncing; preserve any local work. Fetch/pull the source and verify the checked-out versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12` with Android `versionCode` `11`. Confirm `updates.json` points Windows to `windows-v0.1.14`, Android to `android-v0.1.12`, and Linux to `v0.1.13`. If anything differs, stop and ask the maintainer. Do not reset or discard local changes.
 2. On a **native x86_64 Linux host** (not Windows or WSL), from `linux`, run:
 
    ```bash
@@ -46,15 +40,21 @@ Build outputs are local/ignored files, not Git source. A Linux agent on another 
    bash ./release.sh
    ```
 
-   The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. It writes versioned AppImage and Flatpak files to `~/releases/waifu-gallery/` by default; override this with `RELEASE_OUTPUT_DIR`. The exact asset names above assume an x86_64 host; stop and ask before substituting a different architecture.
-3. Confirm both Linux files exist with the exact names in the table. Transfer the Windows and Android builds into an asset staging directory outside Git, for example:
+   The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. The exact asset names above assume an x86_64 host; stop and ask before substituting a different architecture. Build directly into a staging directory outside Git, then download the already published Windows and Android assets:
 
    ```bash
-   export ASSET_DIR="$HOME/releases/waifu-gallery"
+   export ASSET_DIR="$HOME/releases/waifu-gallery/compatibility-v0.1.14"
+   mkdir -p "$ASSET_DIR"
+   RELEASE_OUTPUT_DIR="$ASSET_DIR" bash ./release.sh
+   gh release download windows-v0.1.14 --repo calestinfisalia/WaifuGallery \
+     --pattern WaifuGallery-Setup-x64.exe --pattern WaifuGallery-Portable-x64.exe \
+     --dir "$ASSET_DIR"
+   gh release download android-v0.1.12 --repo calestinfisalia/WaifuGallery \
+     --pattern app-release.apk --dir "$ASSET_DIR"
    ```
 
-   Ensure all five assets are in that directory. Stop and ask the maintainer if any asset is missing or its embedded app version does not match the table.
-4. Confirm `v0.1.14` is unused, then create **one stable compatibility release** (not a platform-only release), so legacy apps using GitHub's `releases/latest` still see every platform:
+3. Confirm all five assets are in `ASSET_DIR` with the exact names in the table. Stop and ask the maintainer if any asset is missing or its app version does not match the table.
+4. Confirm `v0.1.14` is unused, then create **one stable compatibility release** (not another platform-only release), so legacy apps using GitHub's `releases/latest` still see every platform:
 
    ```bash
    gh auth status
@@ -66,12 +66,13 @@ Build outputs are local/ignored files, not Git source. A Linux agent on another 
      "$ASSET_DIR/app-release.apk" \
      --title "Waifu Gallery 0.1.14 Compatibility Release" \
      --notes "Compatibility release: Windows 0.1.14, Linux 0.1.13, Android 0.1.12." \
+     --latest \
      --repo calestinfisalia/WaifuGallery
    ```
 
-   Do not mark the release as a draft or prerelease.
+   Do not mark the release as a draft or prerelease. The explicit `--latest` makes this complete release the legacy update channel.
 5. Verify the exact tag with `gh release view v0.1.14 --repo calestinfisalia/WaifuGallery --json tagName,isDraft,isPrerelease,assets`. Confirm all five filenames are present and GitHub reports a SHA-256 digest for `WaifuGallery-Setup-x64.exe` and `app-release.apk`. Confirm `v0.1.14` is the latest release.
-6. Only after verification, change `updates.json` to Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`, setting all three `release_tag` values to `v0.1.14`. Commit and push that feed update. Never advertise an artifact before its release exists.
+6. Only after verification, change all three `updates.json` entries to Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.12`, setting every `release_tag` to `v0.1.14`. Commit and push that feed update. Never advertise an artifact before its release exists.
 7. Verify the public `updates.json` and release once more. Keep the compatibility release as `releases/latest` while supporting old clients.
 
 ## Version files
@@ -117,7 +118,7 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions inside it may differ by platform. Point all three manifest entries at their latest app versions but at this compatibility release tag. The latest published compatibility release is `v0.1.13`, with Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`; all three feed entries reference it. See the current handoff above before preparing the next release.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions inside it may differ by platform. Point all three manifest entries at their latest app versions but at this compatibility release tag. The latest complete compatibility release is `v0.1.13`, with Windows `0.1.13`, Linux `0.1.12`, and Android `0.1.11`. Until `v0.1.14` is complete, newer Windows and Android clients use their platform-specific releases while Linux continues to use `v0.1.13`. See the current handoff above before preparing the next release.
 
 If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 
