@@ -8,7 +8,7 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 - [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.14).
 - [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.13), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.12).
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.14).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
 
