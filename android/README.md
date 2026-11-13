@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.14` with `versionCode` `12`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.15` with `versionCode` `13`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -32,6 +32,11 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+
+## Android 0.1.15
+
+- **License:** new Android builds from this source are distributed under GNU GPL version 3 or later; the full license text is included in the APK.
+- Android source version: `0.1.15`; `versionCode`: `13`.
 
 ## Android 0.1.14
 
@@ -112,4 +117,4 @@ The release APK is written to `app\build\outputs\apk\release\app-release.apk`.
 
 ## License and attribution
 
-The Waifu Gallery Android application source is licensed under the MIT License; see [LICENSE](LICENSE). NyarchLinux/WaifuDownloader is acknowledged as inspiration for the general random-image feature, not as the source of this Kotlin/Compose implementation. Third-party libraries and Material icons retain their own licenses; consult their respective project notices.
+Starting with this source revision, original Waifu Gallery Android application code is copyright (C) 2026 Fisalia Cantarella and licensed under the GNU GPL version 3 or later; see [LICENSE](LICENSE). Android versions published before this license change remain under their included MIT license. NyarchLinux/WaifuDownloader is acknowledged as inspiration for the general random-image feature, not as the source of this Kotlin/Compose implementation. Third-party libraries and Material icons retain their own licenses; consult their respective project notices.

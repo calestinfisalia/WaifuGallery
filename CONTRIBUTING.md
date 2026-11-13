@@ -56,4 +56,6 @@ let Gradle sync. To build a debug APK from PowerShell, run
   request or issue.
 
 By submitting a contribution, you agree that it may be distributed under the
-project's [MIT License](LICENSE).
+project's [GNU GPL version 3 or later](LICENSE). You retain copyright in your
+contribution; do not submit code or other material that you do not have the
+right to license under these terms.

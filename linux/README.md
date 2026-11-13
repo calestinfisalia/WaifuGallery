@@ -148,4 +148,4 @@ distribution and test the resulting artifacts on the target distributions.
 
 ## License and credits
 
-Waifu Gallery application source is licensed under the repository [MIT License](../LICENSE). Toolbar SVGs retain their Lucide/Feather notices in `waifu_gallery/assets/LUCIDE-LICENSE.txt`. Artwork and provider images retain their creators' rights.
+Starting with this source revision, original Waifu Gallery application code is licensed under the repository [GNU GPL version 3 or later](../LICENSE). Versions published before this license change remain under their included MIT license. Toolbar SVGs retain their Lucide/Feather notices in `waifu_gallery/assets/LUCIDE-LICENSE.txt`. Artwork and provider images retain their creators' rights.

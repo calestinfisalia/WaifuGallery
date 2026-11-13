@@ -2529,7 +2529,8 @@ private fun SettingsScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                                 Text(
-                                    "Source code: MIT License.\n" +
+                                    "Source code: GNU GPL version 3 or later.\n" +
+                                        "Copyright (C) 2026 Fisalia Cantarella. No warranty; see LICENSE.txt.\n" +
                                         "Bundled icons and artwork retain their own licenses and creator rights.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

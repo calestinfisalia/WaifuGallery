@@ -119,8 +119,11 @@ APPIMAGE_DIR="$BUILD_ROOT/appimage"
 mkdir -p "$APPIMAGE_DIR/usr/lib/waifu-gallery" \
     "$APPIMAGE_DIR/usr/bin" \
     "$APPIMAGE_DIR/usr/share/applications" \
+    "$APPIMAGE_DIR/usr/share/licenses/waifu-gallery" \
     "$APPIMAGE_DIR/usr/share/icons/hicolor/256x256/apps"
 cp -a "$APP_BUNDLE/." "$APPIMAGE_DIR/usr/lib/waifu-gallery/"
+install -Dm644 "$SCRIPT_DIR/../LICENSE" \
+    "$APPIMAGE_DIR/usr/share/licenses/waifu-gallery/COPYING"
 install -Dm755 /dev/stdin "$APPIMAGE_DIR/AppRun" <<'APPRUN'
 #!/usr/bin/env sh
 HERE="$(dirname "$(readlink -f "$0")")"
@@ -152,6 +155,7 @@ ARCH="$APPIMAGE_ARCH" appimagetool "$APPIMAGE_DIR" "$APPIMAGE_PATH"
 FLATPAK_SOURCE="$BUILD_ROOT/flatpak-source"
 mkdir -p "$FLATPAK_SOURCE"
 cp -a "$APP_BUNDLE" "$FLATPAK_SOURCE/WaifuGallery"
+install -Dm644 "$SCRIPT_DIR/../LICENSE" "$FLATPAK_SOURCE/COPYING"
 ICON_SIZE="$(magick identify -format '%[fx:max(w,h)]' "$APP_ICON")"
 magick "$APP_ICON" -gravity center -background none \
     -extent "${ICON_SIZE}x${ICON_SIZE}" "$FLATPAK_SOURCE/icon.png"

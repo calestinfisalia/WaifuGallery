@@ -17,6 +17,7 @@ modules:
     build-commands:
       - install -d /app/lib/waifu-gallery
       - cp -a WaifuGallery/. /app/lib/waifu-gallery/
+      - install -Dm644 COPYING /app/share/licenses/waifu-gallery/COPYING
       - install -Dm755 waifu-gallery /app/bin/waifu-gallery
       - install -Dm644 com.fisalia.WaifuGallery.desktop /app/share/applications/com.fisalia.WaifuGallery.desktop
       - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.fisalia.WaifuGallery.png

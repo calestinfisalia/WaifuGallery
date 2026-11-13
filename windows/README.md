@@ -111,12 +111,17 @@ The preview displays a mock 57% progress value; its disabled button cannot start
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
 
+## Windows 0.1.15
+
+- **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
+- Windows source version: 0.1.15.
+
 ## Windows 0.1.14
 
 - **Search and providers:** All-provider search combines results across eligible providers; random browsing selects a fast response and can fall back if preview loading fails.
 - **Favorites and downloads:** improved favorite loading, selection, and download controls.
 - **Media and settings:** refined video controls, provider connection status, and settings navigation.
-- The source version is 0.1.14. Publish a Windows release and update the Windows entry in the repository `updates.json` before distributing this build.
+- The source version was 0.1.14.
 
 ## Windows 0.1.13
 
@@ -250,4 +255,4 @@ Toolbar icons use SVG assets from [Lucide](https://github.com/lucide-icons/lucid
 
 ## License status
 
-The Waifu Gallery application source code is licensed under the MIT License; see the repository [LICENSE](../LICENSE). Bundled Lucide SVGs retain their ISC and Feather-derived MIT notices in `waifu_gallery/assets/LUCIDE-LICENSE.txt`. The application logo and provider images retain their respective creators' rights and are not relicensed by the application license.
+Starting with this source revision, original Waifu Gallery application code is licensed under the GNU GPL version 3 or later; see the repository [LICENSE](../LICENSE). Versions published before this license change remain under their included MIT license. Bundled Lucide SVGs retain their ISC and Feather-derived MIT notices in `waifu_gallery/assets/LUCIDE-LICENSE.txt`. The application logo and provider images retain their respective creators' rights and are not relicensed by the application license.

@@ -6,9 +6,9 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.14).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.15).
 - [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.13), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.14).
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.15).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
 
@@ -19,6 +19,11 @@ Windows, Linux, and Android versions advance independently. Clients read their o
 Platform release tags use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`. Android also increments `versionCode` for every APK. When migrating existing installations from the old shared `releases/latest` checker, publish one compatibility release containing all three platform packages before switching to platform-only releases; old clients cannot read the manifest.
 
 See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, manifest-update, migration, and validation procedure.
+
+## Version 0.1.15
+
+- **License:** new Windows and Android builds from this source are licensed under GNU GPL version 3 or later. Linux packages are not rebuilt in this release; the previously published Linux 0.1.12 packages retain their original MIT license.
+- See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
 
 ## Version 0.1.12
 
@@ -58,11 +63,11 @@ When reporting a regression, include the OS, whether the media is an image or vi
 
 ## License and credits
 
-The Waifu Gallery application source code is licensed under the MIT License; see [LICENSE](LICENSE). Android also includes a copy at [android/LICENSE](android/LICENSE).
+Starting with this source revision, original Waifu Gallery application code is licensed under **GNU GPL version 3 or later**; see [LICENSE](LICENSE). Original desktop application code is copyright (C) 2026 Calestin Fisalia; original Android application code is copyright (C) 2026 Fisalia Cantarella. Android includes the same license at [android/LICENSE](android/LICENSE). Versions published before this license change remain available under the license included with those versions (MIT).
 
 The general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). Waifu Gallery is an independent implementation and does not include its GTK source or artwork.
 
-Bundled toolbar SVGs in the Windows app are from [Lucide](https://github.com/lucide-icons/lucide); their ISC and Feather-derived MIT notices are in [LUCIDE-LICENSE.txt](windows/waifu_gallery/assets/LUCIDE-LICENSE.txt). The `waifugallery.png` artwork and images fetched from providers are not relicensed by the application MIT license; their rights remain with their respective creators.
+Bundled toolbar SVGs in the Windows app are from [Lucide](https://github.com/lucide-icons/lucide); their ISC and Feather-derived MIT notices are in [LUCIDE-LICENSE.txt](windows/waifu_gallery/assets/LUCIDE-LICENSE.txt). The `waifugallery.png` artwork and images fetched from providers are not relicensed by the application license; their rights remain with their respective creators.
 
 Third-party libraries retain their own licenses. Review their respective license notices when redistributing builds.
 

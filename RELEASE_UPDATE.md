@@ -13,7 +13,7 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.14`, Linux `0.1.13`, and Android `0.1.14`; the feed points to Windows `0.1.14`, Linux `0.1.12`, and Android `0.1.14`, all via compatibility release `v0.1.14`.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.15`, Linux `0.1.13`, and Android `0.1.15`; until the next release is published, the feed remains at Windows `0.1.14`, Linux `0.1.12`, and Android `0.1.14`, all via compatibility release `v0.1.14`.
 
 ## Current compatibility release: `v0.1.14`
 
@@ -31,19 +31,41 @@ The `v0.1.14` compatibility release contains:
 
 The Windows and Android assets were built from current source; the Linux assets are reused from the previous complete compatibility release. All are available under the `v0.1.14` tag. The Android platform-only release `android-v0.1.12` remains available, but the update manifest points to the compatibility APK.
 
-### Next Linux update
+### Next compatibility release: `v0.1.15`
 
-Linux `0.1.13` is still pending. On a **native x86_64 Linux host** (not Windows or WSL), inspect `git status`, preserve local work, sync the release-preparation commit, then from `linux` run:
+Windows `0.1.15` and Android `0.1.15` (`versionCode` `13`) are the next release targets and use GNU GPL version 3 or later. Linux is intentionally not rebuilt in this release: reuse the already-published Linux `0.1.12` AppImage and Flatpak from `v0.1.14`. Those Linux binaries remain under their original MIT license. The separate Linux `0.1.13` source build is still pending for the maintainer to build and release later.
 
-   ```bash
-   python3 -m unittest discover -s tests -v
-   python3 -m compileall -q waifu_gallery
-   bash ./release.sh
+1. Build and test Windows and Android from the `0.1.15` source. The Windows build must include the GPL license in the Setup wizard and as a sidecar for the portable EXE; the Android APK includes `assets/LICENSE.txt`.
+2. Stage these five assets outside Git:
+
+   | Platform | Version in this compatibility release | Assets |
+   | --- | --- | --- |
+   | Windows | `0.1.15` | `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe` |
+   | Linux (reused; not rebuilt) | `0.1.12` | `Waifu-Gallery-0.1.12-x86_64.AppImage`, `Waifu-Gallery-0.1.12-x86_64.flatpak` |
+   | Android | `0.1.15` (`versionCode` `13`) | `app-release.apk` |
+
+3. Generate `SHA256SUMS-0.1.15.txt` for the staged files, verify the Windows and Android app versions and all file hashes, then create the stable compatibility release:
+
+   ```powershell
+   gh release create v0.1.15 `
+     "$ASSET_DIR\WaifuGallery-Setup-x64.exe" `
+     "$ASSET_DIR\WaifuGallery-Portable-x64.exe" `
+     "$ASSET_DIR\Waifu-Gallery-0.1.12-x86_64.AppImage" `
+     "$ASSET_DIR\Waifu-Gallery-0.1.12-x86_64.flatpak" `
+     "$ASSET_DIR\app-release.apk" `
+     "$ASSET_DIR\SHA256SUMS-0.1.15.txt" `
+     --title "Waifu Gallery 0.1.15 Compatibility Release" `
+     --notes "Windows 0.1.15 and Android 0.1.15 switch to GPL-3.0-or-later. Linux 0.1.12 packages are reused unchanged under their original MIT license; Linux 0.1.13 is pending." `
+     --latest `
+     --repo calestinfisalia/WaifuGallery
    ```
 
-The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. Confirm the generated files are `Waifu-Gallery-0.1.13-x86_64.AppImage` and `Waifu-Gallery-0.1.13-x86_64.flatpak`. Do not replace the packages inside the published `v0.1.14` release.
+4. Verify all six assets and their GitHub SHA-256 digests, and confirm `v0.1.15` is GitHub's **Latest**. The APK `versionName` must match tag `0.1.15` so legacy Android clients stop offering the same update repeatedly.
+5. Only after the release exists and is verified, update `updates.json`: Windows `0.1.15` and Android `0.1.15` point to `v0.1.15`; Linux remains version `0.1.12` but points to `v0.1.15`. Commit and push the feed update. Never advertise artifacts before publication.
 
-After Linux `0.1.13` passes validation, publish a platform release `linux-v0.1.13` with `--latest=false` and update only the Linux feed entry. When a new compatibility release is needed, include assets for every platform and keep the Android APK's `versionName` equal to the numeric compatibility tag (increment `versionCode`) while legacy clients remain in use. Legacy Linux clients also compare the global compatibility tag numerically, so include a Linux package whose app version matches that tag to prevent repeated notices.
+### Later Linux `0.1.13` release
+
+The maintainer can build Linux on a **native x86_64 Linux host** (not Windows or WSL). Run `python3 -m unittest discover -s tests -v`, `python3 -m compileall -q waifu_gallery`, and `bash ./release.sh` from `linux`. The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. It outputs versioned packages under `~/releases/waifu-gallery/` by default. Publish `linux-v0.1.13` with `--latest=false`, then update only the Linux feed entry after verifying its assets and digests. The compatibility release remains the complete legacy channel; include a newly built Linux package in a future compatibility release before making that newer tag Latest.
 
 ## Version files
 

@@ -3,6 +3,7 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $releaseDir = Join-Path $projectRoot "dist-release"
 $assetDir = Join-Path $projectRoot "waifu_gallery\assets"
+$licenseFile = Join-Path $projectRoot "..\LICENSE"
 $appVersionFile = Join-Path $projectRoot "waifu_gallery\__init__.py"
 
 if (-not (Test-Path -LiteralPath $python)) {
@@ -33,6 +34,7 @@ Write-Host "Building the single-file portable executable..."
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $portableOutput)) {
     throw "Could not build the portable executable."
 }
+Copy-Item -LiteralPath $licenseFile -Destination (Join-Path $releaseDir "LICENSE-GPL-3.0.txt") -Force
 
 $innoSetupCompiler = Join-Path ([Environment]::GetFolderPath("ProgramFiles")) "Inno Setup 7\ISCC.exe"
 if (-not (Test-Path -LiteralPath $innoSetupCompiler)) {

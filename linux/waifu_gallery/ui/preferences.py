@@ -1497,12 +1497,13 @@ class PreferencesDialog(FramelessResizableDialog):
         separator.setStyleSheet("color: #303449;")
         panel_layout.addWidget(separator)
         license_note = QLabel(
-            "Source code: MIT License.\n"
+            "Source code: GNU GPL version 3 or later.\n"
+            "Copyright (C) 2026 Calestin Fisalia. No warranty; see COPYING.\n"
             "Bundled icons and artwork retain their own licenses and creator rights."
         )
         license_note.setWordWrap(True)
         license_note.setMaximumWidth(340)
-        license_note.setMinimumHeight(64)
+        license_note.setMinimumHeight(80)
         license_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         license_note.setStyleSheet("color: #a9b1d6;")
         layout.addWidget(license_note, 0, Qt.AlignmentFlag.AlignHCenter)

@@ -1,6 +1,6 @@
 #define AppName "Waifu Gallery"
 #ifndef AppVersion
-  #define AppVersion "0.1.14"
+  #define AppVersion "0.1.15"
 #endif
 #ifndef WindowsDistDir
   #define WindowsDistDir "dist\Waifu Gallery"
@@ -20,6 +20,7 @@ DisableProgramGroupPage=yes
 UsePreviousAppDir=yes
 UninstallDisplayIcon={app}\Waifu Gallery.exe
 SetupIconFile=waifu_gallery\assets\waifugallery.ico
+LicenseFile=..\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=WaifuGallery-Setup-x64
 ArchitecturesAllowed=x64
@@ -38,6 +39,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{#WindowsDistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\Waifu Gallery.exe"
