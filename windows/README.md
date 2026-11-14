@@ -116,7 +116,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **Preview quality:** prefer medium provider samples for sharper initial image display.
 - **About:** reposition the mascot slightly toward the center and add a clickable project repository link.
 - Windows source version: 0.1.16.
-- Windows Setup and portable release builds are being prepared; see the repository [release guide](../RELEASE_UPDATE.md).
+- Windows Setup and portable release builds are published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16).
 
 ## Windows 0.1.15
 

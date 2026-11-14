@@ -13,11 +13,11 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows `0.1.16`, Linux `0.1.16`, and Android `0.1.16`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`. Per the maintainer's plan, skip the Linux `0.1.15` package and add Linux `0.1.16` manually later.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows, Linux, and Android `0.1.16`; the feed is Windows `0.1.16`, Linux `0.1.12`, and Android `0.1.16`. Skip the Linux `0.1.15` package and add Linux `0.1.16` to release `v0.1.16` manually later.
 
-## Current compatibility release: `v0.1.15`
+## Previous compatibility release: `v0.1.15`
 
-Compatibility release `v0.1.15` is published and is GitHub's **Latest**. It contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. The new Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license. Linux source is prepared at `0.1.15` under GPL, but that package version is intentionally skipped; do not add Linux `0.1.15` assets to this release.
+Compatibility release `v0.1.15` contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. It is superseded by `v0.1.16`. The Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license.
 
 The Android version intentionally matches the compatibility tag. Legacy Android clients query `/releases/latest`, parse the release tag as the app version, and install `app-release.apk`. Android `0.1.15`/code `13` provides the GPL-licensed update and prevents the old updater from offering the same update again.
 
@@ -31,13 +31,37 @@ The `v0.1.15` compatibility release contains:
 
 `SHA256SUMS-0.1.15.txt` contains hashes for the six existing payload assets. The Windows and Android assets were built from GPL-licensed source; Linux assets were reused unchanged from `v0.1.14`.
 
-### Coordinated release: `v0.1.16`
+## Current compatibility release: `v0.1.16`
 
-Skip Linux package version `0.1.15`. Source declarations are now `0.1.16` for all three platforms. Build Windows and Android first; the maintainer will add the Linux `0.1.16` packages manually later.
+Release `v0.1.16` is published with Windows and Android assets. It is the current compatibility release. The Linux `0.1.15` package is skipped; Linux `0.1.16` assets will be added manually later.
 
-Android `versionCode` is `14`. Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials. Do not build Linux on Windows or WSL. Before its package is added, validate Linux window behavior under Wayland and X11 and verify Qt Multimedia codecs in the intended runtime on a native x86_64 Linux host.
+Android `versionCode` is `14`. Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials. The feed now points Windows and Android to `v0.1.16`; Linux remains at `0.1.12` / `v0.1.15` until its package is added.
 
-The `v0.1.16` compatibility release may initially contain the Windows installer and portable EXE plus Android `app-release.apk`; add the Linux `0.1.16` AppImage and Flatpak to that same release later. During that interval, legacy Linux clients will not have a Linux package in the latest release. Keep the current `updates.json` entries until the Windows and Android assets are published, then update only those two entries to version `0.1.16` and release tag `v0.1.16`. Keep Linux at `0.1.12` until its assets are attached, then update only the Linux entry. Verify asset names and SHA-256 digests before each manifest update. Keep the existing `v0.1.15` release and assets unchanged.
+The release currently contains `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `LICENSE-GPL-3.0.txt`, and Android `app-release.apk`. Legacy Linux clients do not yet have a Linux package in the latest release. Do not change the Linux manifest entry until its matching assets are attached.
+
+### Add Linux `0.1.16` assets later
+
+Build on a **native x86_64 Linux host** after validating window behavior under Wayland and X11 and multimedia codec availability in the intended runtime. From `linux`, run tests and build into a staging directory:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q waifu_gallery
+bash -n ./release.sh
+ASSET_DIR="$HOME/releases/waifu-gallery/linux-v0.1.16"
+mkdir -p "$ASSET_DIR"
+RELEASE_OUTPUT_DIR="$ASSET_DIR" bash ./release.sh
+```
+
+Confirm the outputs are `Waifu-Gallery-0.1.16-x86_64.AppImage` and `Waifu-Gallery-0.1.16-x86_64.flatpak`, and that each includes the GNU GPL license. Upload both to the existing compatibility release without replacing its Windows or Android assets:
+
+```bash
+gh release upload v0.1.16 \
+  "$ASSET_DIR/Waifu-Gallery-0.1.16-x86_64.AppImage" \
+  "$ASSET_DIR/Waifu-Gallery-0.1.16-x86_64.flatpak" \
+  --repo calestinfisalia/WaifuGallery
+```
+
+Verify the uploaded asset names and SHA-256 digests, then update only Linux in `updates.json` to version `0.1.16` and release tag `v0.1.16`. Commit/push the manifest and verify the public feed.
 
 ## Version files
 

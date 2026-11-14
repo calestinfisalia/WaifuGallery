@@ -40,6 +40,7 @@ The version 2 format is interoperable with Windows and Linux, records included s
 - **Search:** support pull-to-refresh while retaining existing results during refresh.
 - **About:** add a clickable project repository link.
 - Android source version: `0.1.16`; `versionCode`: `14`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/v0.1.16/app-release.apk).
 
 ## Android 0.1.15
 
