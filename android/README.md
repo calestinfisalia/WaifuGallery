@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.15` with `versionCode` `13`. Android's version advances independently from Windows and Linux; continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.15` with `versionCode` `13`. Android's version can advance independently from Windows and Linux; the next planned coordinated release is `0.1.16` for all three platforms. Keep the current version until that release is prepared, and continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -24,14 +24,14 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Save to `Pictures/Waifu Gallery` by default, or choose a persistent Android folder.
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
-Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Safety & Privacy, Backup & Restore, Updates, and About. **Settings → Providers** opens a submenu with separate pages for the default provider, provider accounts, and connection status, following the Safety & Privacy navigation pattern. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers → Provider accounts**. Credentials are stored on the device and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
+Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Safety & Privacy, Backup & Restore, Updates, and About. **Settings → Providers** opens a submenu with separate pages for the default provider, provider accounts, and connection status, following the Safety & Privacy navigation pattern. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers → Provider accounts**. Credentials are stored in app-private SharedPreferences, are not separately encrypted by Waifu Gallery, and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
 The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL.
 
 ## Encrypted user data backup
 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
-The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Credentials in SharedPreferences remain stored according to the existing local storage behavior; only the exported backup is encrypted.
+The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
 
 ## Android 0.1.15
 
@@ -91,8 +91,6 @@ The version 2 format is interoperable with Windows and Linux, records included s
 - **Favorites:** video thumbnails have a visible play badge, and image/video totals are shown separately so video posts are easier to distinguish.
 - Release artifact: `app-release.apk`.
 
-Every APK update must use the same signing certificate as the installed app. This project currently uses the local Android debug key for release builds; preserve that key and build releases on the same machine, or configure a persistent release key before switching build machines.
-
 ## Android 0.1.7
 
 - Added encrypted cross-platform export and import for favorites, provider credentials, and portable preferences.
@@ -107,6 +105,10 @@ Open this folder in Android Studio and let Gradle sync. Use an Android 10 (API 2
 ```
 
 The APK is written to `app\build\outputs\apk\debug\app-debug.apk`. This project does not include machine-specific `local.properties`; configure the Android SDK through `ANDROID_HOME` or create a local file on your own machine.
+
+### Current APK signing
+
+For now, the release build intentionally uses Gradle's local debug signing configuration; a dedicated release keystore has not been configured. Keep using the same local debug key for APK updates, because Android will not install an update signed with a different certificate. Do not commit the keystore or its credentials. Migrating to a securely stored release key is deferred.
 
 To build the release APK used for distribution:
 

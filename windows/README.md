@@ -29,7 +29,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Safety & Privacy settings with an optional guardian PIN, maximum rating, and optional allowed-tag policy. A separate optional Favorites PIN protects opening the Favorites view.
 
 The application only filters results using metadata provided by each image service. Always follow each provider's usage rules.
-Parental controls and the Favorites lock are currently implemented only in the Windows app. They are in-app restrictions, not tamper-proof OS controls; someone with access to the same Windows account can alter local application data. Tag and rating rules depend on provider metadata and are not a guarantee that every post is correctly labeled, and these controls cannot protect media already downloaded outside the app.
+Parental controls and the Favorites lock are in-app restrictions, not tamper-proof OS controls; someone with access to the same Windows account can alter local application data. Tag and rating rules depend on provider metadata and are not a guarantee that every post is correctly labeled, and these controls cannot protect media already downloaded outside the app.
 
 ## Safety & Privacy
 
@@ -116,6 +116,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
 - **Favorites:** downloading selected favorites asks for confirmation before queuing.
 - Windows source version: 0.1.15.
+- The next planned coordinated release is version 0.1.16 for Windows, Linux, and Android; no version files have been bumped for it yet.
 
 ## Windows 0.1.14
 

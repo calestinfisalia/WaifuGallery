@@ -821,6 +821,7 @@ class MainWindow(QMainWindow):
                         for item in value.get("video_variants", [])
                         if isinstance(item, (list, tuple)) and len(item) == 3
                     ),
+                    sample_url=str(value.get("sample_url", "")),
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
@@ -842,6 +843,7 @@ class MainWindow(QMainWindow):
             "width": post.width,
             "height": post.height,
             "video_variants": [list(item) for item in post.video_variants],
+            "sample_url": post.sample_url,
         } for post in posts])
 
     @staticmethod

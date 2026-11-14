@@ -209,6 +209,7 @@ object UserDataBackupCodec {
         put("media_type", post.mediaType)
         put("width", post.width)
         put("height", post.height)
+        put("sample_url", post.sampleUrl)
         put("video_variants", JSONArray().apply {
             post.videoVariants.forEach { variant ->
                 put(JSONArray().put(variant.url).put(variant.width).put(variant.height))
@@ -296,6 +297,7 @@ object UserDataBackupCodec {
                 title = item.optionalString("title", ""),
                 width = item.optionalInt("width", 0),
                 height = item.optionalInt("height", 0),
+                sampleUrl = item.optionalString("sample_url", ""),
                 videoVariants = variants,
             )
         }

@@ -698,6 +698,7 @@ class BooruApi(
             .distinct()
             .ifEmpty { listOf(image) }
         val thumbnail = thumbnails.first()
+        val sample = firstNonEmpty(post, "sample_url", "jpeg_url").orEmpty()
         val id = "${provider.name.lowercase()}_${post.optString("id").ifBlank { post.optString("md5", image) }}"
         val dedupeKey = post.optString("md5").takeIf { it.isNotBlank() } ?: image
         val allTags = listOf("tag_string", "tag_string_general", "tag_string_character", "tag_string_copyright", "tag_string_artist", "tags")
@@ -739,6 +740,7 @@ class BooruApi(
             width = width,
             height = height,
             videoVariants = videoVariants,
+            sampleUrl = sample,
         )
     }
 

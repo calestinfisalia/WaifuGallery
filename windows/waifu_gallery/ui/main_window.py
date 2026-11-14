@@ -843,6 +843,7 @@ class MainWindow(QMainWindow):
                         for item in value.get("video_variants", [])
                         if isinstance(item, (list, tuple)) and len(item) == 3
                     ),
+                    sample_url=str(value.get("sample_url", "")),
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
@@ -864,6 +865,7 @@ class MainWindow(QMainWindow):
             "width": post.width,
             "height": post.height,
             "video_variants": [list(item) for item in post.video_variants],
+            "sample_url": post.sample_url,
         } for post in posts])
 
     @staticmethod
@@ -1843,8 +1845,8 @@ class MainWindow(QMainWindow):
         elif category == "post-detail" and identifier == self.active_detail_id:
             self._finish_loading()
             self.detail_media_stack.setCurrentWidget(self.detail_video if self.detail_post and self.detail_post.media_type == "video" else self.detail_scroll)
-            self.detail_image.set_image(QPixmap())
-            self.detail_image.set_placeholder(f"Could not load image\n{error}")
+            if self.detail_image.original.isNull():
+                self.detail_image.set_placeholder(f"Could not load image\n{error}")
             self.statusBar().showMessage(f"Could not load image: {error}")
         elif category == "post-detail-video" and identifier == self.active_detail_id:
             self._finish_loading()
@@ -2570,7 +2572,11 @@ class MainWindow(QMainWindow):
         else:
             self._full_image_loaded = False
             self.detail_media_stack.setCurrentWidget(self.detail_scroll)
-            self.detail_image.set_loading()
+            cached_preview = self.thumbnail_cache.get(post.post_id)
+            if cached_preview is not None:
+                self.detail_image.set_image(cached_preview)
+            else:
+                self.detail_image.set_loading()
             self._begin_loading()
             self._submit(
                 f"post-detail:{self.active_detail_id}", self._fetch_decoded_preview, post,

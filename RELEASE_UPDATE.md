@@ -1,6 +1,6 @@
 # Platform Release and Update Guide
 
-This guide is the release runbook for AI agents and maintainers. Windows, Linux, and Android have independent app versions. Do not use the GitHub repository's global `releases/latest` endpoint for new update checks.
+This guide is the release runbook for AI agents and maintainers. Windows, Linux, and Android can have independent app versions, but the next planned release is coordinated at `0.1.16` for all three platforms. Do not use the GitHub repository's global `releases/latest` endpoint for new update checks.
 
 ## Source of truth
 
@@ -13,11 +13,11 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.15`, Linux `0.1.15`, and Android `0.1.15`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`, until Linux 0.1.15 packages are built and uploaded.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows `0.1.15`, Linux `0.1.15`, and Android `0.1.15`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`. Per the maintainer's plan, do not publish a Linux `0.1.15` package; keep Linux at `0.1.12` in the feed until the coordinated `0.1.16` release is ready.
 
 ## Current compatibility release: `v0.1.15`
 
-Compatibility release `v0.1.15` is published and is GitHub's **Latest**. It contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. The new Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license. Linux source is now prepared at `0.1.15` under GPL; build and upload its packages to this compatibility release as described below.
+Compatibility release `v0.1.15` is published and is GitHub's **Latest**. It contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. The new Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license. Linux source is prepared at `0.1.15` under GPL, but that package version is intentionally skipped; do not add Linux `0.1.15` assets to this release.
 
 The Android version intentionally matches the compatibility tag. Legacy Android clients query `/releases/latest`, parse the release tag as the app version, and install `app-release.apk`. Android `0.1.15`/code `13` provides the GPL-licensed update and prevents the old updater from offering the same update again.
 
@@ -31,43 +31,13 @@ The `v0.1.15` compatibility release contains:
 
 `SHA256SUMS-0.1.15.txt` contains hashes for the six existing payload assets. The Windows and Android assets were built from GPL-licensed source; Linux assets were reused unchanged from `v0.1.14`.
 
-### Build and add Linux `0.1.15`
+### Planned coordinated release: `v0.1.16`
 
-Linux source is ready at `0.1.15`. Build on a **native x86_64 Linux host** (not Windows or WSL). From `linux`, validate and build into a staging directory:
+Skip Linux package version `0.1.15`. After Linux runtime validation, prepare version `0.1.16` for Windows, Linux, and Android and publish all three packages together under the compatibility tag `v0.1.16`. Keep the current source versions and `updates.json` unchanged until release preparation begins.
 
-```bash
-python3 -m unittest discover -s tests -v
-python3 -m compileall -q waifu_gallery
-bash -n ./release.sh
-export ASSET_DIR="$HOME/releases/waifu-gallery/linux-v0.1.15"
-mkdir -p "$ASSET_DIR"
-RELEASE_OUTPUT_DIR="$ASSET_DIR" bash ./release.sh
-```
+Before packaging, validate Linux window behavior under Wayland and X11 and verify Qt Multimedia codecs in the intended runtime on a native x86_64 Linux host. Run each platform's tests and build its version `0.1.16` artifacts. Set Android `versionName` to `0.1.16` and increment `versionCode` above `13` (use `14` if there has been no intervening APK release). Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials.
 
-The script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. Confirm the outputs are `Waifu-Gallery-0.1.15-x86_64.AppImage` and `Waifu-Gallery-0.1.15-x86_64.flatpak`. The AppImage bundles the license at `usr/share/licenses/waifu-gallery/COPYING`; Flatpak installs it at `/app/share/licenses/waifu-gallery/COPYING`. Confirm Linux About reports GPL-3.0-or-later. Do not rebuild or replace Windows/Android assets.
-
-The compatibility tag `v0.1.15` is already published and must stay **Latest**. Generate a separate checksum file for the new Linux assets and upload all three to that release (do not create a new tag or a second compatibility release):
-
-```bash
-cd "$ASSET_DIR"
-sha256sum \
-  Waifu-Gallery-0.1.15-x86_64.AppImage \
-  Waifu-Gallery-0.1.15-x86_64.flatpak \
-  > SHA256SUMS-Linux-0.1.15.txt
-gh release upload v0.1.15 \
-  "$ASSET_DIR/Waifu-Gallery-0.1.15-x86_64.AppImage" \
-  "$ASSET_DIR/Waifu-Gallery-0.1.15-x86_64.flatpak" \
-  "$ASSET_DIR/SHA256SUMS-Linux-0.1.15.txt" \
-  --repo calestinfisalia/WaifuGallery
-```
-
-After uploading the new packages, update the release notes:
-
-```bash
-gh release edit v0.1.15 --notes "Windows and Android 0.1.15 use GPL-3.0-or-later. Linux 0.1.15 AppImage and Flatpak are now available under GPL-3.0-or-later. The older Linux 0.1.12 packages remain MIT-licensed." --repo calestinfisalia/WaifuGallery
-```
-
-Verify the new assets and GitHub SHA-256 digests with `gh release view v0.1.15 --repo calestinfisalia/WaifuGallery --json tagName,isDraft,isPrerelease,assets`. Then update only the Linux entry in `updates.json` to version `0.1.15`, release tag `v0.1.15`, commit/push the manifest, and verify the public feed. Leave Windows/Android at `0.1.15` and keep `v0.1.15` as the legacy `releases/latest` channel.
+Publish a compatibility release containing the Windows installer and portable EXE, Linux `0.1.16` AppImage and Flatpak, and Android `app-release.apk`. Ensure the release notes and license files match the built assets. Verify all asset names and SHA-256 digests before changing `updates.json`. Then set all three platform entries to version `0.1.16` and release tag `v0.1.16`, commit/push the manifest, and verify the public feed. Keep the existing `v0.1.15` release and assets unchanged.
 
 ## Version files
 
@@ -77,9 +47,11 @@ Update all version declarations for the target platform:
 - **Linux:** `linux/waifu_gallery/__init__.py` and `linux/pyproject.toml`. `linux/release.sh` uses the project version to name both packages.
 - **Android:** `android/app/build.gradle.kts` (`versionName` and a strictly increasing `versionCode`).
 
-Do not bump versions for unaffected platforms. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`. For Android compatibility releases specifically, older clients compare the global compatibility tag directly with `versionName`, so make those two numeric versions match.
+Do not bump versions for unaffected platforms, except for the planned coordinated `0.1.16` release, which intentionally updates all three. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`. For Android compatibility releases specifically, older clients compare the global compatibility tag directly with `versionName`, so make those two numeric versions match.
 
 ## Release a platform update
+
+The next release should follow the coordinated `v0.1.16` plan above. The platform-only procedure below applies to future updates where only one platform changes.
 
 1. Confirm which platform changed and choose its next version only. Check that the release tag is unused:
    - `windows-vX.Y.Z`
@@ -112,7 +84,7 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.15`, with Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`. See the current handoff above before preparing the next release.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.15`, with Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`. The next planned compatibility release is `v0.1.16` with all three platform packages.
 
 If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 

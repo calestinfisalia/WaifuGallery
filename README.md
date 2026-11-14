@@ -7,14 +7,14 @@ Waifu Gallery is an independent media browsing application with separate Windows
 ## Projects
 
 - [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.15).
-- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.15), sharing provider, media, and backup features; platform runtime and packaging still need Linux verification.
+- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.15). The published update-manifest version remains 0.1.12; skip a Linux 0.1.15 package and target the next coordinated 0.1.16 release after Linux validation.
 - [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.15).
 
-The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows and Android include PIN-protected Favorites and parental content controls. Feature availability and platform requirements are documented in each project README.
+The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows, Linux, and Android include PIN-protected Favorites and parental content controls. These are in-app restrictions, not OS-level supervision; rating and tag filters rely on provider metadata. See each project README for platform-specific behavior and requirements.
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions advance independently. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform; update only the affected platform after its GitHub release has been published.
+Windows, Linux, and Android versions can advance independently. The next planned release is coordinated at 0.1.16 for all three platforms; the Linux 0.1.15 package is intentionally skipped. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform and update them only after the corresponding release assets exist.
 
 Platform release tags use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`. Android also increments `versionCode` for every APK. When migrating existing installations from the old shared `releases/latest` checker, publish one compatibility release containing all three platform packages before switching to platform-only releases; old clients cannot read the manifest.
 
@@ -22,7 +22,7 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 
 ## Version 0.1.15
 
-- **License:** new Windows, Linux, and Android source builds use GNU GPL version 3 or later. Linux 0.1.12 binaries already published under this release retain their original MIT license; build Linux 0.1.15 separately.
+- **License:** new Windows, Linux, and Android source builds use GNU GPL version 3 or later. Linux 0.1.12 binaries already published under this release retain their original MIT license. The Linux 0.1.15 package is skipped; the next planned package is part of the coordinated 0.1.16 release after runtime validation.
 - **Favorites:** bulk downloads ask for confirmation before queuing selected media on Windows, Linux, and Android.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
 
@@ -36,7 +36,7 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 ## Version 0.1.11
 
 - **Fixes:** improved the desktop video player, fixed desktop and Android Settings UI issues, and corrected the ambient-mode toggle.
-- **New features:** added Safety & Privacy on Windows and Android, including parental content controls and a Favorites lock; added more Windows themes; and enabled selecting backup sections.
+- **New features:** added Safety & Privacy on Windows, Linux, and Android, including parental content controls and a Favorites lock; added more Windows themes; and enabled selecting backup sections.
 - **Downloads:** history retains saved file paths across restarts.
 - See the platform READMEs for release-specific details and Linux verification status.
 
@@ -46,7 +46,7 @@ Windows, Linux, and Android provide **Settings → Backup & Restore**. Android S
 
 The shared version 2 format records which sections are included and uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; there is no recovery option. Import validates and decrypts the entire file before writing anything, and leaves unselected sections unchanged. Unsupported desktop themes are reported during confirmation and left unchanged; Android does not apply themes. **Merge** adds missing favorites and keeps credentials already configured on the device; **Replace** replaces included favorites and provider credentials. Included portable settings are imported with either option. The local download location is retained.
 
-This encrypts the exported file only. Provider credentials remain stored using each platform's existing local settings storage, so protect access to your device as usual.
+This encrypts the exported file only. Provider credentials remain in each platform's local settings storage (QSettings on desktop and app-private SharedPreferences on Android); Waifu Gallery does not separately encrypt those local values. Protect access to your device and user account.
 Windows and Linux use app-styled dialogs and an in-app file browser for backup passphrases and file selection; Android uses its system document picker.
 
 ## Desktop UI behavior and bug reports

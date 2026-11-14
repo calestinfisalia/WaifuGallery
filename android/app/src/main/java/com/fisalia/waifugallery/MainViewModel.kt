@@ -407,7 +407,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        if (_state.value.screen == AppScreen.GALLERY) loadGallery()
+        if (_state.value.screen == AppScreen.GALLERY) loadGallery(preserveResults = true)
         else refreshRandom()
     }
 
@@ -501,13 +501,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadGallery()
     }
 
-    private fun loadGallery() {
+    private fun loadGallery(preserveResults: Boolean = false) {
         val snapshot = _state.value
         if (snapshot.galleryQuery.isBlank()) return
         _state.update {
             it.copy(
                 screen = AppScreen.GALLERY,
-                gallery = emptyList(),
+                gallery = if (preserveResults) it.gallery else emptyList(),
                 galleryProviderErrors = emptyList(),
                 totalResults = null,
                 isLoading = true,

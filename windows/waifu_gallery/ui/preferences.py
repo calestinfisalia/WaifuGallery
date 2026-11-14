@@ -147,7 +147,7 @@ class _AboutMascotOverlay(QWidget):
         if self._pixmap.isNull():
             return
         painter = QPainter(self)
-        painter.drawPixmap(self.width() - 190, 26, self._pixmap)
+        painter.drawPixmap(self.width() - 230, 26, self._pixmap)
 
 
 def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) -> dict[str, object]:
@@ -1654,6 +1654,12 @@ class PreferencesDialog(FramelessResizableDialog):
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #a9b1d6;")
         app_layout.addWidget(subtitle, 0, Qt.AlignmentFlag.AlignHCenter)
+        repository_link = QLabel(
+            '<a href="https://github.com/calestinfisalia/WaifuGallery">GitHub repository</a>'
+        )
+        repository_link.setOpenExternalLinks(True)
+        repository_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_layout.addWidget(repository_link)
         content_layout.addWidget(app_info, 0, Qt.AlignmentFlag.AlignHCenter)
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)

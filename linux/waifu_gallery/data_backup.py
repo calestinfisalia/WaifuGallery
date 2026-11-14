@@ -120,6 +120,7 @@ def normalize_payload(payload: object) -> dict:
             "width": dimensions[0],
             "height": dimensions[1],
             "video_variants": normalized_variants,
+            "sample_url": _optional_string(favorite.get("sample_url", ""), "favorite.sample_url"),
             "thumbnail_url": _optional_string(favorite.get("thumbnail_url", ""), "favorite.thumbnail_url"),
             "extension": _optional_string(favorite.get("extension", ""), "favorite.extension"),
             "dedupe_key": _optional_string(favorite.get("dedupe_key", ""), "favorite.dedupe_key"),

@@ -17,6 +17,7 @@ class ImagePost:
     width: int = 0
     height: int = 0
     video_variants: tuple[tuple[str, int, int], ...] = ()
+    sample_url: str = ""
 
 
 @dataclass(frozen=True, slots=True)

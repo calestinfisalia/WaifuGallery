@@ -503,10 +503,17 @@ class BooruCatalog:
         The original URL remains on ImagePost and is used by downloads and the
         explicit full-resolution action.
         """
-        # Provider metadata orders these as preview -> sample -> original.
-        # Keep the original for the explicit full-resolution action whenever
-        # a smaller preview variant is available, but prefer the sharper sample.
-        candidates = [url for url in reversed(post.preview_urls) if url != post.image_url]
+        if post.media_type == "video":
+            candidates = [url for url in reversed(post.preview_urls) if url != post.image_url]
+        else:
+            sample_url = post.sample_url or next(
+                (url for url in post.preview_urls[1:] if url != post.image_url),
+                "",
+            )
+            candidates = [sample_url] if sample_url and sample_url != post.image_url else []
+            candidates.extend(
+                url for url in post.preview_urls if url != post.image_url and url != sample_url
+            )
         if not candidates:
             candidates.append(post.image_url)
         failures = []
@@ -998,7 +1005,7 @@ class BooruCatalog:
         video_variants = list(dict.fromkeys(video_variants))
         return ImagePost(post_id, provider, image_url, previews,
                          rating, tags, artists, str(raw.get("source") or ""), str(raw.get("md5") or ""),
-                         title, media_type, width, height, tuple(video_variants))
+                         title, media_type, width, height, tuple(video_variants), sample_url)
 
     @staticmethod
     def _first(data: dict, *fields: str) -> str:

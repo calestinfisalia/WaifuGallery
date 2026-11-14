@@ -239,7 +239,7 @@ class ProviderMediaTests(unittest.TestCase):
         self.assertEqual(result.provider, "Danbooru")
         self.assertNotIn("yande.re", requested_providers)
 
-    def test_random_danbooru_prefers_large_variant_over_small_sample(self):
+    def test_random_danbooru_prefers_sample_for_sharper_first_render(self):
         post = BooruCatalog._normalize(
             {
                 "id": 123,
@@ -266,7 +266,34 @@ class ProviderMediaTests(unittest.TestCase):
         self.assertEqual(content, b"image")
         self.assertEqual(
             fetched_urls[0],
-            "https://danbooru.donmai.us/data/sample/large.jpg",
+            "https://danbooru.donmai.us/data/sample/small.jpg",
+        )
+
+    def test_video_preview_keeps_lightweight_candidate_first(self):
+        post = BooruCatalog._normalize(
+            {
+                "id": 123,
+                "file_url": "https://danbooru.donmai.us/data/video.webm",
+                "file_ext": "webm",
+                "sample_url": "https://danbooru.donmai.us/data/sample.jpg",
+                "preview_file_url": "https://danbooru.donmai.us/180x180/preview.jpg",
+                "rating": "e",
+            },
+            "Danbooru",
+        )
+        self.assertIsNotNone(post)
+        catalog = BooruCatalog()
+        fetched_urls = []
+        with patch.object(
+            catalog,
+            "fetch_image",
+            side_effect=lambda url, _progress=None, **_kwargs: fetched_urls.append(url) or b"image",
+        ):
+            catalog.fetch_post_preview(post)
+
+        self.assertEqual(
+            fetched_urls[0],
+            "https://danbooru.donmai.us/180x180/preview.jpg",
         )
 
     def test_preview_tries_next_url_after_network_error(self):
@@ -297,6 +324,8 @@ class ProviderMediaTests(unittest.TestCase):
 
         self.assertEqual(content, b"preview")
         self.assertEqual(len(requested), 2)
+        self.assertEqual(requested[0][0], "https://slow-preview.example/small.jpg")
+        self.assertEqual(requested[1][0], "https://backup-preview.example/preview.jpg")
         self.assertEqual(requested[0][1]["timeout"], (3, 8))
         self.assertEqual(get_session.call_args_list, [call(retry=False)] * 2)
 

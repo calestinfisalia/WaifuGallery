@@ -17,9 +17,20 @@ data class ImagePost(
     val width: Int = 0,
     val height: Int = 0,
     val videoVariants: List<VideoVariant> = emptyList(),
+    val sampleUrl: String = "",
 )
 
 data class VideoVariant(val url: String, val width: Int, val height: Int)
+
+fun ImagePost.mediumPreviewCandidates(): List<String> {
+    val mediumUrl = sampleUrl.takeIf(String::isNotBlank)
+        ?: thumbnailCandidates.firstOrNull {
+            it.isNotBlank() && it != thumbnailUrl && it != imageUrl
+        }.orEmpty()
+    return (listOf(mediumUrl) + thumbnailCandidates)
+        .filter { it.isNotBlank() && it != imageUrl }
+        .distinct()
+}
 
 fun originalImageUrl(imageUrl: String, thumbnailCandidates: List<String>): String =
     if (imageUrl in thumbnailCandidates) {

@@ -241,6 +241,8 @@ class ProviderMediaTests(unittest.TestCase):
 
         self.assertEqual(content, b"preview")
         self.assertEqual(len(requested), 2)
+        self.assertEqual(requested[0][0], "https://slow-preview.example/small.jpg")
+        self.assertEqual(requested[1][0], "https://backup-preview.example/preview.jpg")
         self.assertEqual(requested[0][1]["timeout"], (3, 8))
         self.assertEqual(get_session.call_args_list, [call(retry=False)] * 2)
 

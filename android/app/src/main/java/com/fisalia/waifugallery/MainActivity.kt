@@ -112,6 +112,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -169,6 +170,7 @@ import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.ImagePost
+import com.fisalia.waifugallery.data.mediumPreviewCandidates
 import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.UserDataBackup
 import com.fisalia.waifugallery.data.UserDataBackupCodec
@@ -790,6 +792,7 @@ private fun RandomScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun GalleryScreen(
     state: UiState,
     imageLoader: ImageLoader,
@@ -804,56 +807,62 @@ private fun GalleryScreen(
     }
     Column(modifier.fillMaxSize().padding(horizontal = 10.dp)) {
         Text("${state.galleryProvider}  |  ${state.rating.label}", Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (state.gallery.isNotEmpty()) {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = 145.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(state.gallery, key = { it.id }) { post ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().aspectRatio(0.95f).clickable { model.openDetail(post) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Panel),
-                        ) {
-                            Box(Modifier.fillMaxSize()) {
-                                ImageFrame(
-                                    post.thumbnailUrl,
-                                    post,
-                                    imageLoader,
-                                    Modifier.fillMaxSize(),
-                                    allowThumbnailFallback = true,
-                                )
-                                if (post.mediaType == "video") {
-                                    VideoPlayBadge(Modifier.align(Alignment.Center))
+        PullToRefreshBox(
+            isRefreshing = state.isLoading && state.gallery.isNotEmpty(),
+            onRefresh = model::refresh,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                if (state.gallery.isNotEmpty()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 145.dp),
+                        contentPadding = PaddingValues(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(state.gallery, key = { it.id }) { post ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth().aspectRatio(0.95f).clickable { model.openDetail(post) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Panel),
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    ImageFrame(
+                                        post.thumbnailUrl,
+                                        post,
+                                        imageLoader,
+                                        Modifier.fillMaxSize(),
+                                        allowThumbnailFallback = true,
+                                    )
+                                    if (post.mediaType == "video") {
+                                        VideoPlayBadge(Modifier.align(Alignment.Center))
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            if (state.isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                LoadingSpinner()
-            }
-            if (!state.isLoading && state.gallery.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (state.galleryProviderErrors.isEmpty()) {
-                    Text("No images found")
-                } else {
-                    Column(
-                        Modifier.padding(horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text("No results from available providers")
-                        Text(
-                            state.galleryProviderErrors.joinToString("\n"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = model::refresh) { Text("Try again") }
+                if (state.isLoading && state.gallery.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    LoadingSpinner()
+                }
+                if (!state.isLoading && state.gallery.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (state.galleryProviderErrors.isEmpty()) {
+                        Text("No images found")
+                    } else {
+                        Column(
+                            Modifier.padding(horizontal = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text("No results from available providers")
+                            Text(
+                                state.galleryProviderErrors.joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = model::refresh) { Text("Try again") }
+                        }
                     }
                 }
             }
@@ -1402,9 +1411,12 @@ private fun ImageFrame(
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
     var showOriginal by remember(post.id) { mutableStateOf(false) }
     val candidates = when {
-        allowThumbnailFallback -> post.thumbnailCandidates
+        allowThumbnailFallback ->
+            (listOf(post.thumbnailUrl) + post.thumbnailCandidates)
+                .filter { it.isNotBlank() && it != post.imageUrl }
+                .distinct()
         post.mediaType != "video" && zoomEnabled && !showOriginal ->
-            post.thumbnailCandidates.filterNot { it == post.imageUrl }
+            post.mediumPreviewCandidates()
         else -> emptyList()
     }.ifEmpty { listOf(if (showOriginal) post.imageUrl else url) }
     val displayedUrl = candidates[candidateIndex.coerceAtMost(candidates.lastIndex)]
@@ -2040,21 +2052,21 @@ private fun SettingsScreen(
                         else Modifier.verticalScroll(rememberScrollState()),
                     )
                     .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (selectedPage.isEmpty()) {
-                    SettingsCategoryRow("Browsing", "Custom random search terms", Icons.Default.Search) {
+                    SettingsCategoryRow("Browsing", "Custom random search terms", Icons.Default.Search, Color(0xFF9FC4FF)) {
                         navigateToPage("browsing")
                     }
-                    SettingsCategoryRow("Providers", "Choose a source, manage accounts, and test connections", Icons.Default.Cloud) { navigateToPage("providers") }
-                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Wifi) { navigateToPage("network") }
-                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.FilterList) { navigateToPage("filters") }
-                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen) { navigateToPage("display") }
-                    SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download) { navigateToPage("downloads") }
-                    SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Security) { navigateToPage("safety") }
-                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Backup) { navigateToPage("backup") }
-                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.SystemUpdateAlt) { navigateToPage("updates") }
-                    SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info) { navigateToPage("about") }
+                    SettingsCategoryRow("Providers", "Choose a source, manage accounts, and test connections", Icons.Default.Cloud, Color(0xFF90CAF9)) { navigateToPage("providers") }
+                    SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Wifi, Color(0xFF80DEEA)) { navigateToPage("network") }
+                    SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.FilterList, Color(0xFFFFCC80)) { navigateToPage("filters") }
+                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen, Color(0xFFFFAB91)) { navigateToPage("display") }
+                    SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download, Color(0xFFB39DDB)) { navigateToPage("downloads") }
+                    SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Security, Color(0xFFF48FB1)) { navigateToPage("safety") }
+                    SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Backup, Color(0xFF80CBC4)) { navigateToPage("backup") }
+                    SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.SystemUpdateAlt, Color(0xFFA5D6A7)) { navigateToPage("updates") }
+                    SettingsCategoryRow("About", "App version, creator, and licenses", Icons.Default.Info, Color(0xFFB0BEC5)) { navigateToPage("about") }
                 } else {
                     when (selectedPage) {
                         "safety" -> {
@@ -2235,100 +2247,114 @@ private fun SettingsScreen(
                             }
                         }
                         "network" -> {
-                            SettingSwitch(
-                                "Use DNS over HTTPS",
-                                state.useDoh,
-                                "Resolve provider and image hosts through the selected DNS resolver",
-                                model::setUseDoh,
-                            )
-                            Box {
-                                SettingsValueRow(
-                                    "DNS provider",
-                                    state.dohProvider,
-                                    enabled = state.useDoh,
-                                ) { dohMenu = true }
-                                DropdownMenu(expanded = dohMenu, onDismissRequest = { dohMenu = false }) {
-                                    listOf("Cloudflare", "Cloudflare Security", "Cloudflare Family", "Google Public DNS", "AdGuard DNS", "Custom").forEach { name ->
-                                        DropdownMenuItem(
-                                            text = { Text(name) },
-                                            onClick = { model.setDohProvider(name); dohMenu = false },
-                                        )
+                            SettingsPreferenceGroup {
+                                SettingSwitch(
+                                    "Use DNS over HTTPS",
+                                    state.useDoh,
+                                    "Resolve provider and image hosts through the selected DNS resolver",
+                                    grouped = true,
+                                ) { model.setUseDoh(it) }
+                                SettingsPreferenceDivider()
+                                Box {
+                                    SettingsValueRow(
+                                        "DNS provider",
+                                        state.dohProvider,
+                                        enabled = state.useDoh,
+                                        grouped = true,
+                                    ) { dohMenu = true }
+                                    DropdownMenu(expanded = dohMenu, onDismissRequest = { dohMenu = false }) {
+                                        listOf("Cloudflare", "Cloudflare Security", "Cloudflare Family", "Google Public DNS", "AdGuard DNS", "Custom").forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name) },
+                                                onClick = { model.setDohProvider(name); dohMenu = false },
+                                            )
+                                        }
                                     }
                                 }
-                            }
-                            if (state.dohProvider == "Custom") {
-                                OutlinedTextField(
-                                    value = state.customDohEndpoint,
-                                    onValueChange = model::setCustomDohEndpoint,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    label = { Text("DNS-over-HTTPS URL") },
-                                    placeholder = { Text("https://resolver.example/dns-query") },
-                                    enabled = state.useDoh,
-                                )
+                                if (state.dohProvider == "Custom") {
+                                    SettingsPreferenceDivider()
+                                    OutlinedTextField(
+                                        value = state.customDohEndpoint,
+                                        onValueChange = model::setCustomDohEndpoint,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                        singleLine = true,
+                                        label = { Text("DNS-over-HTTPS URL") },
+                                        placeholder = { Text("https://resolver.example/dns-query") },
+                                        enabled = state.useDoh,
+                                    )
+                                }
                             }
                         }
                         "filters" -> {
-                            Box {
-                                SettingsValueRow(
-                                    "Media type",
-                                    when (state.mediaFilter) {
-                                        "image" -> "Images only"
-                                        "video" -> "Videos only"
-                                        else -> "Images and videos"
-                                    },
-                                ) { mediaMenu = true }
-                                DropdownMenu(expanded = mediaMenu, onDismissRequest = { mediaMenu = false }) {
-                                    listOf(
-                                        "image" to "Images only",
-                                        "video" to "Videos only",
-                                        "all" to "Images and videos",
-                                    ).forEach { (value, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label) },
-                                            onClick = { model.setMediaFilter(value); mediaMenu = false },
-                                        )
+                            SettingsPreferenceGroup {
+                                Box {
+                                    SettingsValueRow(
+                                        "Media type",
+                                        when (state.mediaFilter) {
+                                            "image" -> "Images only"
+                                            "video" -> "Videos only"
+                                            else -> "Images and videos"
+                                        },
+                                        grouped = true,
+                                    ) { mediaMenu = true }
+                                    DropdownMenu(expanded = mediaMenu, onDismissRequest = { mediaMenu = false }) {
+                                        listOf(
+                                            "image" to "Images only",
+                                            "video" to "Videos only",
+                                            "all" to "Images and videos",
+                                        ).forEach { (value, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label) },
+                                                onClick = { model.setMediaFilter(value); mediaMenu = false },
+                                            )
+                                        }
+                                    }
+                                }
+                                SettingsPreferenceDivider()
+                                Box {
+                                    SettingsValueRow("Default rating", state.rating.label, grouped = true) { ratingMenu = true }
+                                    DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
+                                        RatingFilter.entries.forEach { option ->
+                                            DropdownMenuItem(
+                                                text = { Text(option.label) },
+                                                trailingIcon = {
+                                                    if (state.rating == option) Icon(Icons.Default.Check, contentDescription = "Selected")
+                                                },
+                                                onClick = {
+                                                    model.setRatingPreference(option)
+                                                    ratingMenu = false
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
-                            Box {
-                                SettingsValueRow("Default rating", state.rating.label) { ratingMenu = true }
-                                DropdownMenu(expanded = ratingMenu, onDismissRequest = { ratingMenu = false }) {
-                                    RatingFilter.entries.forEach { option ->
-                                        DropdownMenuItem(
-                                            text = { Text(option.label) },
-                                            trailingIcon = {
-                                                if (state.rating == option) Icon(Icons.Default.Check, contentDescription = "Selected")
-                                            },
-                                            onClick = {
-                                                model.setRatingPreference(option)
-                                                ratingMenu = false
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                            SettingSwitch(
-                                "Filter gore",
-                                state.filterGore,
-                                "Hide posts tagged with gore-related terms",
-                                model::setFilterGore,
-                            )
-                            SettingSwitch(
-                                "Exclude male-only posts",
-                                state.excludeMale,
-                                "Hide posts tagged as male-only",
-                                model::setExcludeMale,
-                            )
                             val blockedTags = state.customBlockTags
                                 .replace(",", " ")
                                 .split(Regex("\\s+"))
                                 .filter(String::isNotBlank)
                                 .distinctBy(String::lowercase)
-                            SettingsValueRow(
-                                "Custom blocked tags",
-                                "${blockedTags.size} tags",
-                            ) { showBlockedTagsDialog = true }
+                            SettingsPreferenceGroup {
+                                SettingSwitch(
+                                    "Filter gore",
+                                    state.filterGore,
+                                    "Hide posts tagged with gore-related terms",
+                                    grouped = true,
+                                ) { model.setFilterGore(it) }
+                                SettingsPreferenceDivider()
+                                SettingSwitch(
+                                    "Exclude male-only posts",
+                                    state.excludeMale,
+                                    "Hide posts tagged as male-only",
+                                    grouped = true,
+                                ) { model.setExcludeMale(it) }
+                                SettingsPreferenceDivider()
+                                SettingsValueRow(
+                                    "Custom blocked tags",
+                                    "${blockedTags.size} tags",
+                                    grouped = true,
+                                ) { showBlockedTagsDialog = true }
+                            }
                             if (showBlockedTagsDialog) {
                                 AlertDialog(
                                     onDismissRequest = { showBlockedTagsDialog = false },
@@ -2415,32 +2441,36 @@ private fun SettingsScreen(
                             }
                         }
                         "display" -> {
-                            SettingSwitch(
-                                "Ambient background",
-                                state.ambientMode,
-                                "Use a blurred version of the current media behind it",
-                                model::setAmbientMode,
-                            )
-                            Box {
-                                SettingsValueRow(
-                                    "Video resolution",
-                                    if (state.videoMaxHeight == 0) "Auto" else "Up to ${state.videoMaxHeight}p",
-                                ) { videoResolutionMenu = true }
-                                DropdownMenu(
-                                    expanded = videoResolutionMenu,
-                                    onDismissRequest = { videoResolutionMenu = false },
-                                ) {
-                                    listOf(
-                                        0 to "Auto",
-                                        2160 to "Up to 2160p",
-                                        1080 to "Up to 1080p",
-                                        720 to "Up to 720p",
-                                        480 to "Up to 480p",
-                                    ).forEach { (height, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label) },
-                                            onClick = { model.setVideoMaxHeight(height); videoResolutionMenu = false },
-                                        )
+                            SettingsPreferenceGroup {
+                                SettingSwitch(
+                                    "Ambient background",
+                                    state.ambientMode,
+                                    "Use a blurred version of the current media behind it",
+                                    grouped = true,
+                                ) { model.setAmbientMode(it) }
+                                SettingsPreferenceDivider()
+                                Box {
+                                    SettingsValueRow(
+                                        "Video resolution",
+                                        if (state.videoMaxHeight == 0) "Auto" else "Up to ${state.videoMaxHeight}p",
+                                        grouped = true,
+                                    ) { videoResolutionMenu = true }
+                                    DropdownMenu(
+                                        expanded = videoResolutionMenu,
+                                        onDismissRequest = { videoResolutionMenu = false },
+                                    ) {
+                                        listOf(
+                                            0 to "Auto",
+                                            2160 to "Up to 2160p",
+                                            1080 to "Up to 1080p",
+                                            720 to "Up to 720p",
+                                            480 to "Up to 480p",
+                                        ).forEach { (height, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label) },
+                                                onClick = { model.setVideoMaxHeight(height); videoResolutionMenu = false },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2911,26 +2941,67 @@ private fun SettingsCategoryRow(
     title: String,
     description: String,
     icon: ImageVector,
+    iconTint: Color = Accent,
     onClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         color = Panel,
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = RoundedCornerShape(50),
+                color = iconTint,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = AppBackground, modifier = Modifier.size(20.dp))
+                }
             }
-            Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.NavigateNext,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
+}
+
+@Composable
+private fun SettingsPreferenceGroup(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Panel,
+    ) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun SettingsPreferenceDivider() {
+    Box(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)),
+    )
 }
 
 @Composable
@@ -2938,15 +3009,16 @@ private fun SettingsValueRow(
     title: String,
     summary: String,
     enabled: Boolean = true,
+    grouped: Boolean = false,
     onClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        color = Panel,
+        shape = if (grouped) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp),
+        color = if (grouped) Color.Transparent else Panel,
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -2979,7 +3051,7 @@ private fun SettingsSectionCard(
     ) {
         Column(
             Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
@@ -3469,82 +3541,91 @@ private fun DownloadQueueScreen(
             } else {
                 Column(
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
-                        .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    downloads.forEach { item ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = item.status == DownloadStatus.SAVED) {
-                                onOpen(item.id)
-                            },
-                            colors = CardDefaults.cardColors(containerColor = Panel),
-                        ) {
-                            Column(
-                                Modifier.fillMaxWidth().padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        "waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}",
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        color = Panel,
+                    ) {
+                        Column {
+                            downloads.forEachIndexed { index, item ->
+                                if (index > 0) {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                                            .height(1.dp).background(Color.White.copy(alpha = 0.08f)),
                                     )
-                                    if (
-                                        item.status == DownloadStatus.DOWNLOADING &&
-                                        item.progress != 1f
-                                    ) {
-                                        IconButton(
-                                            onClick = { onCancel(item.id) },
-                                            modifier = Modifier.size(32.dp),
+                                }
+                                val statusText = when (item.status) {
+                                    DownloadStatus.QUEUED -> "Queued"
+                                    DownloadStatus.DOWNLOADING ->
+                                        if (item.progress != null) "Downloading ${(item.progress * 100).toInt()}%" else "Downloading"
+                                    DownloadStatus.SAVED ->
+                                        item.savedLocation?.takeIf(String::isNotBlank)?.let { "Completed · Saved to $it" }
+                                            ?: "Completed"
+                                    DownloadStatus.FAILED -> "Failed: ${item.error ?: "Unknown error"}"
+                                    DownloadStatus.CANCELLED -> "Cancelled"
+                                }
+                                Column(
+                                    Modifier.fillMaxWidth()
+                                        .clickable(enabled = item.status == DownloadStatus.SAVED) { onOpen(item.id) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "waifu_${item.post.id.substringAfter('_')}.${item.post.extension.ifBlank { "jpg" }}",
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (
+                                            item.status == DownloadStatus.DOWNLOADING &&
+                                            item.progress != 1f
                                         ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Cancel download",
-                                                modifier = Modifier.size(18.dp),
-                                            )
+                                            IconButton(
+                                                onClick = { onCancel(item.id) },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Cancel download",
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
                                         }
                                     }
-                                }
-                                Text(
-                                    "${item.post.provider} - ${item.post.artists.joinToString().ifBlank { "Artist info unavailable" }}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                )
-                                if (item.status == DownloadStatus.SAVED && !item.savedLocation.isNullOrBlank()) {
                                     Text(
-                                        "Saved to ${item.savedLocation}",
+                                        "${item.post.provider} - ${item.post.artists.joinToString().ifBlank { "Artist info unavailable" }}",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        when (item.status) {
-                                            DownloadStatus.QUEUED -> "Queued"
-                                            DownloadStatus.DOWNLOADING ->
-                                                if (item.progress != null) "Downloading ${(item.progress * 100).toInt()}%" else "Downloading"
-                                            DownloadStatus.SAVED -> "Completed"
-                                            DownloadStatus.FAILED -> "Failed: ${item.error ?: "Unknown error"}"
-                                            DownloadStatus.CANCELLED -> "Cancelled"
-                                        },
-                                        Modifier.weight(1f),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                    if (item.status == DownloadStatus.FAILED) {
-                                        TextButton(onClick = { onRetry(item.id) }) { Text("Retry") }
-                                    }
-                                }
-                                if (item.status == DownloadStatus.DOWNLOADING) {
-                                    if (item.progress == null) {
-                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Accent)
-                                    } else {
-                                        LinearProgressIndicator(
-                                            progress = { item.progress },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = Accent,
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            statusText,
+                                            Modifier.weight(1f),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
+                                        if (item.status == DownloadStatus.FAILED) {
+                                            TextButton(onClick = { onRetry(item.id) }) { Text("Retry") }
+                                        }
+                                    }
+                                    if (item.status == DownloadStatus.DOWNLOADING) {
+                                        if (item.progress == null) {
+                                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Accent)
+                                        } else {
+                                            LinearProgressIndicator(
+                                                progress = { item.progress },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                color = Accent,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -3557,14 +3638,20 @@ private fun DownloadQueueScreen(
 }
 
 @Composable
-private fun SettingSwitch(title: String, checked: Boolean, description: String, onChecked: (Boolean) -> Unit) {
+private fun SettingSwitch(
+    title: String,
+    checked: Boolean,
+    description: String,
+    grouped: Boolean = false,
+    onChecked: (Boolean) -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable { onChecked(!checked) },
-        shape = RoundedCornerShape(18.dp),
-        color = Panel,
+        shape = if (grouped) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp),
+        color = if (grouped) Color.Transparent else Panel,
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {

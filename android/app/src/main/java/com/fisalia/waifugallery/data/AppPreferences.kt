@@ -260,6 +260,7 @@ class AppPreferences(context: Context) {
                     title = item.optString("title", ""),
                     width = item.optInt("width", 0),
                     height = item.optInt("height", 0),
+                    sampleUrl = item.optString("sampleUrl", ""),
                     videoVariants = item.optJSONArray("videoVariants")?.let { variants ->
                         (0 until variants.length()).mapNotNull { variantIndex ->
                             val variant = variants.optJSONObject(variantIndex) ?: return@mapNotNull null
@@ -371,6 +372,7 @@ class AppPreferences(context: Context) {
                 put("title", post.title)
                 put("width", post.width)
                 put("height", post.height)
+                put("sampleUrl", post.sampleUrl)
                 put("videoVariants", JSONArray().apply {
                     post.videoVariants.forEach { variant ->
                         put(JSONObject().apply {
