@@ -6,7 +6,7 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.16).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.17).
 - [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.16). Its published update-manifest version remains 0.1.12 until the Linux 0.1.16 package is added manually.
 - [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.16; `versionCode` 14).
 
@@ -14,15 +14,16 @@ The desktop and Android applications provide random browsing, tag search, provid
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. The `v0.1.16` release is published with Windows and Android assets; the Linux `0.1.16` package will be added manually later. The Linux 0.1.15 package is intentionally skipped. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform and update them only after the corresponding release assets exist.
+Windows, Linux, and Android versions can advance independently. Windows `0.1.17` is published separately in [`windows-v0.1.17`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.17); Linux and Android remain on the existing `0.1.16` release plan. The Linux 0.1.15 package is intentionally skipped, and Linux 0.1.16 will be added manually later. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
 
 Independent platform releases use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`; compatibility releases for legacy clients may use a shared `vX.Y.Z` tag. Android also increments `versionCode` for every APK. Old clients cannot read the platform update manifest.
 
 See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, manifest-update, migration, and validation procedure.
 
-## Version 0.1.16
+## Windows 0.1.17
 
-- **Windows and Android:** version 0.1.16 is published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16).
+- **Windows:** fix the Download action not returning after leaving Search; version 0.1.17 is published in [`windows-v0.1.17`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.17).
+- **Android:** version 0.1.16 is published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16).
 - **Linux:** the 0.1.15 package is skipped; add the Linux 0.1.16 package manually after runtime validation. Until then, published Linux 0.1.12 binaries remain under their original MIT license.
 - Android `versionCode` is `14`; release signing continues to use the local debug key for now.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.

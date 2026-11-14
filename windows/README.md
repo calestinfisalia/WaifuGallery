@@ -119,6 +119,12 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Windows source version: 0.1.16.
 - Windows Setup and portable release builds are published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16).
 
+## Windows 0.1.17
+
+- **Random browsing:** restore the Download action after leaving Search mode.
+- Windows source version: 0.1.17.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.17`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.17).
+
 ## Windows 0.1.15
 
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
