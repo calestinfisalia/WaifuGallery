@@ -2572,11 +2572,7 @@ class MainWindow(QMainWindow):
         else:
             self._full_image_loaded = False
             self.detail_media_stack.setCurrentWidget(self.detail_scroll)
-            cached_preview = self.thumbnail_cache.get(post.post_id)
-            if cached_preview is not None:
-                self.detail_image.set_image(cached_preview)
-            else:
-                self.detail_image.set_loading()
+            self.detail_image.set_loading()
             self._begin_loading()
             self._submit(
                 f"post-detail:{self.active_detail_id}", self._fetch_decoded_preview, post,

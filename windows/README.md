@@ -114,6 +114,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 ## Windows 0.1.16
 
 - **Preview quality:** prefer medium provider samples for sharper initial image display.
+- **Image loading:** the detail view stays blank with its loading indicator until the new preview is ready, instead of briefly showing a cached gallery thumbnail.
 - **About:** reposition the mascot slightly toward the center and add a clickable project repository link.
 - Windows source version: 0.1.16.
 - Windows Setup and portable release builds are published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16).
@@ -224,8 +225,11 @@ On Windows, the app records its own top-level window and small centered Qt widge
 Install Python 3.10 or newer, then run:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\run.ps1
 ```
+
+The process-scoped policy change applies only to the current PowerShell session and is discarded when that session closes. It does not change the machine or user execution policy.
 
 The first run creates `.venv`; each run installs or updates dependencies from `requirements.txt` before starting, so new project dependencies are picked up by existing environments.
 
