@@ -1,6 +1,6 @@
 # Platform Release and Update Guide
 
-This guide is the release runbook for AI agents and maintainers. Windows, Linux, and Android can have independent app versions, but the next planned release is coordinated at `0.1.16` for all three platforms. Do not use the GitHub repository's global `releases/latest` endpoint for new update checks.
+This guide is the release runbook for AI agents and maintainers. Windows, Linux, and Android can have independent app versions. Windows `0.1.17` is published in `windows-v0.1.17`; Android remains at `0.1.16`, and Linux remains at `0.1.12` until its package is added manually. New update checks must use the exact platform release tag from `updates.json`, not the global `releases/latest` endpoint.
 
 ## Source of truth
 
@@ -13,7 +13,7 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows, Linux, and Android `0.1.16`; the feed is Windows `0.1.16`, Linux `0.1.12`, and Android `0.1.16`. Skip the Linux `0.1.15` package and add Linux `0.1.16` to release `v0.1.16` manually later.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows `0.1.17`, Linux `0.1.16`, and Android `0.1.16`; the feed is Windows `0.1.17` (`windows-v0.1.17`), Linux `0.1.12` (`v0.1.15`), and Android `0.1.16` (`v0.1.16`). Skip the Linux `0.1.15` package and add Linux `0.1.16` to release `v0.1.16` manually later.
 
 ## Previous compatibility release: `v0.1.15`
 
@@ -33,11 +33,11 @@ The `v0.1.15` compatibility release contains:
 
 ## Current compatibility release: `v0.1.16`
 
-Release `v0.1.16` is published with Windows and Android assets. It is the current compatibility release. The Linux `0.1.15` package is skipped; Linux `0.1.16` assets will be added manually later.
+Release `v0.1.16` is the compatibility release for legacy clients and contains Windows `0.1.16`, Android `0.1.16`, and will receive Linux assets manually later. Windows `0.1.17` is a separate platform-only update in `windows-v0.1.17`. The Linux `0.1.15` package is skipped.
 
-Android `versionCode` is `14`. Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials. The feed now points Windows and Android to `v0.1.16`; Linux remains at `0.1.12` / `v0.1.15` until its package is added.
+Android `versionCode` is `14`. Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials. The feed points Windows to `windows-v0.1.17`, Android to `v0.1.16`, and Linux to `0.1.12` / `v0.1.15` until its package is added.
 
-The release currently contains `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `LICENSE-GPL-3.0.txt`, and Android `app-release.apk`. Legacy Linux clients do not yet have a Linux package in the latest release. Do not change the Linux manifest entry until its matching assets are attached.
+The `v0.1.16` release contains the `0.1.16` Windows and Android assets. The Windows `0.1.17` platform release contains `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, and `LICENSE-GPL-3.0.txt`. Legacy Linux clients do not yet have a Linux package in the latest compatibility release. Do not change the Linux manifest entry until matching assets are attached.
 
 ### Add Linux `0.1.16` assets later
 
@@ -75,7 +75,7 @@ Do not bump versions for unaffected platforms, except for the coordinated `0.1.1
 
 ## Release a platform update
 
-The current release work follows the coordinated `v0.1.16` plan above. The platform-only procedure below applies to future updates where only one platform changes.
+The Windows 0.1.17 update follows the platform-only procedure below.
 
 1. Confirm which platform changed and choose its next version only. Check that the release tag is unused:
    - `windows-vX.Y.Z`
@@ -108,7 +108,7 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.15`, with Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`. The `v0.1.16` release will gain Linux assets after the maintainer adds them manually.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The compatibility release is `v0.1.16`, with Windows `0.1.16`, Linux `0.1.12`, and Android `0.1.16`. Windows `0.1.17` is released separately. The `v0.1.16` release will gain Linux assets after the maintainer adds them manually.
 
 If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 
