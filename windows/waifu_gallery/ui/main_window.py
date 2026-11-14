@@ -2054,6 +2054,7 @@ class MainWindow(QMainWindow):
         self.random_media_stack.setCurrentWidget(self.random_scroll)
         self.random_video.clear()
         self.random_image.set_image(pixmap)
+        self.download_button.show()
         self.full_image_button.setToolTip("Load original-resolution image")
         self.full_image_button.setEnabled(True)
         self.full_image_button.show()
@@ -2079,6 +2080,7 @@ class MainWindow(QMainWindow):
         # Keep the random video poster centered in the available viewer area.
         self.random_video.set_poster_alignment(Qt.AlignmentFlag.AlignCenter)
         self.random_video.set_deferred_source(post.image_url)
+        self.download_button.show()
         if not self._fullscreen_active:
             QTimer.singleShot(0, self._ensure_status_bar_visible)
         if post.preview_urls:
