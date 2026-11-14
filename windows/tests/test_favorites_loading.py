@@ -116,7 +116,24 @@ class FavoritesLoadingTests(unittest.TestCase):
             return_value=True,
         ):
             dialog._delete_selected_favorites()
-        dialog._download_selected_favorites()
+        with patch(
+            "waifu_gallery.ui.favorites.BackupMessageDialog.ask",
+            return_value="No",
+        ) as confirm_download:
+            dialog._download_selected_favorites()
+        self.assertEqual(downloaded, [])
+        confirm_download.assert_called_once_with(
+            dialog,
+            "Download selected favorites",
+            "Add all 1 selected media to the download queue?",
+            ("No", "Yes"),
+            default_button="No",
+        )
+        with patch(
+            "waifu_gallery.ui.favorites.BackupMessageDialog.ask",
+            return_value="Yes",
+        ):
+            dialog._download_selected_favorites()
 
         self.assertEqual(deleted, [["provider:0"]])
         self.assertEqual(downloaded, [["provider:0"]])

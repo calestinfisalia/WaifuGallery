@@ -36,6 +36,7 @@ The version 2 format is interoperable with Windows and Linux, records included s
 ## Android 0.1.15
 
 - **License:** new Android builds from this source are distributed under GNU GPL version 3 or later; the full license text is included in the APK.
+- **Favorites:** downloading selected favorites asks for confirmation before queuing.
 - Android source version: `0.1.15`; `versionCode`: `13`.
 
 ## Android 0.1.14

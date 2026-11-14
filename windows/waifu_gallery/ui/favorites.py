@@ -477,7 +477,13 @@ class FavoritesDialog(FramelessResizableDialog):
 
     def _download_selected_favorites(self) -> None:
         selected = self._selected_favorite_keys()
-        if selected:
+        if selected and BackupMessageDialog.ask(
+            self,
+            "Download selected favorites",
+            f"Add all {len(selected)} selected media to the download queue?",
+            ("No", "Yes"),
+            default_button="No",
+        ) == "Yes":
             self.downloadSelectedRequested.emit(selected)
 
     @staticmethod

@@ -480,7 +480,13 @@ class FavoritesDialog(FramelessResizableDialog):
 
     def _download_selected_favorites(self) -> None:
         selected = self._selected_favorite_keys()
-        if selected:
+        if selected and QMessageBox.question(
+            self,
+            "Download selected favorites",
+            f"Add all {len(selected)} selected media to the download queue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes:
             self.downloadSelectedRequested.emit(selected)
 
     @staticmethod

@@ -13,11 +13,11 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.15`, Linux `0.1.13`, and Android `0.1.15`; the feed points to Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current source versions are Windows `0.1.15`, Linux `0.1.15`, and Android `0.1.15`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`, until Linux 0.1.15 packages are built and uploaded.
 
 ## Current compatibility release: `v0.1.15`
 
-Compatibility release `v0.1.15` is published and is GitHub's **Latest**. It contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. The new Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license; Linux `0.1.13` is pending a native Linux build.
+Compatibility release `v0.1.15` is published and is GitHub's **Latest**. It contains Windows `0.1.15`, Android `0.1.15` (`versionCode` `13`), and reused Linux `0.1.12` packages. The new Windows and Android builds use GNU GPL version 3 or later. The Linux packages were not rebuilt and remain under their original MIT license. Linux source is now prepared at `0.1.15` under GPL; build and upload its packages to this compatibility release as described below.
 
 The Android version intentionally matches the compatibility tag. Legacy Android clients query `/releases/latest`, parse the release tag as the app version, and install `app-release.apk`. Android `0.1.15`/code `13` provides the GPL-licensed update and prevents the old updater from offering the same update again.
 
@@ -26,14 +26,48 @@ The `v0.1.15` compatibility release contains:
 | Platform | App version | Required release assets |
 | --- | --- | --- |
 | Windows | `0.1.15` | `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `LICENSE-GPL-3.0.txt` |
-| Linux (reused; MIT) | `0.1.12` | `Waifu-Gallery-0.1.12-x86_64.AppImage`, `Waifu-Gallery-0.1.12-x86_64.flatpak` |
+| Linux (currently published; MIT) | `0.1.12` | `Waifu-Gallery-0.1.12-x86_64.AppImage`, `Waifu-Gallery-0.1.12-x86_64.flatpak` |
 | Android | `0.1.15` (`versionCode` `13`) | `app-release.apk` (contains the GPL license text) |
 
-`SHA256SUMS-0.1.15.txt` contains hashes for the six payload assets. The Windows and Android assets were built from GPL-licensed source; Linux assets were reused unchanged from `v0.1.14`.
+`SHA256SUMS-0.1.15.txt` contains hashes for the six existing payload assets. The Windows and Android assets were built from GPL-licensed source; Linux assets were reused unchanged from `v0.1.14`.
 
-### Later Linux `0.1.13` release
+### Build and add Linux `0.1.15`
 
-Linux `0.1.13` remains for the maintainer to build on a **native x86_64 Linux host** (not Windows or WSL). Run `python3 -m unittest discover -s tests -v`, `python3 -m compileall -q waifu_gallery`, and `bash ./release.sh` from `linux`. The release script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. It outputs versioned packages under `~/releases/waifu-gallery/` by default. Publish `linux-v0.1.13` with `--latest=false`, then update only the Linux feed entry after verifying its assets and digests. The compatibility release remains the legacy channel; include a newly built Linux package in a future compatibility release before making that newer tag Latest.
+Linux source is ready at `0.1.15`. Build on a **native x86_64 Linux host** (not Windows or WSL). From `linux`, validate and build into a staging directory:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q waifu_gallery
+bash -n ./release.sh
+export ASSET_DIR="$HOME/releases/waifu-gallery/linux-v0.1.15"
+mkdir -p "$ASSET_DIR"
+RELEASE_OUTPUT_DIR="$ASSET_DIR" bash ./release.sh
+```
+
+The script requires Python 3.10+, `flatpak`, `flatpak-builder`, `appimagetool`, ImageMagick's `magick`, and the user Flatpak SDK `org.freedesktop.Sdk//24.08`. Confirm the outputs are `Waifu-Gallery-0.1.15-x86_64.AppImage` and `Waifu-Gallery-0.1.15-x86_64.flatpak`. The AppImage bundles the license at `usr/share/licenses/waifu-gallery/COPYING`; Flatpak installs it at `/app/share/licenses/waifu-gallery/COPYING`. Confirm Linux About reports GPL-3.0-or-later. Do not rebuild or replace Windows/Android assets.
+
+The compatibility tag `v0.1.15` is already published and must stay **Latest**. Generate a separate checksum file for the new Linux assets and upload all three to that release (do not create a new tag or a second compatibility release):
+
+```bash
+cd "$ASSET_DIR"
+sha256sum \
+  Waifu-Gallery-0.1.15-x86_64.AppImage \
+  Waifu-Gallery-0.1.15-x86_64.flatpak \
+  > SHA256SUMS-Linux-0.1.15.txt
+gh release upload v0.1.15 \
+  "$ASSET_DIR/Waifu-Gallery-0.1.15-x86_64.AppImage" \
+  "$ASSET_DIR/Waifu-Gallery-0.1.15-x86_64.flatpak" \
+  "$ASSET_DIR/SHA256SUMS-Linux-0.1.15.txt" \
+  --repo calestinfisalia/WaifuGallery
+```
+
+After uploading the new packages, update the release notes:
+
+```bash
+gh release edit v0.1.15 --notes "Windows and Android 0.1.15 use GPL-3.0-or-later. Linux 0.1.15 AppImage and Flatpak are now available under GPL-3.0-or-later. The older Linux 0.1.12 packages remain MIT-licensed." --repo calestinfisalia/WaifuGallery
+```
+
+Verify the new assets and GitHub SHA-256 digests with `gh release view v0.1.15 --repo calestinfisalia/WaifuGallery --json tagName,isDraft,isPrerelease,assets`. Then update only the Linux entry in `updates.json` to version `0.1.15`, release tag `v0.1.15`, commit/push the manifest, and verify the public feed. Leave Windows/Android at `0.1.15` and keep `v0.1.15` as the legacy `releases/latest` channel.
 
 ## Version files
 

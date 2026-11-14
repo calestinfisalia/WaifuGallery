@@ -114,6 +114,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 ## Windows 0.1.15
 
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
+- **Favorites:** downloading selected favorites asks for confirmation before queuing.
 - Windows source version: 0.1.15.
 
 ## Windows 0.1.14

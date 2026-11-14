@@ -1008,6 +1008,7 @@ private fun FavoritesScreen(
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var menuPostId by remember { mutableStateOf<String?>(null) }
     var confirmSelectedRemoval by remember { mutableStateOf(false) }
+    var confirmSelectedDownload by remember { mutableStateOf(false) }
     val selectedPosts = visibleFavorites.filter { it.id in selectedIds }
     val selectionActive = selectedIds.isNotEmpty()
 
@@ -1052,7 +1053,7 @@ private fun FavoritesScreen(
                     IconButton(onClick = { confirmSelectedRemoval = true }) {
                         Icon(Icons.Default.Delete, contentDescription = "Remove selected favorites")
                     }
-                    IconButton(onClick = { model.queueFavoriteDownloads(selectedPosts) }) {
+                    IconButton(onClick = { confirmSelectedDownload = true }) {
                         Icon(Icons.Default.Download, contentDescription = "Download selected images")
                     }
                 }
@@ -1171,6 +1172,22 @@ private fun FavoritesScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmSelectedRemoval = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (confirmSelectedDownload) {
+        AlertDialog(
+            onDismissRequest = { confirmSelectedDownload = false },
+            title = { Text("Download selected favorites?") },
+            text = { Text("Add all ${selectedPosts.size} selected media to the download queue?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.queueFavoriteDownloads(selectedPosts)
+                    confirmSelectedDownload = false
+                }) { Text("Yes") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSelectedDownload = false }) { Text("No") }
             },
         )
     }

@@ -1,6 +1,6 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.13 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.15 while Linux launch and packaging files remain separate.
 
 ## Status
 
@@ -19,7 +19,7 @@ On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
 - Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
-- Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
+- Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Downloading selected favorites asks for Yes/No confirmation before queuing. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
 - Downloads history, including saved file paths, is retained locally across app restarts and can be cleared from the Downloads window.
 - Optional process-local DoH using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom RFC 8484 endpoint.
 - Safety & Privacy settings with an optional guardian PIN, maximum rating and allowed-tag policy, plus a separate PIN lock for Favorites. PINs are salted and hashed locally; failed attempts trigger a cooldown.
@@ -74,10 +74,16 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
+## Linux 0.1.15
+
+- **License:** new Linux builds from this source are licensed under GNU GPL version 3 or later. The AppImage and Flatpak include the full license text.
+- **Favorites:** bulk download now asks for Yes/No confirmation before adding all selected favorites to the queue.
+- Linux source version: 0.1.15. Build and publish the Linux packages for the existing compatibility release `v0.1.15`; see the repository [release guide](../RELEASE_UPDATE.md).
+
 ## Linux 0.1.13
 
 - **Updates:** the app now checks the Linux-specific release entry in the repository update manifest, independent of Windows and Android versions.
-- The source version is 0.1.13. Publish Linux packages and update the Linux entry in the repository `updates.json` before distributing this build.
+- The 0.1.13 source build was superseded before publication; see the current 0.1.15 release above.
 
 ## Linux 0.1.12
 
