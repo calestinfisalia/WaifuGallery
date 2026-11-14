@@ -61,10 +61,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
@@ -72,8 +72,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.NavigateBefore
-import androidx.compose.material.icons.filled.NavigateNext
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -670,8 +668,10 @@ private fun HeaderBar(
     var settingsMenuExpanded by remember { mutableStateOf(false) }
     Surface(color = Panel) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().height(58.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (isDetail) {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back to results") }
+            if (searchVisible) {
+                IconButton(onClick = onSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            } else if (isDetail) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to results") }
             } else {
                 IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Refresh") }
             }
@@ -682,9 +682,8 @@ private fun HeaderBar(
                     onValueChange = onQueryChanged,
                     modifier = Modifier
                         .weight(1f)
-                        .height(42.dp)
-                        .offset(y = 3.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(50.dp))
                         .background(Color(0xFF303038))
                         .padding(horizontal = 10.dp),
                     singleLine = true,
@@ -692,7 +691,7 @@ private fun HeaderBar(
                     decorationBox = { innerTextField ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray)
-                            Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                            Box(Modifier.weight(1f).padding(horizontal = 8.dp).offset(y = 2.dp)) {
                                 if (query.isEmpty()) {
                                     Text("Search name or tags", maxLines = 1, color = Color.LightGray, style = MaterialTheme.typography.bodyMedium)
                                 }
@@ -714,7 +713,6 @@ private fun HeaderBar(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
                 )
-                IconButton(onClick = onSearch) { Icon(Icons.Default.Close, "Close search") }
             } else {
                 if (!isDetail) IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Search") }
                 Spacer(Modifier.weight(1f))
@@ -861,8 +859,8 @@ private fun GalleryScreen(
             }
         }
         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { model.changePage(-1) }, enabled = state.page > 1) {
-                Icon(Icons.Default.NavigateBefore, contentDescription = null); Text("Previous")
+            IconButton(onClick = { model.changePage(-1) }, enabled = state.page > 1) {
+                Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = "Previous page")
             }
             val pageCount = state.totalPages?.toString() ?: if (state.hasMore) "..." else state.page.toString()
             val imageCount = state.gallery.count { it.mediaType != "video" }
@@ -873,8 +871,8 @@ private fun GalleryScreen(
                 else -> "$imageCount images"
             }
             Text("${state.page}/$pageCount  |  $mediaCount", Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelMedium)
-            TextButton(onClick = { model.changePage(1) }, enabled = state.hasMore) {
-                Text("Next"); Icon(Icons.Default.NavigateNext, contentDescription = null)
+            IconButton(onClick = { model.changePage(1) }, enabled = state.hasMore) {
+                Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = "Next page")
             }
         }
     }
@@ -1358,7 +1356,7 @@ private fun DetailScreen(
                         IconButton(
                             onClick = { pagerScope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
                             enabled = pagerState.currentPage > 0,
-                        ) { Icon(Icons.Default.NavigateBefore, contentDescription = "Previous favorite") }
+                        ) { Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = "Previous favorite") }
                     }
                     if (state.detailLoadingNext || state.detailLoadingPrevious) {
                         CircularProgressIndicator(color = Accent, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -1369,7 +1367,7 @@ private fun DetailScreen(
                         IconButton(
                             onClick = { pagerScope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } },
                             enabled = pagerState.currentPage < posts.lastIndex,
-                        ) { Icon(Icons.Default.NavigateNext, contentDescription = "Next favorite") }
+                        ) { Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = "Next favorite") }
                     }
                 }
             }
@@ -1771,88 +1769,85 @@ private fun ImageFrame(
                         }
                 }
             }
-            Surface(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
-                color = Color(0xEE1C1E28),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            if (videoStarted) {
+                Surface(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
+                    color = Color(0xEE1C1E28),
+                    shape = RoundedCornerShape(12.dp),
                 ) {
-                    IconButton(
-                        onClick = {
-                            if (videoStarted) {
+                    Row(
+                        Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = {
                                 if (videoPlaying) {
                                     videoPlaying = false
                                     videoBuffering = false
                                 } else {
                                     resumeVideo()
                                 }
-                            } else {
-                                videoStarted = true
-                                videoPlaying = true
-                            }
-                        },
-                        enabled = playbackAllowed,
-                    ) {
-                        Icon(
-                            if (videoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (videoPlaying) "Pause video" else "Play video",
-                        )
-                    }
-                    Slider(
-                        value = videoPosition.toFloat().coerceIn(0f, videoDuration.toFloat().coerceAtLeast(1f)),
-                        onValueChange = { videoPosition = it.toInt() },
-                        onValueChangeFinished = { videoView?.seekTo(videoPosition) },
-                        valueRange = 0f..videoDuration.toFloat().coerceAtLeast(1f),
-                        enabled = videoDuration > 0,
-                        modifier = Modifier.weight(1f),
-                        thumb = {
-                            Box(
-                                Modifier
-                                    .graphicsLayer { translationY = 4.dp.toPx() }
-                                    .size(8.dp)
-                                    .background(Color(0xFFE5E7EB), RoundedCornerShape(50)),
+                            },
+                            enabled = playbackAllowed,
+                        ) {
+                            Icon(
+                                if (videoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (videoPlaying) "Pause video" else "Play video",
                             )
-                        },
-                        track = { sliderState ->
-                            Canvas(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(24.dp),
-                            ) {
-                                val centerY = size.height / 2
-                                val trackHeight = 2.dp.toPx()
-                                val progressX = size.width * sliderState.coercedValueAsFraction
-                                drawLine(
-                                    color = Color(0xFF55565E),
-                                    start = Offset(0f, centerY),
-                                    end = Offset(size.width, centerY),
-                                    strokeWidth = trackHeight,
-                                    cap = StrokeCap.Round,
+                        }
+                        Slider(
+                            value = videoPosition.toFloat().coerceIn(0f, videoDuration.toFloat().coerceAtLeast(1f)),
+                            onValueChange = { videoPosition = it.toInt() },
+                            onValueChangeFinished = { videoView?.seekTo(videoPosition) },
+                            valueRange = 0f..videoDuration.toFloat().coerceAtLeast(1f),
+                            enabled = videoDuration > 0,
+                            modifier = Modifier.weight(1f),
+                            thumb = {
+                                Box(
+                                    Modifier
+                                        .graphicsLayer { translationY = 4.dp.toPx() }
+                                        .size(8.dp)
+                                        .background(Color(0xFFE5E7EB), RoundedCornerShape(50)),
                                 )
-                                if (progressX > 0f) {
+                            },
+                            track = { sliderState ->
+                                Canvas(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(24.dp),
+                                ) {
+                                    val centerY = size.height / 2
+                                    val trackHeight = 2.dp.toPx()
+                                    val progressX = size.width * sliderState.coercedValueAsFraction
                                     drawLine(
-                                        color = Color(0xFFB8BBC2),
+                                        color = Color(0xFF55565E),
                                         start = Offset(0f, centerY),
-                                        end = Offset(progressX, centerY),
+                                        end = Offset(size.width, centerY),
                                         strokeWidth = trackHeight,
                                         cap = StrokeCap.Round,
                                     )
+                                    if (progressX > 0f) {
+                                        drawLine(
+                                            color = Color(0xFFB8BBC2),
+                                            start = Offset(0f, centerY),
+                                            end = Offset(progressX, centerY),
+                                            strokeWidth = trackHeight,
+                                            cap = StrokeCap.Round,
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                    )
-                    Text(
-                        "${formatPlaybackTime(videoPosition)}/${formatPlaybackTime(videoDuration)}",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    IconButton(onClick = { onFullscreenChanged(!mediaFullscreen) }) {
-                        Icon(
-                            if (mediaFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            contentDescription = if (mediaFullscreen) "Exit fullscreen" else "Enter fullscreen",
+                            },
                         )
+                        Text(
+                            "${formatPlaybackTime(videoPosition)}/${formatPlaybackTime(videoDuration)}",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        IconButton(onClick = { onFullscreenChanged(!mediaFullscreen) }) {
+                            Icon(
+                                if (mediaFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = if (mediaFullscreen) "Exit fullscreen" else "Enter fullscreen",
+                            )
+                        }
                     }
                 }
             }
