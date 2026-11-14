@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.15` with `versionCode` `13`. Android's version can advance independently from Windows and Linux; the next planned coordinated release is `0.1.16` for all three platforms. Keep the current version until that release is prepared, and continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.16` with `versionCode` `14`. Android's version can advance independently from Windows and Linux; this build is part of the coordinated `0.1.16` release. Continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -32,6 +32,14 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.16
+
+- **Preview quality:** prefer medium provider samples for sharper initial image display.
+- **Settings and Downloads:** simplify the settings categories and grouped preferences; compact the download history.
+- **Search:** support pull-to-refresh while retaining existing results during refresh.
+- **About:** add a clickable project repository link.
+- Android source version: `0.1.16`; `versionCode`: `14`.
 
 ## Android 0.1.15
 

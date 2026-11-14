@@ -6,23 +6,30 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.15).
-- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.15). The published update-manifest version remains 0.1.12; skip a Linux 0.1.15 package and target the next coordinated 0.1.16 release after Linux validation.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.15).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.16).
+- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.16). Its published update-manifest version remains 0.1.12 until the Linux 0.1.16 package is added manually.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.16; `versionCode` 14).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows, Linux, and Android include PIN-protected Favorites and parental content controls. These are in-app restrictions, not OS-level supervision; rating and tag filters rely on provider metadata. See each project README for platform-specific behavior and requirements.
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. The next planned release is coordinated at 0.1.16 for all three platforms; the Linux 0.1.15 package is intentionally skipped. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform and update them only after the corresponding release assets exist.
+Windows, Linux, and Android versions can advance independently. Version 0.1.16 is being prepared for all three platforms: Windows and Android are being built first, and the Linux package will be added manually later. The Linux 0.1.15 package is intentionally skipped. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag. Keep the manifest entries at the latest published release for each platform and update them only after the corresponding release assets exist.
 
 Platform release tags use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`. Android also increments `versionCode` for every APK. When migrating existing installations from the old shared `releases/latest` checker, publish one compatibility release containing all three platform packages before switching to platform-only releases; old clients cannot read the manifest.
 
 See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, manifest-update, migration, and validation procedure.
 
+## Version 0.1.16
+
+- **Windows and Android:** new release builds are being prepared from the synchronized 0.1.16 sources.
+- **Linux:** the 0.1.15 package is skipped; add the Linux 0.1.16 package manually after runtime validation. Until then, published Linux 0.1.12 binaries remain under their original MIT license.
+- Android `versionCode` is `14`; release signing continues to use the local debug key for now.
+- See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
+
 ## Version 0.1.15
 
-- **License:** new Windows, Linux, and Android source builds use GNU GPL version 3 or later. Linux 0.1.12 binaries already published under this release retain their original MIT license. The Linux 0.1.15 package is skipped; the next planned package is part of the coordinated 0.1.16 release after runtime validation.
+- **License:** new Windows, Linux, and Android source builds use GNU GPL version 3 or later.
 - **Favorites:** bulk downloads ask for confirmation before queuing selected media on Windows, Linux, and Android.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
 

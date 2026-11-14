@@ -13,7 +13,7 @@ This guide is the release runbook for AI agents and maintainers. Windows, Linux,
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows `0.1.15`, Linux `0.1.15`, and Android `0.1.15`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`. Per the maintainer's plan, do not publish a Linux `0.1.15` package; keep Linux at `0.1.12` in the feed until the coordinated `0.1.16` release is ready.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. Current source versions are Windows `0.1.16`, Linux `0.1.16`, and Android `0.1.16`; the feed remains at Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`, all via compatibility release `v0.1.15`. Per the maintainer's plan, skip the Linux `0.1.15` package and add Linux `0.1.16` manually later.
 
 ## Current compatibility release: `v0.1.15`
 
@@ -31,13 +31,13 @@ The `v0.1.15` compatibility release contains:
 
 `SHA256SUMS-0.1.15.txt` contains hashes for the six existing payload assets. The Windows and Android assets were built from GPL-licensed source; Linux assets were reused unchanged from `v0.1.14`.
 
-### Planned coordinated release: `v0.1.16`
+### Coordinated release: `v0.1.16`
 
-Skip Linux package version `0.1.15`. After Linux runtime validation, prepare version `0.1.16` for Windows, Linux, and Android and publish all three packages together under the compatibility tag `v0.1.16`. Keep the current source versions and `updates.json` unchanged until release preparation begins.
+Skip Linux package version `0.1.15`. Source declarations are now `0.1.16` for all three platforms. Build Windows and Android first; the maintainer will add the Linux `0.1.16` packages manually later.
 
-Before packaging, validate Linux window behavior under Wayland and X11 and verify Qt Multimedia codecs in the intended runtime on a native x86_64 Linux host. Run each platform's tests and build its version `0.1.16` artifacts. Set Android `versionName` to `0.1.16` and increment `versionCode` above `13` (use `14` if there has been no intervening APK release). Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials.
+Android `versionCode` is `14`. Preserve the current Android signing setup documented in `android/README.md`; do not commit signing keys or credentials. Do not build Linux on Windows or WSL. Before its package is added, validate Linux window behavior under Wayland and X11 and verify Qt Multimedia codecs in the intended runtime on a native x86_64 Linux host.
 
-Publish a compatibility release containing the Windows installer and portable EXE, Linux `0.1.16` AppImage and Flatpak, and Android `app-release.apk`. Ensure the release notes and license files match the built assets. Verify all asset names and SHA-256 digests before changing `updates.json`. Then set all three platform entries to version `0.1.16` and release tag `v0.1.16`, commit/push the manifest, and verify the public feed. Keep the existing `v0.1.15` release and assets unchanged.
+The `v0.1.16` compatibility release may initially contain the Windows installer and portable EXE plus Android `app-release.apk`; add the Linux `0.1.16` AppImage and Flatpak to that same release later. During that interval, legacy Linux clients will not have a Linux package in the latest release. Keep the current `updates.json` entries until the Windows and Android assets are published, then update only those two entries to version `0.1.16` and release tag `v0.1.16`. Keep Linux at `0.1.12` until its assets are attached, then update only the Linux entry. Verify asset names and SHA-256 digests before each manifest update. Keep the existing `v0.1.15` release and assets unchanged.
 
 ## Version files
 
@@ -47,11 +47,11 @@ Update all version declarations for the target platform:
 - **Linux:** `linux/waifu_gallery/__init__.py` and `linux/pyproject.toml`. `linux/release.sh` uses the project version to name both packages.
 - **Android:** `android/app/build.gradle.kts` (`versionName` and a strictly increasing `versionCode`).
 
-Do not bump versions for unaffected platforms, except for the planned coordinated `0.1.16` release, which intentionally updates all three. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`. For Android compatibility releases specifically, older clients compare the global compatibility tag directly with `versionName`, so make those two numeric versions match.
+Do not bump versions for unaffected platforms, except for the coordinated `0.1.16` release, which uses the same source version for all three. Keep the user-facing version numeric; platform identity belongs in the manifest key and release tag, not in strings like `win-0.1.13`. For Android compatibility releases specifically, older clients compare the global compatibility tag directly with `versionName`, so make those two numeric versions match.
 
 ## Release a platform update
 
-The next release should follow the coordinated `v0.1.16` plan above. The platform-only procedure below applies to future updates where only one platform changes.
+The current release work follows the coordinated `v0.1.16` plan above. The platform-only procedure below applies to future updates where only one platform changes.
 
 1. Confirm which platform changed and choose its next version only. Check that the release tag is unused:
    - `windows-vX.Y.Z`
@@ -84,7 +84,7 @@ The manifest update is a separate commit after the release exists by design: oth
 
 Previously released apps query the single GitHub `/releases/latest` endpoint and do not read `updates.json`. They cannot be taught the new feed remotely.
 
-To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.15`, with Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`. The next planned compatibility release is `v0.1.16` with all three platform packages.
+To keep legacy clients working, publish a **compatibility release** using the conventional tag `vX.Y.Z` with the Windows installer and portable EXE, Linux packages, and Android APK. The package versions may differ by platform, but legacy Android compares the global tag to the APK's `versionName`; keep those equal to avoid repeated update prompts. The current compatibility release is `v0.1.15`, with Windows `0.1.15`, Linux `0.1.12`, and Android `0.1.15`. The `v0.1.16` release will gain Linux assets after the maintainer adds them manually.
 
 If future releases are platform-only, GitHub's global `releases/latest` may no longer contain assets for every platform. Keep publishing compatibility releases while legacy clients need automatic updates, or provide a manual update path for them.
 

@@ -111,12 +111,18 @@ The preview displays a mock 57% progress value; its disabled button cannot start
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
 
+## Windows 0.1.16
+
+- **Preview quality:** prefer medium provider samples for sharper initial image display.
+- **About:** reposition the mascot slightly toward the center and add a clickable project repository link.
+- Windows source version: 0.1.16.
+- Windows Setup and portable release builds are being prepared; see the repository [release guide](../RELEASE_UPDATE.md).
+
 ## Windows 0.1.15
 
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
 - **Favorites:** downloading selected favorites asks for confirmation before queuing.
 - Windows source version: 0.1.15.
-- The next planned coordinated release is version 0.1.16 for Windows, Linux, and Android; no version files have been bumped for it yet.
 
 ## Windows 0.1.14
 
