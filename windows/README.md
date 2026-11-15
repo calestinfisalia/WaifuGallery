@@ -10,7 +10,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Random image browsing and tag search across Danbooru and yande.re; Gelbooru and Rule34.xxx can be enabled with your own API credentials. Selecting a provider keeps requests on that provider. Choosing All merges deduplicated results from eligible providers for each Search page; Random selects by the first successful metadata response and loads the preview asynchronously, trying another provider if that preview fails.
 - Rating choices for SFW, NSFW, or all results. NSFW results require enabling the option in Settings.
     - Optional tag-based gore and AI-generated post filtering, male-only tag exclusion, and custom blocked tags configured in Settings. AI filtering uses provider tags such as `ai-generated` and `ai-assisted`; untagged content may remain visible.
-- Search gallery with 50 results per page and provider filters.
+- Search gallery with 50 results per page and provider filters. Changing content filters reloads the search from page 1.
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
 - Optional ambient background blur, which can be turned off in Settings.
@@ -130,6 +130,12 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **Filters:** add an optional Hide AI-generated posts setting using provider tags such as `ai-generated` and `ai-assisted`. Untagged posts may remain visible.
 - Windows source version: 0.1.18.
 - Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.18`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.18).
+
+## Windows 0.1.19
+
+- **Filters:** changing Hide AI-generated refreshes Random immediately and reloads Search from page 1, so enabling or disabling the filter applies to the visible results.
+- Windows source version: 0.1.19.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.19).
 
 ## Windows 0.1.15
 

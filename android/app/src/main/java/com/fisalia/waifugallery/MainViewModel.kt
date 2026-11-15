@@ -835,14 +835,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         when (current.screen) {
             AppScreen.RANDOM -> refreshRandom()
-            AppScreen.GALLERY -> loadGallery()
+            AppScreen.GALLERY -> refreshGalleryFromFirstPage()
             AppScreen.DETAIL -> when (current.detailOrigin) {
                 AppScreen.RANDOM -> refreshRandom()
-                AppScreen.GALLERY -> loadGallery()
+                AppScreen.GALLERY -> refreshGalleryFromFirstPage()
                 else -> Unit
             }
             AppScreen.FAVORITES -> Unit
         }
+    }
+    private fun refreshGalleryFromFirstPage() {
+        _state.update { it.copy(page = 1, totalPages = null, hasMore = false) }
+        loadGallery()
     }
     fun setProvider(value: String) {
         if (value == "Gelbooru" && !hasGelbooruCredentials()) {

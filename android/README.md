@@ -2,13 +2,13 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.17` with `versionCode` `15`. Android's version can advance independently from Windows and Linux; this APK is published under the Android-specific `android-v0.1.17` release tag. Continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.18` with `versionCode` `16`. Android's version can advance independently from Windows and Linux; this APK is published under the Android-specific `android-v0.1.18` release tag. Continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
 ## Features
 
-- Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider.
+- Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider; changing content filters reloads search from page 1.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key. Settings → Providers can test each API connection and show its HTTP status or concise timeout, TLS, DNS, and connection error.
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
 - Auto search and random requests run eligible providers concurrently, return the first provider with results, and cancel slower requests. If an Auto random request gets provider errors without a result, it retries once before reporting failure.
@@ -32,6 +32,12 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.18
+
+- **Filters:** changing Hide AI-generated or removing custom blocked tags reloads Search from page 1; Random refreshes immediately.
+- Android source version: `0.1.18`; `versionCode`: `16`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.18/app-release.apk).
 
 ## Android 0.1.17
 

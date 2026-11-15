@@ -3183,7 +3183,8 @@ class MainWindow(QMainWindow):
         if settings_changed:
             self._rating_allowed()
             if self.current_query:
-                self.load_page(self.current_page)
+                self.current_page = 1
+                self.load_page(1)
             else:
                 self.show_random()
 
