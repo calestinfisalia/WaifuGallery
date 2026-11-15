@@ -1462,7 +1462,7 @@ class PreferencesDialog(FramelessResizableDialog):
         pixmap = QPixmap(str(self.ASSET_DIR / "waifugallery.png"))
         if not pixmap.isNull():
             logo.setPixmap(pixmap.scaled(
-                QSize(68, 68),
+                QSize(42, 42),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))

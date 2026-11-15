@@ -4,7 +4,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 
 ## Status
 
-The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. The source is version 0.1.16, while the published update-manifest version remains 0.1.12 until the Linux 0.1.16 package is added manually. The Linux 0.1.15 package is intentionally skipped.
+The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. The Linux 0.1.17 source includes a fix for the About logo sizing; its update-manifest version remains 0.1.16 until the 0.1.17 package is published. The Linux 0.1.15 package is intentionally skipped.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
@@ -74,12 +74,18 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Encrypted backups:** added app-styled passphrase prompts and an in-app file browser for exporting and importing cross-platform backups.
 - Linux runtime and packaging still require verification on a Linux desktop; no Linux release artifact is included.
 
-## Linux 0.1.16 (package pending)
+## Linux 0.1.17
+
+- **About:** size the app logo within its label so it is not clipped.
+- **Random browsing:** restore the Download action when opening random images and videos.
+- Linux update tag: `linux-v0.1.17`. The platform manifest advances only after the release assets are verified.
+
+## Linux 0.1.16
 
 - **License:** Linux builds from this source are licensed under GNU GPL version 3 or later. The AppImage and Flatpak must include the full license text.
 - **Preview quality:** prefer medium provider samples for sharper initial image display.
 - **Favorites:** bulk download now asks for Yes/No confirmation before adding all selected favorites to the queue.
-- Linux source version: 0.1.16. Add its package to the coordinated release manually after Wayland/X11 and codec validation. See the repository [release guide](../RELEASE_UPDATE.md).
+- Linux 0.1.16 packages are published in the compatibility release `v0.1.16`. Current Linux releases use platform-specific tags; see the repository [release guide](../RELEASE_UPDATE.md).
 
 ## Linux source 0.1.15 (skipped)
 

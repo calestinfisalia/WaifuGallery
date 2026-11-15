@@ -49,6 +49,42 @@ class LinuxUpdateCheckerTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2)
         self.assertIn("linux-v0.1.13", get.call_args_list[1].args[0])
 
+    def test_offers_linux_0_1_17_from_platform_manifest(self):
+        manifest = {
+            "schema_version": 1,
+            "platforms": {
+                "windows": {"version": "0.1.99", "release_tag": "windows-v0.1.99"},
+                "linux": {"version": "0.1.17", "release_tag": "linux-v0.1.17"},
+                "android": {"version": "0.1.99", "release_tag": "android-v0.1.99"},
+            },
+        }
+        release = {
+            "tag_name": "linux-v0.1.17",
+            "html_url": "https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.17",
+            "body": "Linux 0.1.17 test update",
+            "assets": [{"name": "Waifu-Gallery-0.1.17-x86_64.flatpak"}],
+        }
+        results = []
+        task = updates.UpdateCheckTask()
+        task.signals.finished.connect(lambda *args: results.append(args))
+        with (
+            patch.object(updates, "__version__", "0.1.16"),
+            patch.object(
+                updates.requests,
+                "get",
+                side_effect=[FakeResponse(manifest), FakeResponse(release)],
+            ) as get,
+        ):
+            task.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            results[0],
+            ("0.1.17", release["html_url"], "Linux 0.1.17 test update", ""),
+        )
+        self.assertEqual(get.call_count, 2)
+        self.assertIn("linux-v0.1.17", get.call_args_list[1].args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
