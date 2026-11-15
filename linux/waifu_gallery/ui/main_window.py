@@ -1435,6 +1435,7 @@ class MainWindow(QMainWindow):
             self.settings.doh_endpoint,
             str(self.settings.get("parent/max_rating", "s")) if parent_enabled else None,
             tuple(map(str, allowed_tags)) if isinstance(allowed_tags, (list, tuple)) else (),
+            bool(self.settings.get("search/filter_ai_generated", False)),
         )
 
     def _parent_allows_post(self, post: ImagePost) -> bool:
@@ -2963,6 +2964,7 @@ class MainWindow(QMainWindow):
         previous_filter_settings = (
             bool(self.settings.get("search/exclude_male", True)),
             bool(self.settings.get("search/filter_gore", True)),
+            bool(self.settings.get("search/filter_ai_generated", False)),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
         )
         dialog = PreferencesDialog(self.settings, self)
@@ -3013,6 +3015,7 @@ class MainWindow(QMainWindow):
             preference_state["filters"] = (
                 bool(self.settings.get("search/exclude_male", True)),
                 bool(self.settings.get("search/filter_gore", True)),
+                bool(self.settings.get("search/filter_ai_generated", False)),
                 tuple(self.settings.get("search/custom_block_tags", []) or []),
             )
             if parent_policy_changed:
@@ -3057,6 +3060,7 @@ class MainWindow(QMainWindow):
         current_filter_settings = (
             bool(self.settings.get("search/exclude_male", True)),
             bool(self.settings.get("search/filter_gore", True)),
+            bool(self.settings.get("search/filter_ai_generated", False)),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
         )
         filters_changed = current_filter_settings != previous_filter_settings

@@ -115,10 +115,11 @@ class _UpdateMascotOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         if self._pixmap.isNull():
             return
-        top_offset = 18
-        right_offset = 18
-        available_height = max(100, self.height() - top_offset - 8)
-        target_height = available_height
+        top_offset = 20
+        bottom_offset = 16
+        right_offset = 24
+        available_height = max(100, self.height() - top_offset - bottom_offset)
+        target_height = max(100, round(available_height * 0.72))
         target_width = round(target_height * (self._pixmap.width() / self._pixmap.height()))
         pixmap = self._pixmap.scaled(
             QSize(target_width, target_height),

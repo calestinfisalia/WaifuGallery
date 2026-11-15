@@ -4,7 +4,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 
 ## Status
 
-The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. Linux 0.1.17 is published under `linux-v0.1.17`; the compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped.
+The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. Linux 0.1.18 is being prepared as a platform update; the compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
@@ -14,7 +14,7 @@ On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery
 - Random browsing, tag search, paged results, zoom/pan, favorites, downloads, and media information.
 - With provider set to All, Search merges deduplicated results from eligible providers for each page, while Random selects by the first successful metadata response and loads the preview asynchronously, trying another provider if that preview fails. Selecting a specific provider keeps requests on that provider.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers; Gelbooru and Rule34.xxx require provider credentials.
-- SFW/NSFW rating, male-only and gore filters, custom blocked tags, image/video selection, and configurable video stream resolution.
+- SFW/NSFW rating, male-only and gore filters, optional AI-generated post filtering, custom blocked tags, image/video selection, and configurable video stream resolution. AI filtering uses provider tags (`ai-generated`, `ai-assisted`, and underscore variants); untagged posts may remain visible.
 - Video play/pause, seeking, volume/mute, buffering and playback-error feedback, and fullscreen controls.
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
@@ -31,7 +31,7 @@ Parental controls and the Favorites lock are in-app restrictions, not tamper-pro
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution). Imports respect the sections selected in a backup and leave unselected data unchanged. Download folders, safety PINs/policies, and window state are excluded.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution). Imports respect the sections selected in a backup and leave unselected data unchanged. Download folders, safety PINs/policies, and window state are excluded.
 
 The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. PINs and parental policy are device-local and excluded from backups. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
@@ -79,6 +79,12 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **About:** size the app logo within its label so it is not clipped.
 - **Random browsing:** restore the Download action when opening random images and videos.
 - Linux update tag: `linux-v0.1.17`. The platform manifest advances only after the release assets are verified.
+
+## Linux 0.1.18
+
+- **Filters:** optionally hide provider posts tagged `ai-generated` or `ai-assisted`; untagged posts may remain visible.
+- **About and updates:** center the About app logo and reduce the update-dialog mascot size.
+- Linux update tag: `linux-v0.1.18`; Windows and Android versions are unchanged.
 
 ## Linux 0.1.16
 

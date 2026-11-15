@@ -23,6 +23,41 @@ class ImageResponse:
 
 
 class ProviderMediaTests(unittest.TestCase):
+    def test_ai_generated_filter_hides_tagged_posts_when_enabled(self):
+        catalog = BooruCatalog(filter_ai_generated=True)
+        payload = [
+            {
+                "id": 901,
+                "file_url": "https://danbooru.donmai.us/data/ai.jpg",
+                "rating": "s",
+                "tags": "1girl ai-generated",
+            },
+            {
+                "id": 902,
+                "file_url": "https://danbooru.donmai.us/data/assisted.jpg",
+                "rating": "s",
+                "tags": "1girl ai_assisted",
+            },
+            {
+                "id": 903,
+                "file_url": "https://danbooru.donmai.us/data/handmade.jpg",
+                "rating": "s",
+                "tags": "1girl",
+            },
+        ]
+
+        default_catalog = BooruCatalog()
+        with patch.object(default_catalog, "_request_provider_json", return_value=payload):
+            default_posts, _has_more = default_catalog._search_provider(
+                "Danbooru", "", "sfw", 1, 10
+            )
+
+        with patch.object(catalog, "_request_provider_json", return_value=payload):
+            posts, _has_more = catalog._search_provider("Danbooru", "", "sfw", 1, 10)
+
+        self.assertEqual(len(default_posts), 3)
+        self.assertEqual([post.post_id for post in posts], ["danbooru-903"])
+
     def test_all_search_merges_provider_results_in_round_robin_order(self):
         catalog = BooruCatalog()
         slow_started = Event()
