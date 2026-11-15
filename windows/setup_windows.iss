@@ -1,6 +1,6 @@
 #define AppName "Waifu Gallery"
 #ifndef AppVersion
-  #define AppVersion "0.1.21"
+  #define AppVersion "0.1.22"
 #endif
 #ifndef WindowsDistDir
   #define WindowsDistDir "dist\Waifu Gallery"
@@ -21,6 +21,11 @@ UsePreviousAppDir=yes
 UninstallDisplayIcon={app}\Waifu Gallery.exe
 SetupIconFile=waifu_gallery\assets\waifugallery.ico
 WizardImageFile=installer_assets\wizard-mascot.png
+WizardSmallImageFile=installer_assets\wizard-small.png
+WizardBackImageFile=installer_assets\wizard-background.png
+WizardImageBackColor=#eaf4ff
+WizardBackColor=#eaf4ff
+WizardBackImageOpacity=110
 LicenseFile=..\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=WaifuGallery-Setup-x64
