@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.16` with `versionCode` `14`. Android's version can advance independently from Windows and Linux; this build is part of the coordinated `0.1.16` release. Continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.17` with `versionCode` `15`. Android's version can advance independently from Windows and Linux; this APK is published under the Android-specific `android-v0.1.17` release tag. Continue increasing `versionCode` for each APK update.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -17,7 +17,7 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
 - Compact download cards show progress and retry states; cancel an active transfer with the X button. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
-- Local favorites with image/video badges and separate totals; long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/tag filters, and optional ambient blurred backgrounds.
+- Local favorites with image/video badges and separate totals; long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/AI-generated/tag filters, and optional ambient blurred backgrounds.
 - Safety & Privacy controls with PIN-protected Favorites and parental maximum-rating/allowed-tag filters. PINs are salted and hashed locally and are excluded from encrypted user-data backups; parental filtering relies on provider metadata and is not OS-level supervision.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
 - Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. You can also check manually in **Settings → Updates**. Update downloads show determinate or indeterminate progress and verify the APK checksum before installation. About and update dialogs feature the Iro-chan mascot.
@@ -29,9 +29,15 @@ The preferred video resolution selects the largest listed provider rendition at 
 
 ## Encrypted user data backup
 
-Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
+Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.17
+
+- **Filters:** add an optional Hide AI-generated posts setting using provider tags such as `ai-generated` and `ai-assisted`. Untagged posts may remain visible.
+- Android source version: `0.1.17`; `versionCode`: `15`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.17/app-release.apk).
 
 ## Android 0.1.16
 
@@ -41,6 +47,7 @@ The version 2 format is interoperable with Windows and Linux, records included s
 - **About:** add a clickable project repository link.
 - Android source version: `0.1.16`; `versionCode`: `14`.
 - Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/v0.1.16/app-release.apk).
+- The optional AI-generated post filter was added to the source after the `0.1.16` APK and is available in `0.1.17`.
 
 ## Android 0.1.15
 

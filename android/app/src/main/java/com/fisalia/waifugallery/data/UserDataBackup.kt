@@ -32,6 +32,7 @@ data class UserDataBackup(
     val customDohEndpoint: String,
     val ambientMode: Boolean,
     val videoMaxHeight: Int,
+    val filterAiGenerated: Boolean = false,
     val includedSections: Set<String> = setOf("favorites", "providers", "settings"),
     val theme: String = "Dark",
     val formatVersion: Int = 2,
@@ -67,6 +68,7 @@ object UserDataBackupCodec {
         customDohEndpoint: String,
         ambientMode: Boolean,
         videoMaxHeight: Int,
+        filterAiGenerated: Boolean = false,
     ): UserDataBackup = UserDataBackup(
         favorites = favorites,
         gelbooruUserId = gelbooruUserId,
@@ -86,6 +88,7 @@ object UserDataBackupCodec {
         customDohEndpoint = customDohEndpoint,
         ambientMode = ambientMode,
         videoMaxHeight = videoMaxHeight,
+        filterAiGenerated = filterAiGenerated,
     ).also(::validate)
 
     fun encrypt(data: UserDataBackup, passphrase: String): String {
@@ -185,6 +188,7 @@ object UserDataBackupCodec {
             put("custom_terms", JSONArray(data.customTerms))
             put("exclude_male", data.excludeMale)
             put("filter_gore", data.filterGore)
+            put("filter_ai_generated", data.filterAiGenerated)
             put("custom_block_tags", JSONArray(data.customBlockTags.replace(",", " ").split(Regex("\\s+")).filter(String::isNotBlank)))
             put("media_filter", data.mediaFilter)
             put("use_doh", data.useDoh)
@@ -313,6 +317,7 @@ object UserDataBackupCodec {
             customTerms = settings.stringList("custom_terms"),
             excludeMale = settings.requiredBoolean("exclude_male"),
             filterGore = settings.requiredBoolean("filter_gore"),
+            filterAiGenerated = settings.optionalBoolean("filter_ai_generated", false),
             customBlockTags = settings.stringList("custom_block_tags").joinToString(", "),
             mediaFilter = settings.requiredString("media_filter"),
             useDoh = settings.requiredBoolean("use_doh"),
@@ -339,6 +344,9 @@ object UserDataBackupCodec {
 
     private fun JSONObject.optionalString(key: String, default: String): String =
         if (has(key)) requiredString(key) else default
+
+    private fun JSONObject.optionalBoolean(key: String, default: Boolean): Boolean =
+        if (has(key)) requiredBoolean(key) else default
 
     private fun JSONObject.requiredBoolean(key: String): Boolean {
         val value = get(key)

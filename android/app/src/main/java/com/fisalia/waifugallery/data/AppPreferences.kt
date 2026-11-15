@@ -64,6 +64,10 @@ class AppPreferences(context: Context) {
         get() = store.getBoolean("filter_gore", true)
         set(value) = store.edit().putBoolean("filter_gore", value).apply()
 
+    var filterAiGenerated: Boolean
+        get() = store.getBoolean("filter_ai_generated", false)
+        set(value) = store.edit().putBoolean("filter_ai_generated", value).apply()
+
     var excludeMale: Boolean
         get() = store.getBoolean("exclude_male", true)
         set(value) = store.edit().putBoolean("exclude_male", value).apply()
@@ -339,6 +343,7 @@ class AppPreferences(context: Context) {
                 .putString("doh_provider", data.dohProvider)
                 .putString("custom_doh_endpoint", data.customDohEndpoint.trim())
                 .putBoolean("filter_gore", data.filterGore)
+                .putBoolean("filter_ai_generated", data.filterAiGenerated)
                 .putBoolean("exclude_male", data.excludeMale)
                 .putString("custom_block_tags", data.customBlockTags)
                 .putString("media_filter", data.mediaFilter)

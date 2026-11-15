@@ -106,6 +106,7 @@ data class UiState(
     val dohProvider: String = "Cloudflare",
     val customDohEndpoint: String = "",
     val filterGore: Boolean = true,
+    val filterAiGenerated: Boolean = false,
     val excludeMale: Boolean = true,
     val customBlockTags: String = "",
     val mediaFilter: String = "image",
@@ -135,6 +136,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         excludeMale = { preferences.excludeMale },
         customBlockTags = { preferences.customBlockTags },
         mediaFilter = { preferences.mediaFilter },
+        filterAiGenerated = { preferences.filterAiGenerated },
     )
     private val _state = MutableStateFlow(
         UiState(
@@ -150,6 +152,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dohProvider = preferences.dohProvider,
             customDohEndpoint = preferences.customDohEndpoint,
             filterGore = preferences.filterGore,
+            filterAiGenerated = preferences.filterAiGenerated,
             excludeMale = preferences.excludeMale,
             customBlockTags = preferences.customBlockTags,
             mediaFilter = preferences.mediaFilter,
@@ -699,6 +702,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             customTerms = preferences.customSearchTerms(),
             excludeMale = current.excludeMale,
             filterGore = current.filterGore,
+            filterAiGenerated = current.filterAiGenerated,
             customBlockTags = current.customBlockTags,
             mediaFilter = current.mediaFilter,
             useDoh = current.useDoh,
@@ -733,6 +737,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 dohProvider = if (importsSettings) data.dohProvider else current.dohProvider,
                 customDohEndpoint = if (importsSettings) data.customDohEndpoint else current.customDohEndpoint,
                 filterGore = if (importsSettings) data.filterGore else current.filterGore,
+                filterAiGenerated = if (importsSettings) data.filterAiGenerated else current.filterAiGenerated,
                 excludeMale = if (importsSettings) data.excludeMale else current.excludeMale,
                 customBlockTags = if (importsSettings) data.customBlockTags else current.customBlockTags,
                 mediaFilter = if (importsSettings) data.mediaFilter else current.mediaFilter,
@@ -796,6 +801,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setFilterGore(value: Boolean) {
         preferences.filterGore = value
         _state.update { it.copy(filterGore = value) }
+        refreshCurrentResults()
+    }
+    fun setFilterAiGenerated(value: Boolean) {
+        preferences.filterAiGenerated = value
+        _state.update { it.copy(filterAiGenerated = value) }
         refreshCurrentResults()
     }
     fun setExcludeMale(value: Boolean) {

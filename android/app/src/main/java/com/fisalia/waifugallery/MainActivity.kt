@@ -2343,6 +2343,13 @@ private fun SettingsScreen(
                                 ) { model.setFilterGore(it) }
                                 SettingsPreferenceDivider()
                                 SettingSwitch(
+                                    "Hide AI-generated posts",
+                                    state.filterAiGenerated,
+                                    "Hide posts tagged ai-generated or ai-assisted; untagged posts may remain visible",
+                                    grouped = true,
+                                ) { model.setFilterAiGenerated(it) }
+                                SettingsPreferenceDivider()
+                                SettingSwitch(
                                     "Exclude male-only posts",
                                     state.excludeMale,
                                     "Hide posts tagged as male-only",
