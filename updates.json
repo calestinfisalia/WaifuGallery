@@ -6,8 +6,8 @@
       "release_tag": "windows-v0.1.17"
     },
     "linux": {
-      "version": "0.1.12",
-      "release_tag": "v0.1.15"
+      "version": "0.1.16",
+      "release_tag": "v0.1.16"
     },
     "android": {
       "version": "0.1.16",
