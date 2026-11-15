@@ -137,6 +137,15 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Windows source version: 0.1.19.
 - Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.19).
 
+## Windows 0.1.20
+
+- **AI labels:** identify AI-tagged image and video posts in Random, Search, and detail views.
+- **Fullscreen:** image fullscreen uses the same dark background as video and restores the ambient background when exiting.
+- **Media Info:** arrange tags in two columns.
+- **Filter settings:** correctly persist Windows Registry string booleans so disabled filters remain disabled after reopening Settings.
+- Windows source version: 0.1.20.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.20`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.20).
+
 ## Windows 0.1.15
 
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
