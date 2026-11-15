@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..models import ImagePost, SearchPage
-from ..providers import BooruCatalog, ProviderError
+from ..providers import AI_GENERATED_BLOCK_TAGS, BooruCatalog, ProviderError
 from ..pin_security import has_pin, verify_pin
 from ..settings import AppSettings
 from .downloads import DownloadsDialog
@@ -249,6 +249,7 @@ class MainWindow(QMainWindow):
         self.card_buttons: dict[str, QPushButton] = {}
         self.card_loading_indicators: dict[str, CircularProgressIndicator] = {}
         self.card_play_badges: dict[str, QLabel] = {}
+        self.card_ai_badges: dict[str, QLabel] = {}
         self.card_frames: dict[str, QWidget] = {}
         self.active_detail_id = ""
         self.detail_post: ImagePost | None = None
@@ -413,6 +414,7 @@ class MainWindow(QMainWindow):
         self.random_scroll.setWidget(self.random_image)
         self.random_image.viewport = self.random_scroll.viewport()
         self.random_image.scroll_area = self.random_scroll
+        self.random_ai_badge = self._create_ai_badge(self.random_scroll.viewport())
         self.random_image.zoomChanged.connect(
             lambda zoomed, area=self.random_scroll: self._set_zoom_scrollbars(area, zoomed)
         )
@@ -438,6 +440,7 @@ class MainWindow(QMainWindow):
         self.random_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.random_media_stack.addWidget(self.random_scroll)
         self.random_media_stack.addWidget(self.random_video)
+        self.random_video_ai_badge = self._create_ai_badge(self.random_media_stack)
         random_layout.addWidget(self.random_media_stack, 1)
         self.random_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.random_video.fullscreen_toggle = self.random_video_fullscreen_button
@@ -588,6 +591,7 @@ class MainWindow(QMainWindow):
         self.detail_scroll.setWidget(self.detail_image)
         self.detail_image.viewport = self.detail_scroll.viewport()
         self.detail_image.scroll_area = self.detail_scroll
+        self.detail_ai_badge = self._create_ai_badge(self.detail_scroll.viewport())
         self.detail_image.zoomChanged.connect(
             lambda zoomed, area=self.detail_scroll: self._set_zoom_scrollbars(area, zoomed)
         )
@@ -613,6 +617,7 @@ class MainWindow(QMainWindow):
         self.detail_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.detail_media_stack.addWidget(self.detail_scroll)
         self.detail_media_stack.addWidget(self.detail_video)
+        self.detail_video_ai_badge = self._create_ai_badge(self.detail_media_stack)
         self.detail_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.detail_video.fullscreen_toggle = self.detail_video_fullscreen_button
         self.detail_video.add_control_action(self.detail_video_fullscreen_button, index=5)
@@ -913,6 +918,51 @@ class MainWindow(QMainWindow):
             f"{post.provider} | {rating_label(post.rating)} | "
             f"{self._image_size_text(post, pixmap, full=self._full_image_loaded)}"
         )
+
+    @staticmethod
+    def _create_ai_badge(parent: QWidget) -> QLabel:
+        badge = QLabel("AI", parent)
+        badge.setObjectName("aiGeneratedBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        badge.setAccessibleName("AI-generated image")
+        badge.setToolTip("Provider tagged this image as AI-generated or AI-assisted.")
+        badge.setStyleSheet(
+            "QLabel#aiGeneratedBadge {"
+            "background: rgba(18, 20, 28, 220); color: #ffffff;"
+            "border: 1px solid rgba(255, 255, 255, 90); border-radius: 9px;"
+            "padding: 3px 8px; font-size: 11px; font-weight: 700;"
+            "}"
+        )
+        badge.adjustSize()
+        badge.hide()
+        return badge
+
+    @staticmethod
+    def _is_ai_tagged_post(post: ImagePost | None) -> bool:
+        return bool(
+            post
+            and post.tags.intersection(AI_GENERATED_BLOCK_TAGS)
+        )
+
+    @staticmethod
+    def _position_corner_badge(badge: QLabel) -> None:
+        parent = badge.parentWidget()
+        if parent is None:
+            return
+        badge.adjustSize()
+        margin = 12
+        badge.move(
+            max(margin, parent.width() - badge.width() - margin),
+            max(margin, parent.height() - badge.height() - margin),
+        )
+        badge.raise_()
+
+    def _update_media_ai_badge(self, badge: QLabel, post: ImagePost | None) -> None:
+        visible = self._is_ai_tagged_post(post)
+        badge.setVisible(visible)
+        if visible:
+            self._position_corner_badge(badge)
 
     def _set_search_footer_counts(self) -> None:
         if self.pages.currentWidget() is not self.gallery_page:
@@ -1424,16 +1474,16 @@ class MainWindow(QMainWindow):
             allowed_tags = allowed_tags.split(",")
         return BooruCatalog(
             self.settings.gelbooru_credentials,
-            bool(self.settings.get("search/exclude_male", True)),
+            self.settings.get_bool("search/exclude_male", True),
             self.settings.use_doh,
             self.settings.rule34_credentials,
-            bool(self.settings.get("search/filter_gore", True)),
+            self.settings.get_bool("search/filter_gore", True),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
             str(self.settings.get("search/media_filter", "image")),
             self.settings.doh_endpoint,
             str(self.settings.get("parent/max_rating", "s")) if parent_enabled else None,
             tuple(map(str, allowed_tags)) if isinstance(allowed_tags, (list, tuple)) else (),
-            bool(self.settings.get("search/filter_ai_generated", False)),
+            self.settings.get_bool("search/filter_ai_generated", False),
         )
 
     def _parent_allows_post(self, post: ImagePost) -> bool:
@@ -1704,6 +1754,7 @@ class MainWindow(QMainWindow):
                 self.detail_media_stack.setCurrentWidget(self.detail_scroll)
                 self.detail_video.clear()
                 self.detail_image.set_image(pixmap)
+                self._update_media_ai_badge(self.detail_ai_badge, self.detail_post)
                 self._full_image_loaded = False
                 self._set_image_credits_visible(True)
                 self._set_ambient_image(self.detail_ambient, pixmap, self.detail_page)
@@ -1985,6 +2036,8 @@ class MainWindow(QMainWindow):
     def show_random(self) -> None:
         if not self._rating_allowed():
             return
+        self.random_ai_badge.hide()
+        self.random_video_ai_badge.hide()
         if not self._fullscreen_active:
             self.statusBar().show()
         self._hide_normal_video_actions("random")
@@ -2055,6 +2108,10 @@ class MainWindow(QMainWindow):
         self.random_media_stack.setCurrentWidget(self.random_scroll)
         self.random_video.clear()
         self.random_image.set_image(pixmap)
+        self.random_video_ai_badge.hide()
+        self._update_media_ai_badge(
+            self.random_ai_badge, getattr(self, "random_post", None)
+        )
         self.download_button.show()
         self.full_image_button.setToolTip("Load original-resolution image")
         self.full_image_button.setEnabled(True)
@@ -2069,6 +2126,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Image loaded", 3000)
 
     def _show_random_video(self, post: ImagePost) -> None:
+        self.random_ai_badge.hide()
+        self._update_media_ai_badge(self.random_video_ai_badge, post)
         if not self._fullscreen_active:
             self.statusBar().show()
             self.statusBar().raise_()
@@ -2220,6 +2279,7 @@ class MainWindow(QMainWindow):
         self.card_buttons.clear()
         self.card_loading_indicators.clear()
         self.card_play_badges.clear()
+        self.card_ai_badges.clear()
         self.card_frames.clear()
         while self.gallery_rows.count():
             entry = self.gallery_rows.takeAt(0)
@@ -2385,6 +2445,13 @@ class MainWindow(QMainWindow):
             play_badge.setVisible(post.post_id in self.thumbnail_cache)
             preview_layout.addWidget(play_badge, 0, 0, Qt.AlignmentFlag.AlignCenter)
             self.card_play_badges[post.post_id] = play_badge
+        if self._is_ai_tagged_post(post):
+            ai_badge = self._create_ai_badge(preview_container)
+            preview_layout.addWidget(
+                ai_badge, 0, 0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
+            )
+            self.card_ai_badges[post.post_id] = ai_badge
         card_layout.addWidget(preview_container)
         self.card_buttons[post.post_id] = button
         self.card_frames[post.post_id] = frame
@@ -2488,6 +2555,10 @@ class MainWindow(QMainWindow):
         badge = self.card_play_badges.get(post.post_id)
         if badge:
             badge.show()
+        ai_badge = self.card_ai_badges.get(post.post_id)
+        if ai_badge:
+            ai_badge.show()
+            ai_badge.raise_()
 
     def open_post(self, post: ImagePost) -> None:
         if not self._parent_allows_post(post):
@@ -2503,6 +2574,11 @@ class MainWindow(QMainWindow):
         self._hide_normal_video_actions("random")
         self._hide_normal_video_actions("detail")
         self._set_ambient_image(self.detail_ambient, QPixmap(), self.detail_page)
+        self.detail_ai_badge.hide()
+        self._update_media_ai_badge(
+            self.detail_video_ai_badge,
+            post if post.media_type == "video" else None,
+        )
         self.detail_post = post
         self._full_image_loaded = False
         self.full_image_button.hide()
@@ -2767,7 +2843,7 @@ class MainWindow(QMainWindow):
         self._fullscreen_active = True
         active_player = self.random_video if self._fullscreen_source == "random" else self.detail_video
         active_player.set_fullscreen_mode(True)
-        if fullscreen_post is not None and fullscreen_post.media_type == "video":
+        if fullscreen_post is not None:
             ambient = (
                 self.random_ambient
                 if self._fullscreen_source == "random"
@@ -3071,15 +3147,7 @@ class MainWindow(QMainWindow):
             return
         previous_provider = self.selected_provider
         previous_rating = self.selected_rating
-        previous_filter_settings = (
-            bool(self.settings.get("search/exclude_male", True)),
-            bool(self.settings.get("search/filter_gore", True)),
-            bool(self.settings.get("search/filter_ai_generated", False)),
-            tuple(self.settings.get("search/custom_block_tags", []) or []),
-            self.settings.get_bool("parent/enabled"),
-            str(self.settings.get("parent/max_rating", "s")),
-            tuple(self.settings.get("parent/allowed_tags", []) or []),
-        )
+        previous_filter_settings = self._content_filter_settings()
         dialog = PreferencesDialog(self.settings, self)
         self.preferences_dialog = dialog
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -3119,15 +3187,7 @@ class MainWindow(QMainWindow):
             )
             preference_state["provider"] = self.selected_provider
             preference_state["rating"] = self.selected_rating
-            preference_state["filters"] = (
-                bool(self.settings.get("search/exclude_male", True)),
-                bool(self.settings.get("search/filter_gore", True)),
-                bool(self.settings.get("search/filter_ai_generated", False)),
-                tuple(self.settings.get("search/custom_block_tags", []) or []),
-                self.settings.get_bool("parent/enabled"),
-                str(self.settings.get("parent/max_rating", "s")),
-                tuple(self.settings.get("parent/allowed_tags", []) or []),
-            )
+            preference_state["filters"] = self._content_filter_settings()
             preference_state["parent_policy"] = parent_policy
             preference_state["favorites_lock"] = favorites_lock_enabled
 
@@ -3142,6 +3202,33 @@ class MainWindow(QMainWindow):
     def _clear_preferences_dialog(self, dialog: PreferencesDialog) -> None:
         if self.preferences_dialog is dialog:
             self.preferences_dialog = None
+
+    def _content_filter_settings(self) -> tuple:
+        return (
+            self.settings.get_bool("search/exclude_male", True),
+            self.settings.get_bool("search/allow_nsfw"),
+            self.settings.get_bool("search/filter_gore", True),
+            self.settings.get_bool("search/filter_ai_generated", False),
+            tuple(self.settings.get("search/custom_block_tags", []) or []),
+            self.settings.get_bool("parent/enabled"),
+            str(self.settings.get("parent/max_rating", "s")),
+            tuple(self.settings.get("parent/allowed_tags", []) or []),
+        )
+
+    def _refresh_active_filter_view(self) -> None:
+        current_page = self.pages.currentWidget()
+        search_is_active = current_page is self.gallery_page or (
+            current_page is self.detail_page and self.detail_origin == "search"
+        )
+        random_is_active = current_page is self.random_page or (
+            current_page is self.detail_page and self.detail_origin == "random"
+        )
+
+        if search_is_active and self.current_query:
+            self.current_page = 1
+            self.load_page(1)
+        elif random_is_active:
+            self.show_random()
 
     def _preferences_updated(
         self,
@@ -3164,15 +3251,7 @@ class MainWindow(QMainWindow):
             self.media_actions[media].setChecked(True)
         self._update_filter_tooltip()
         self._apply_ambient_mode()
-        current_filter_settings = (
-            bool(self.settings.get("search/exclude_male", True)),
-            bool(self.settings.get("search/filter_gore", True)),
-            bool(self.settings.get("search/filter_ai_generated", False)),
-            tuple(self.settings.get("search/custom_block_tags", []) or []),
-            self.settings.get_bool("parent/enabled"),
-            str(self.settings.get("parent/max_rating", "s")),
-            tuple(self.settings.get("parent/allowed_tags", []) or []),
-        )
+        current_filter_settings = self._content_filter_settings()
         filters_changed = current_filter_settings != previous_filter_settings
         settings_changed = (
             self.selected_provider != previous_provider
@@ -3182,11 +3261,7 @@ class MainWindow(QMainWindow):
         )
         if settings_changed:
             self._rating_allowed()
-            if self.current_query:
-                self.current_page = 1
-                self.load_page(1)
-            else:
-                self.show_random()
+            self._refresh_active_filter_view()
 
     def queue_download(self, post: ImagePost) -> None:
         if not self._parent_allows_post(post):
@@ -3229,6 +3304,15 @@ class MainWindow(QMainWindow):
         self.pool.start(task)
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Resize:
+            for badge in (
+                getattr(self, "random_ai_badge", None),
+                getattr(self, "detail_ai_badge", None),
+                getattr(self, "random_video_ai_badge", None),
+                getattr(self, "detail_video_ai_badge", None),
+            ):
+                if badge is not None and watched is badge.parentWidget():
+                    self._position_corner_badge(badge)
         if (
             event.type() == QEvent.Type.Enter
             and isinstance(watched, QWidget)

@@ -638,14 +638,14 @@ class PreferencesDialog(FramelessResizableDialog):
         rating_layout.addWidget(self.default_rating)
         rules_section, rules_layout = self._settings_section("Content rules")
         self.exclude_male = QCheckBox("Exclude posts tagged as male-only")
-        self.exclude_male.setChecked(bool(self.settings.get("search/exclude_male", True)))
+        self.exclude_male.setChecked(self.settings.get_bool("search/exclude_male", True))
         self.allow_nsfw = QCheckBox("Allow NSFW results")
         self.allow_nsfw.setChecked(self.settings.get_bool("search/allow_nsfw"))
         self.filter_gore = QCheckBox("Filter posts tagged as gore")
-        self.filter_gore.setChecked(bool(self.settings.get("search/filter_gore", True)))
+        self.filter_gore.setChecked(self.settings.get_bool("search/filter_gore", True))
         self.filter_ai_generated = QCheckBox("Hide AI-generated posts")
         self.filter_ai_generated.setChecked(
-            bool(self.settings.get("search/filter_ai_generated", False))
+            self.settings.get_bool("search/filter_ai_generated", False)
         )
         for control in (
             self.exclude_male,
