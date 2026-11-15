@@ -197,6 +197,7 @@ def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) 
             "search/custom_terms": imported["custom_terms"],
             "search/exclude_male": imported["exclude_male"],
             "search/filter_gore": imported["filter_gore"],
+            "search/filter_ai_generated": imported["filter_ai_generated"],
             "search/custom_block_tags": imported["custom_block_tags"],
             "search/media_filter": imported["media_filter"],
             "network/use_doh": imported["use_doh"],
@@ -642,8 +643,23 @@ class PreferencesDialog(FramelessResizableDialog):
         self.allow_nsfw.setChecked(self.settings.get_bool("search/allow_nsfw"))
         self.filter_gore = QCheckBox("Filter posts tagged as gore")
         self.filter_gore.setChecked(bool(self.settings.get("search/filter_gore", True)))
-        for control in (self.exclude_male, self.allow_nsfw, self.filter_gore):
+        self.filter_ai_generated = QCheckBox("Hide AI-generated posts")
+        self.filter_ai_generated.setChecked(
+            bool(self.settings.get("search/filter_ai_generated", False))
+        )
+        for control in (
+            self.exclude_male,
+            self.allow_nsfw,
+            self.filter_gore,
+            self.filter_ai_generated,
+        ):
             rules_layout.addWidget(control)
+        ai_filter_help = QLabel(
+            "Uses provider tags such as ai-generated and ai-assisted; untagged posts may remain visible."
+        )
+        ai_filter_help.setObjectName("settingsHelpText")
+        ai_filter_help.setWordWrap(True)
+        rules_layout.addWidget(ai_filter_help)
         tags_section, tags_layout = self._settings_section("Custom blocked tags")
         tags_layout.addWidget(QLabel("Posts containing these provider tags are hidden."))
         self.filter_list = QListWidget()
@@ -756,6 +772,7 @@ class PreferencesDialog(FramelessResizableDialog):
             self.exclude_male,
             self.allow_nsfw,
             self.filter_gore,
+            self.filter_ai_generated,
             self.ambient_mode,
         ):
             control.toggled.connect(self._persist_settings)
@@ -1968,6 +1985,7 @@ class PreferencesDialog(FramelessResizableDialog):
             "search/exclude_male": self.exclude_male.isChecked(),
             "search/allow_nsfw": self.allow_nsfw.isChecked(),
             "search/filter_gore": self.filter_gore.isChecked(),
+            "search/filter_ai_generated": self.filter_ai_generated.isChecked(),
             "search/custom_block_tags": [
                 self.filter_list.item(i).text() for i in range(self.filter_list.count())
             ],

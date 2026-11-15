@@ -177,6 +177,9 @@ def normalize_payload(payload: object) -> dict:
         "custom_terms": _strings(settings.get("custom_terms"), "settings.custom_terms"),
         "exclude_male": _boolean(settings.get("exclude_male"), "settings.exclude_male"),
         "filter_gore": _boolean(settings.get("filter_gore"), "settings.filter_gore"),
+        "filter_ai_generated": _boolean(
+            settings.get("filter_ai_generated", False), "settings.filter_ai_generated"
+        ),
         "custom_block_tags": _strings(settings.get("custom_block_tags"), "settings.custom_block_tags"),
         "media_filter": media_filter,
         "use_doh": _boolean(settings.get("use_doh"), "settings.use_doh"),
@@ -232,6 +235,7 @@ def create_payload(settings, sections: tuple[str, ...] | None = None) -> dict:
             "custom_terms": settings.get("search/custom_terms", []) if "settings" in included else [],
             "exclude_male": bool(settings.get("search/exclude_male", True)) if "settings" in included else True,
             "filter_gore": bool(settings.get("search/filter_gore", True)) if "settings" in included else True,
+            "filter_ai_generated": bool(settings.get("search/filter_ai_generated", False)) if "settings" in included else False,
             "custom_block_tags": settings.get("search/custom_block_tags", []) if "settings" in included else [],
             "media_filter": str(settings.get("search/media_filter", "image")) if "settings" in included else "image",
             "use_doh": settings.use_doh if "settings" in included else False,

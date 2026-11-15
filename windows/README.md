@@ -9,7 +9,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Windows desktop interface implemented with Python and PySide6.
 - Random image browsing and tag search across Danbooru and yande.re; Gelbooru and Rule34.xxx can be enabled with your own API credentials. Selecting a provider keeps requests on that provider. Choosing All merges deduplicated results from eligible providers for each Search page; Random selects by the first successful metadata response and loads the preview asynchronously, trying another provider if that preview fails.
 - Rating choices for SFW, NSFW, or all results. NSFW results require enabling the option in Settings.
-  - Optional tag-based gore filtering, male-only tag exclusion, and custom blocked tags configured in Settings. These filters depend on provider tags and cannot detect untagged content.
+    - Optional tag-based gore and AI-generated post filtering, male-only tag exclusion, and custom blocked tags configured in Settings. AI filtering uses provider tags such as `ai-generated` and `ai-assisted`; untagged content may remain visible.
 - Search gallery with 50 results per page and provider filters.
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
@@ -39,7 +39,7 @@ PINs and parental policy are device-local and are intentionally excluded from en
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating, search and content filters, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
 
 The version 2 format is shared with Linux and Android, records the included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Version 1 backups remain importable. Set a passphrase of at least 8 characters; it cannot be recovered. Unselected sections remain unchanged when importing. Unsupported desktop themes are identified in the import summary and left unchanged. Merge adds missing included favorites and keeps existing included provider credentials, while Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
 Export and import use the native Windows file picker to open or save backup files, with app-styled passphrase and confirmation dialogs.

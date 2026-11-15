@@ -42,6 +42,9 @@ GORE_BLOCK_TAGS = frozenset({
     "guro", "intestines", "mutilation", "open_wound", "organs", "severed_arm",
     "severed_foot", "severed_hand", "severed_head", "severed_leg", "wound",
 })
+AI_GENERATED_BLOCK_TAGS = frozenset({
+    "ai-generated", "ai_generated", "ai-assisted", "ai_assisted",
+})
 VIDEO_EXTENSIONS = frozenset({".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi"})
 _RANDOM_HISTORY: dict[tuple[str, str, str, str], deque[str]] = {}
 _RANDOM_HISTORY_LOCK = threading.Lock()
@@ -219,12 +222,14 @@ class BooruCatalog:
         doh_endpoint: str | None = None,
         parent_max_rating: str | None = None,
         parent_allowed_tags: tuple[str, ...] = (),
+        filter_ai_generated: bool = False,
     ) -> None:
         self.user_id, self.api_key = credentials
         self.rule34_user_id, self.rule34_api_key = rule34_credentials
         self.exclude_male = exclude_male
         self.use_doh = use_doh
         self.filter_gore = filter_gore
+        self.filter_ai_generated = filter_ai_generated
         block_tag_values = (custom_block_tags,) if isinstance(custom_block_tags, str) else custom_block_tags
         self.custom_block_tags = frozenset(
             tag.strip().casefold().replace(" ", "_")
@@ -679,6 +684,8 @@ class BooruCatalog:
                     if self.custom_block_tags.intersection(post.tags):
                         continue
                     if self.filter_gore and post.tags.intersection(GORE_BLOCK_TAGS):
+                        continue
+                    if self.filter_ai_generated and post.tags.intersection(AI_GENERATED_BLOCK_TAGS):
                         continue
                     # Some sources, especially yande.re, do not tag posts with
                     # 1girl/female_focus. Exclude explicit male tags, but don't
