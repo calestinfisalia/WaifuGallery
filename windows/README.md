@@ -146,6 +146,12 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Windows source version: 0.1.20.
 - Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.20`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.20).
 
+## Windows 0.1.21
+
+- **Installer:** replace the default wizard illustration with the transparent Iro-chan tablet pose.
+- Windows source version: 0.1.21.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.21`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.21).
+
 ## Windows 0.1.15
 
 - **License:** new Windows builds from this source are distributed under GNU GPL version 3 or later; the installer presents the license and the portable build includes a copy.
