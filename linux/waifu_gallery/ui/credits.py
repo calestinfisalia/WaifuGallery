@@ -154,7 +154,7 @@ class ImageCreditsDialog(QDialog):
         tags_layout.setHorizontalSpacing(6)
         tags_layout.setVerticalSpacing(1)
         tags_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        columns = 3
+        columns = 2
         for index, tag in enumerate(sorted(post.tags, key=str.casefold)):
             button = QToolButton()
             button.setText(tag.replace("_", " "))

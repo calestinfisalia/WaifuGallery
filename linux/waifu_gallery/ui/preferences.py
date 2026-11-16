@@ -637,14 +637,14 @@ class PreferencesDialog(FramelessResizableDialog):
         rating_layout.addWidget(self.default_rating)
         rules_section, rules_layout = _settings_section("Content rules")
         self.exclude_male = QCheckBox("Exclude posts tagged as male-only")
-        self.exclude_male.setChecked(bool(self.settings.get("search/exclude_male", True)))
+        self.exclude_male.setChecked(self.settings.get_bool("search/exclude_male", True))
         self.allow_nsfw = QCheckBox("Allow NSFW results")
-        self.allow_nsfw.setChecked(bool(self.settings.get("search/allow_nsfw", False)))
+        self.allow_nsfw.setChecked(self.settings.get_bool("search/allow_nsfw", False))
         self.filter_gore = QCheckBox("Filter posts tagged as gore")
-        self.filter_gore.setChecked(bool(self.settings.get("search/filter_gore", True)))
+        self.filter_gore.setChecked(self.settings.get_bool("search/filter_gore", True))
         self.filter_ai_generated = QCheckBox("Hide AI-generated posts")
         self.filter_ai_generated.setChecked(
-            bool(self.settings.get("search/filter_ai_generated", False))
+            self.settings.get_bool("search/filter_ai_generated", False)
         )
         for control in (
             self.exclude_male,
@@ -660,7 +660,8 @@ class PreferencesDialog(FramelessResizableDialog):
         ai_filter_help.setWordWrap(True)
         rules_layout.addWidget(ai_filter_help)
 
-        rules_layout.addWidget(QLabel("Custom blocked tags"))
+        tags_section, tags_layout = _settings_section("Custom blocked tags")
+        tags_layout.addWidget(QLabel("Posts containing these provider tags are hidden."))
         self.filter_list = QListWidget()
         self.filter_list.setObjectName("customFilterList")
         self.filter_list.setFrameShape(QFrame.Shape.NoFrame)
@@ -675,7 +676,7 @@ class PreferencesDialog(FramelessResizableDialog):
             saved_tags = saved_tags.replace(",", " ").split()
         for tag in saved_tags:
             self._add_chip_item(self.filter_list, str(tag))
-        rules_layout.addWidget(self.filter_list, 1)
+        tags_layout.addWidget(self.filter_list, 1)
         add_row = QHBoxLayout()
         add_row.setSpacing(8)
         self.new_filter = QLineEdit()
@@ -686,17 +687,14 @@ class PreferencesDialog(FramelessResizableDialog):
         self.new_filter.returnPressed.connect(self.add_filter)
         add_row.addWidget(self.new_filter, 1)
         add_row.addWidget(add_button)
-        rules_layout.addLayout(add_row)
-        help_text = QLabel("Built-in tag filters only match posts tagged by their provider.")
-        help_text.setObjectName("settingsHelpText")
-        help_text.setWordWrap(True)
-        rules_layout.addWidget(help_text)
+        tags_layout.addLayout(add_row)
         page = self._section_menu_page(
             "Filters",
-            "Set a default rating and choose which tagged content is filtered.",
+            "Set the default rating and choose how content is filtered.",
             (
-                ("Default rating", "Choose which ratings are included in browsing.", "info", rating_section),
-                ("Content rules", "Filter tags and manage content preferences.", "settings-2", rules_section),
+                ("Default rating", "Choose the rating shown by default.", "settings-2", rating_section),
+                ("Content rules", "Configure rating and tag-based content rules.", "check", rules_section),
+                ("Custom blocked tags", "Hide posts containing selected tags.", "x", tags_section),
             ),
         )
         self._add_page(page, "Filters", "filter")
@@ -1285,28 +1283,18 @@ class PreferencesDialog(FramelessResizableDialog):
         self.settings_changed.emit()
 
     def _build_backup_tab(self) -> None:
-        page = QWidget()
-        page.setObjectName("settingsPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(14)
-        title = QLabel("Export or import your user data")
-        title.setStyleSheet("font-size: 16pt; font-weight: 650;")
-        layout.addWidget(title)
-        description = QLabel(
-            "Backups contain favorites, provider credentials, and portable preferences. "
-            "They are encrypted with a passphrase you choose and can be used on Windows, "
-            "Linux, and Android. Device-specific download locations are not included."
-        )
-        description.setWordWrap(True)
-        layout.addWidget(description)
+        export_section, export_layout = _settings_section("Export encrypted backup")
+        export_layout.addWidget(QLabel(
+            "Create an encrypted backup containing favorites, provider credentials, and "
+            "portable preferences. Device-specific settings and local safety PINs are not included."
+        ))
         notice = QFrame()
         notice.setObjectName("backupNotice")
         notice_layout = QVBoxLayout(notice)
         notice_layout.setContentsMargins(14, 12, 14, 12)
         notice_layout.setSpacing(5)
         notice_title = QLabel("Keep your passphrase safe")
-        notice_title.setStyleSheet("font-weight: 650;")
+        notice_title.setStyleSheet("font-weight: 600;")
         notice_layout.addWidget(notice_title)
         warning = QLabel(
             "It cannot be recovered. Anyone with the backup file and its passphrase can "
@@ -1314,34 +1302,30 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         warning.setWordWrap(True)
         notice_layout.addWidget(warning)
-        layout.addWidget(notice)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(12)
+        export_layout.addWidget(notice)
         export_button = QPushButton("Export encrypted backup")
         export_button.clicked.connect(self.export_user_data)
+        export_button.setMinimumHeight(38)
+        export_layout.addWidget(export_button)
+
+        import_section, import_layout = _settings_section("Import backup")
+        import_layout.addWidget(QLabel(
+            "Restore or merge a saved backup. Merge keeps existing favorites and provider "
+            "credentials where present; Replace uses the backup's favorites and credentials."
+        ))
         import_button = QPushButton("Import backup")
         import_button.clicked.connect(self.import_user_data)
-        for heading, description_text, button in (
-            ("Export", "Create an encrypted backup file.", export_button),
-            ("Import", "Restore or merge a saved backup.", import_button),
-        ):
-            card = QFrame()
-            card.setObjectName("backupActionCard")
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(14, 12, 14, 12)
-            card_layout.setSpacing(7)
-            card_title = QLabel(heading)
-            card_title.setStyleSheet("font-weight: 650;")
-            card_layout.addWidget(card_title)
-            card_description = QLabel(description_text)
-            card_description.setWordWrap(True)
-            card_layout.addWidget(card_description)
-            button.setMinimumHeight(38)
-            card_layout.addWidget(button)
-            actions.addWidget(card, 1)
-        layout.addLayout(actions)
-        layout.addStretch(1)
+        import_button.setMinimumHeight(38)
+        import_layout.addWidget(import_button)
+
+        page = self._section_menu_page(
+            "Backup & Restore",
+            "Choose whether to export your data or import an existing backup.",
+            (
+                ("Export", "Create a passphrase-protected backup file.", "archive", export_section),
+                ("Import", "Restore or merge data from a backup.", "restore", import_section),
+            ),
+        )
         self._add_page(page, "Backup & Restore", "archive")
 
     def export_user_data(self) -> None:
@@ -1493,7 +1477,7 @@ class PreferencesDialog(FramelessResizableDialog):
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         panel_layout.addWidget(logo, 0, Qt.AlignmentFlag.AlignHCenter)
         title = QLabel("Waifu Gallery")
-        title.setStyleSheet("font-size: 16pt; font-weight: 700;")
+        title.setStyleSheet("font-size: 16pt; font-weight: 600;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         panel_layout.addWidget(title)
         version = QLabel(f"Version {__version__}")

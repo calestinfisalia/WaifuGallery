@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..models import ImagePost, SearchPage
-from ..providers import BooruCatalog, ProviderError
+from ..providers import AI_GENERATED_BLOCK_TAGS, BooruCatalog, ProviderError
 from ..settings import AppSettings
 from .backup_prompts import BackupMessageDialog
 from .downloads import DownloadsDialog
@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
         self.card_buttons: dict[str, QPushButton] = {}
         self.card_loading_indicators: dict[str, CircularProgressIndicator] = {}
         self.card_play_badges: dict[str, QLabel] = {}
+        self.card_ai_badges: dict[str, QLabel] = {}
         self.card_frames: dict[str, QWidget] = {}
         self.active_detail_id = ""
         self.detail_post: ImagePost | None = None
@@ -400,6 +401,7 @@ class MainWindow(QMainWindow):
         self.random_scroll.setWidget(self.random_image)
         self.random_image.viewport = self.random_scroll.viewport()
         self.random_image.scroll_area = self.random_scroll
+        self.random_ai_badge = self._create_ai_badge(self.random_scroll.viewport())
         self.random_image.zoomChanged.connect(
             lambda zoomed, area=self.random_scroll: self._set_zoom_scrollbars(area, zoomed)
         )
@@ -425,6 +427,7 @@ class MainWindow(QMainWindow):
         self.random_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.random_media_stack.addWidget(self.random_scroll)
         self.random_media_stack.addWidget(self.random_video)
+        self.random_video_ai_badge = self._create_ai_badge(self.random_media_stack)
         random_layout.addWidget(self.random_media_stack, 1)
         self.random_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.random_video.fullscreen_toggle = self.random_video_fullscreen_button
@@ -566,6 +569,7 @@ class MainWindow(QMainWindow):
         self.detail_scroll.setWidget(self.detail_image)
         self.detail_image.viewport = self.detail_scroll.viewport()
         self.detail_image.scroll_area = self.detail_scroll
+        self.detail_ai_badge = self._create_ai_badge(self.detail_scroll.viewport())
         self.detail_image.zoomChanged.connect(
             lambda zoomed, area=self.detail_scroll: self._set_zoom_scrollbars(area, zoomed)
         )
@@ -591,6 +595,7 @@ class MainWindow(QMainWindow):
         self.detail_media_stack.setStyleSheet("background: transparent; border: 0;")
         self.detail_media_stack.addWidget(self.detail_scroll)
         self.detail_media_stack.addWidget(self.detail_video)
+        self.detail_video_ai_badge = self._create_ai_badge(self.detail_media_stack)
         self.detail_video_fullscreen_button = self._icon_button("expand", "Fullscreen video")
         self.detail_video.fullscreen_toggle = self.detail_video_fullscreen_button
         self.detail_video.add_control_action(self.detail_video_fullscreen_button, index=5)
@@ -912,6 +917,58 @@ class MainWindow(QMainWindow):
         if self.pages.currentWidget() is self.detail_page:
             return self.detail_post
         return None
+
+    @staticmethod
+    def _create_ai_badge(parent: QWidget) -> QLabel:
+        badge = QLabel("AI", parent)
+        badge.setObjectName("aiGeneratedBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        badge.setAccessibleName("AI-generated image")
+        badge.setToolTip("Provider tagged this image as AI-generated or AI-assisted.")
+        badge.setStyleSheet(
+            "QLabel#aiGeneratedBadge {"
+            "background: rgba(18, 20, 28, 220); color: #ffffff;"
+            "border: 1px solid rgba(255, 255, 255, 90); border-radius: 9px;"
+            "padding: 3px 8px; font-size: 11px; font-weight: 600;"
+            "}"
+        )
+        badge.adjustSize()
+        badge.hide()
+        return badge
+
+    @staticmethod
+    def _is_ai_tagged_post(post: ImagePost | None) -> bool:
+        return bool(post and post.tags.intersection(AI_GENERATED_BLOCK_TAGS))
+
+    @staticmethod
+    def _position_corner_badge(badge: QLabel) -> None:
+        parent = badge.parentWidget()
+        if parent is None:
+            return
+        badge.adjustSize()
+        margin = 12
+        badge.move(
+            max(margin, parent.width() - badge.width() - margin),
+            max(margin, parent.height() - badge.height() - margin),
+        )
+        badge.raise_()
+
+    def _update_media_ai_badge(self, badge: QLabel, post: ImagePost | None) -> None:
+        visible = self._is_ai_tagged_post(post)
+        badge.setVisible(visible)
+        if visible:
+            self._position_corner_badge(badge)
+
+    def _reposition_visible_ai_badges(self) -> None:
+        for badge in (
+            self.random_ai_badge,
+            self.random_video_ai_badge,
+            self.detail_ai_badge,
+            self.detail_video_ai_badge,
+        ):
+            if not badge.isHidden():
+                self._position_corner_badge(badge)
 
     def _sync_favorite_buttons(self) -> None:
         post = self._active_post()
@@ -1246,7 +1303,7 @@ class MainWindow(QMainWindow):
             }
 
         stylesheet = """
-            * { font-family: "Inter", "Segoe UI", sans-serif; font-size: 10pt; }
+            * { font-family: "Inter", "Segoe UI", sans-serif; font-size: 10pt; font-weight: 400; }
             QMainWindow { background: transparent; border: 1px solid __BORDER__; border-radius: 12px; }
             QDialog, QWidget#appRoot, QWidget#contentArea { background: __BG__; color: __TEXT__; }
             QDialog#settingsDialog { background: transparent; border: 0; }
@@ -1272,7 +1329,7 @@ class MainWindow(QMainWindow):
             QDialog#downloadsDialog, QDialog#releaseNotesDialog { background: transparent; border: 0; }
             QWidget#downloadsSurface, QWidget#releaseNotesSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 12px; }
             QWidget#dialogTitleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
-            QLabel#downloadsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#downloadsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
             QPushButton#downloadsCloseButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
             QPushButton#downloadsCloseButton:hover { background: #F7768E; }
             QListWidget#downloadsList { background: transparent; border: 0; outline: 0; }
@@ -1286,9 +1343,9 @@ class MainWindow(QMainWindow):
             QPushButton#downloadCancelButton, QPushButton#downloadOpenFolderButton { background: transparent; border: 0; border-radius: 8px; padding: 2px; }
             QPushButton#downloadCancelButton:hover, QPushButton#downloadOpenFolderButton:hover { background: __ACTIVE__; }
             QPushButton#downloadCancelButton:disabled { background: transparent; }
-            QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 700; }
+            QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 600; }
             QLabel#releaseNotesVersion { color: __MUTED__; }
-            QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
             QPushButton#favoritesSelectAllButton, QPushButton#favoritesDeleteSelectedButton, QPushButton#favoritesDownloadSelectedButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#favoritesSelectAllButton:hover, QPushButton#favoritesDeleteSelectedButton:hover, QPushButton#favoritesDownloadSelectedButton:hover { background: __HOVER__; }
             QPushButton#favoritesSelectAllButton:checked { background: __ACTIVE__; border: 1px solid __ACCENT__; }
@@ -1297,12 +1354,12 @@ class MainWindow(QMainWindow):
             QDialog#mediaInfoDialog { background: transparent; border: 0; }
             QWidget#mediaInfoSurface { background: __BG__; border: 1px solid __BORDER__; border-radius: 18px; }
             QWidget#mediaInfoTitleBar { background: transparent; }
-            QLabel#mediaInfoWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#mediaInfoWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
             QLabel#mediaInfoFieldLabel { color: __MUTED__; min-width: 62px; }
             QPushButton#mediaInfoCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#mediaInfoCloseButton:hover { background: #F7768E; }
             QWidget#settingsTitleBar { background: transparent; }
-            QLabel#settingsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#settingsWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
             QPushButton#settingsCloseButton { background: transparent; border: 0; border-radius: 15px; padding: 0; }
             QPushButton#settingsCloseButton:hover { background: #F7768E; }
             QWidget#settingsSidebar { background: __SIDEBAR__; border-radius: 16px; }
@@ -1311,7 +1368,7 @@ class MainWindow(QMainWindow):
             QWidget#settingsPage QLabel { background: transparent; }
             QWidget#settingsPage QFrame { background: transparent; border-color: __BORDER__; }
             QWidget#settingsPage QFrame#settingsSection { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 12px; }
-            QLabel#settingsSectionTitle { color: __STRONG__; font-size: 11pt; font-weight: 650; }
+            QLabel#settingsSectionTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
             QLabel#settingsHelpText { color: __MUTED__; }
             QPushButton#settingsSubmenuButton, QPushButton#safetyMenuButton { text-align: left; background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 10px; padding: 10px 14px; }
             QPushButton#settingsSubmenuButton:hover, QPushButton#safetyMenuButton:hover { background: __HOVER__; border-color: __MUTED__; }
@@ -1325,7 +1382,7 @@ class MainWindow(QMainWindow):
             QScrollArea#safetySettingsScroll { background: transparent; border: 0; }
             QWidget#aboutMascot, QWidget#updateMascot { background: transparent; }
             QFrame#releaseNotesCard { background: __SIDEBAR__; border: 1px solid __BORDER__; border-radius: 18px; }
-            QLabel#releaseNotesSubheading { color: __MUTED__; font-weight: 600; }
+            QLabel#releaseNotesSubheading { color: __MUTED__; font-weight: 500; }
             QWidget#customTermRow { background: transparent; border: 0; }
             QPushButton#removeCustomTermButton { background: transparent; border: 0; border-radius: 14px; padding: 0; }
             QPushButton#removeCustomTermButton:hover { background: #4A3042; }
@@ -1334,7 +1391,7 @@ class MainWindow(QMainWindow):
             QPushButton#settingsNavButton:checked { background: __MENU_SELECTED__; color: __STRONG__; }
             QWidget#appRoot { border-radius: 12px; }
             QWidget#titleBar { background: __SIDEBAR__; border-bottom: 1px solid __BORDER__; border-top-left-radius: 12px; border-top-right-radius: 12px; }
-            QLabel#windowTitle { color: __STRONG__; font-size: 10pt; font-weight: 650; }
+            QLabel#windowTitle { color: __STRONG__; font-size: 10pt; font-weight: 600; }
             QWidget#titleBar QPushButton { background: transparent; border: 0; border-radius: 7px; padding: 0; }
             QWidget#titleBar QPushButton:hover { background: __HOVER__; }
             QWidget { color: __TEXT__; }
@@ -1698,6 +1755,7 @@ class MainWindow(QMainWindow):
                 self.detail_media_stack.setCurrentWidget(self.detail_scroll)
                 self.detail_video.clear()
                 self.detail_image.set_image(pixmap)
+                self._update_media_ai_badge(self.detail_ai_badge, self.detail_post)
                 self._full_image_loaded = False
                 self._set_image_credits_visible(True)
                 self._set_ambient_image(self.detail_ambient, pixmap, self.detail_page)
@@ -1976,6 +2034,8 @@ class MainWindow(QMainWindow):
     def show_random(self) -> None:
         if not self._rating_allowed():
             return
+        self.random_ai_badge.hide()
+        self.random_video_ai_badge.hide()
         if not self._fullscreen_active:
             self.statusBar().show()
         self._hide_normal_video_actions("random")
@@ -2044,6 +2104,10 @@ class MainWindow(QMainWindow):
         self.random_media_stack.setCurrentWidget(self.random_scroll)
         self.random_video.clear()
         self.random_image.set_image(pixmap)
+        self.random_video_ai_badge.hide()
+        self._update_media_ai_badge(
+            self.random_ai_badge, getattr(self, "random_post", None)
+        )
         self.download_button.show()
         self.full_image_button.setToolTip("Load original-resolution image")
         self.full_image_button.setEnabled(True)
@@ -2058,6 +2122,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Image loaded", 3000)
 
     def _show_random_video(self, post: ImagePost) -> None:
+        self.random_ai_badge.hide()
+        self._update_media_ai_badge(self.random_video_ai_badge, post)
         if not self._fullscreen_active:
             self.statusBar().show()
             self.statusBar().raise_()
@@ -2205,6 +2271,7 @@ class MainWindow(QMainWindow):
         self.card_buttons.clear()
         self.card_loading_indicators.clear()
         self.card_play_badges.clear()
+        self.card_ai_badges.clear()
         self.card_frames.clear()
         while self.gallery_rows.count():
             entry = self.gallery_rows.takeAt(0)
@@ -2342,6 +2409,15 @@ class MainWindow(QMainWindow):
             play_badge.setVisible(post.post_id in self.thumbnail_cache)
             preview_layout.addWidget(play_badge, 0, 0, Qt.AlignmentFlag.AlignCenter)
             self.card_play_badges[post.post_id] = play_badge
+        if self._is_ai_tagged_post(post):
+            ai_badge = self._create_ai_badge(preview_container)
+            preview_layout.addWidget(
+                ai_badge,
+                0,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
+            )
+            self.card_ai_badges[post.post_id] = ai_badge
         card_layout.addWidget(preview_container)
         self.card_buttons[post.post_id] = button
         self.card_frames[post.post_id] = frame
@@ -2445,6 +2521,10 @@ class MainWindow(QMainWindow):
         badge = self.card_play_badges.get(post.post_id)
         if badge:
             badge.show()
+        ai_badge = self.card_ai_badges.get(post.post_id)
+        if ai_badge:
+            ai_badge.show()
+            ai_badge.raise_()
 
     def open_post(self, post: ImagePost) -> None:
         self._media_controls_idle_timer.stop()
@@ -2454,6 +2534,11 @@ class MainWindow(QMainWindow):
         self._hide_normal_video_actions("random")
         self._hide_normal_video_actions("detail")
         self._set_ambient_image(self.detail_ambient, QPixmap(), self.detail_page)
+        self.detail_ai_badge.hide()
+        self._update_media_ai_badge(
+            self.detail_video_ai_badge,
+            post if post.media_type == "video" else None,
+        )
         self.detail_post = post
         self._full_image_loaded = False
         self.full_image_button.hide()
@@ -2718,7 +2803,7 @@ class MainWindow(QMainWindow):
         self._fullscreen_active = True
         active_player = self.random_video if self._fullscreen_source == "random" else self.detail_video
         active_player.set_fullscreen_mode(True)
-        if fullscreen_post is not None and fullscreen_post.media_type == "video":
+        if fullscreen_post is not None:
             ambient = (
                 self.random_ambient
                 if self._fullscreen_source == "random"
@@ -3258,6 +3343,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._resize_settle_timer.start()
+        if hasattr(self, "random_ai_badge"):
+            QTimer.singleShot(0, self._reposition_visible_ai_badges)
         if hasattr(self, "gallery_status") and self.gallery_status.isVisible():
             width = min(820, max(280, self.gallery_page.width() - 40))
             self.gallery_status.setFixedWidth(width)

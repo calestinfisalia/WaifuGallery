@@ -1,10 +1,10 @@
 # Waifu Gallery for Linux
 
-This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are aligned with Windows 0.1.15 while Linux launch and packaging files remain separate.
+This directory is a separate Linux port of the Windows Python/PySide6 application. Shared provider, video, filter, DoH, favorites, media-info, and backup features are kept aligned with the Windows application while Linux launch and packaging files remain separate.
 
 ## Status
 
-The source includes the shared Windows 0.1.3–0.1.11 desktop features, including Rule34.xxx credentials, configurable media and tag filters, DoH resolvers, video playback, volume/mute, stream resolution selection, image/video counts, media information, automatically saved settings, immediate DoH disable, resizable application-styled dialogs, section-based encrypted cross-platform backups, persistent download paths, startup release checks, OLED Dark, and PIN-protected Safety & Privacy controls. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. Linux 0.1.18 is published under `linux-v0.1.18`; the compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped.
+Linux source version 0.1.19 carries the AI-generated media badges, fullscreen image background, and two-column Media Info tags already available on Windows, with lighter typography for Linux font fallbacks. Linux 0.1.19 has not been published; the update feed remains at `linux-v0.1.18` until the Linux build and assets are verified. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. The compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
@@ -31,7 +31,7 @@ Parental controls and the Favorites lock are in-app restrictions, not tamper-pro
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution). Imports respect the sections selected in a backup and leave unselected data unchanged. Download folders, safety PINs/policies, and window state are excluded.
+Open Settings → Backup & Restore and choose the separate Export or Import page. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution). During import, choose which included sections to restore; unselected data remains unchanged. Download folders, safety PINs/policies, and window state are excluded.
 
 The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. PINs and parental policy are device-local and excluded from backups. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
@@ -85,6 +85,14 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Filters:** optionally hide provider posts tagged `ai-generated` or `ai-assisted`; untagged posts may remain visible.
 - **About and updates:** center the About app logo and reduce the update-dialog mascot size.
 - Linux update tag: `linux-v0.1.18`; Windows and Android versions are unchanged.
+
+## Linux 0.1.19 (prepared, not published)
+
+- **AI labels:** show an AI badge on tagged image and video media in Random, Search, and detail views.
+- **Fullscreen:** image fullscreen hides the ambient background, matching video fullscreen.
+- **Media Info:** arrange tags in two columns.
+- **Typography:** set a consistent regular body weight and soften headings for Linux font fallbacks.
+- Linux source version: 0.1.19. The update feed remains on `linux-v0.1.18` until release assets are built and verified.
 
 ## Linux 0.1.16
 
