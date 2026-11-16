@@ -11,8 +11,8 @@ android {
         applicationId = "com.fisalia.waifugallery"
         minSdk = 29
         targetSdk = 37
-        versionCode = 18
-        versionName = "0.1.20"
+        versionCode = 19
+        versionName = "0.1.21"
     }
 
     buildFeatures {

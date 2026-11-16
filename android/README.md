@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version and latest published version are `0.1.20` with `versionCode` `18`, published under the Android-specific `android-v0.1.20` release tag. Android's version can advance independently from Windows and Linux.
+Android's source version is `0.1.21` with `versionCode` `19`; the latest published version is `0.1.20` (`versionCode` `18`) under the Android-specific `android-v0.1.20` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -13,7 +13,8 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
 - Auto search and random requests run eligible providers concurrently, return the first provider with results, and cancel slower requests. If an Auto random request gets provider errors without a result, it retries once before reporting failure.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
-- AI badge on image posts tagged `ai-generated` or `ai-assisted`, shown in Random, Search, Favorites, and image details.
+- AI badge on tagged image and video posts, shown on full-size media at the upper left and on thumbnails at the lower right.
+- Back navigation returns from Search details to results, from results to Random, and exits from Random.
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
@@ -33,6 +34,13 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.21 (prepared, not published)
+
+- **AI labels:** place the badge on the upper-left of full-size tagged image/video media while leaving thumbnail badges on the lower-right.
+- **Back navigation:** Search detail returns to results; Search results return to Random; Back from Random exits the app.
+- Android source version: `0.1.21`; `versionCode`: `19`.
+- Update feed remains on `android-v0.1.20` until the APK is built and its release verified.
 
 ## Android 0.1.20
 

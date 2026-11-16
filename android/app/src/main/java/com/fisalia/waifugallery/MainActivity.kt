@@ -355,14 +355,20 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         if (currentPost?.mediaType != "video") mediaFullscreen = false
     }
     BackHandler(
-        mediaFullscreen || state.screen == AppScreen.DETAIL || state.screen == AppScreen.FAVORITES,
+        mediaFullscreen ||
+            state.screen == AppScreen.DETAIL ||
+            state.screen == AppScreen.GALLERY ||
+            state.screen == AppScreen.FAVORITES ||
+            (state.screen == AppScreen.RANDOM && state.searchVisible),
     ) {
         if (mediaFullscreen) {
             mediaFullscreen = false
         } else if (state.screen == AppScreen.DETAIL) {
             model.backToGallery()
-        } else {
+        } else if (state.screen == AppScreen.GALLERY || state.screen == AppScreen.FAVORITES) {
             model.goHome()
+        } else {
+            model.toggleSearch()
         }
     }
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -671,7 +677,11 @@ private fun HeaderBar(
     var settingsMenuExpanded by remember { mutableStateOf(false) }
     Surface(color = Panel) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().height(58.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (searchVisible) {
+            if (isGallery) {
+                IconButton(onClick = onHome) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to random")
+                }
+            } else if (searchVisible) {
                 IconButton(onClick = onSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             } else if (isDetail) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to results") }
@@ -1710,9 +1720,11 @@ private fun ImageFrame(
             },
         )
         }
-        if (post.mediaType == "image" && post.hasAiGeneratedTag()) {
+        if (post.hasAiGeneratedTag()) {
             Surface(
-                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                modifier = Modifier
+                    .align(if (allowThumbnailFallback) Alignment.BottomEnd else Alignment.TopStart)
+                    .padding(12.dp),
                 color = Color(0xDD111318),
                 shape = RoundedCornerShape(9.dp),
             ) {
