@@ -325,18 +325,14 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     }
     LaunchedEffect(mediaFullscreen, fullscreenPost?.id) {
         val currentActivity = activity ?: return@LaunchedEffect
-        if (mediaFullscreen && fullscreenPost != null) {
+        if (mediaFullscreen && fullscreenPost?.mediaType == "video") {
             if (!orientationLocked) {
                 previousOrientation = currentActivity.requestedOrientation
                 orientationLocked = true
             }
-            val dimensions = if (fullscreenPost.mediaType == "video") {
-                fullscreenPost.videoVariants
-                    .firstOrNull { it.width > 0 && it.height > 0 }
-                    ?.let { it.width to it.height }
-            } else {
-                null
-            }
+            val dimensions = fullscreenPost.videoVariants
+                .firstOrNull { it.width > 0 && it.height > 0 }
+                ?.let { it.width to it.height }
             val width = dimensions?.first ?: fullscreenPost.width
             val height = dimensions?.second ?: fullscreenPost.height
             currentActivity.requestedOrientation = if (width > height) {
