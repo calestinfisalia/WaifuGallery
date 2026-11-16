@@ -86,6 +86,50 @@ internal suspend fun <P, T> firstSuccessfulProviderResponse(
     }
 }
 
+internal suspend fun <P, T> allProviderResponses(
+    providers: List<P>,
+    request: suspend (P) -> T,
+    onFailure: (P, Throwable) -> Unit,
+): List<Pair<P, T>> = coroutineScope {
+    providers.map { provider ->
+        async(Dispatchers.IO) {
+            val result = try {
+                Result.success(request(provider))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            provider to result
+        }
+    }.awaitAll().mapNotNull { (provider, result) ->
+        result.exceptionOrNull()?.let { onFailure(provider, it) }
+        result.getOrNull()?.let { provider to it }
+    }
+}
+
+internal fun mergeProviderPostsRoundRobin(
+    providerOrder: List<String>,
+    postsByProvider: Map<String, List<ImagePost>>,
+    limit: Int,
+): List<ImagePost> {
+    if (limit <= 0) return emptyList()
+    val merged = ArrayList<ImagePost>(limit)
+    val seen = mutableSetOf<String>()
+    val maximumResults = providerOrder.maxOfOrNull { postsByProvider[it].orEmpty().size } ?: 0
+    for (index in 0 until maximumResults) {
+        for (provider in providerOrder) {
+            val post = postsByProvider[provider]?.getOrNull(index) ?: continue
+            val dedupeKey = post.dedupeKey.ifBlank {
+                post.imageUrl.ifBlank { "${post.provider}:${post.id}" }
+            }
+            if (seen.add(dedupeKey)) merged += post
+            if (merged.size >= limit) return merged
+        }
+    }
+    return merged
+}
+
 private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
@@ -320,11 +364,38 @@ class BooruApi(
                 add(danbooru)
             }
         }
+        if (providerName == "All") {
+            val errors = mutableListOf<String>()
+            val results = allProviderResponses(
+                providers = providers,
+                request = { provider ->
+                    searchProvider(provider, query, rating, page, limit, includeCount = false)
+                },
+                onFailure = { provider, error ->
+                    errors += "${provider.name}: ${error.message ?: "Request failed"}"
+                },
+            )
+            if (results.isEmpty() && errors.size == providers.size && errors.isNotEmpty()) {
+                throw IllegalStateException("All providers failed: ${errors.joinToString(" | ")}")
+            }
+            val postsByProvider = results.associate { (provider, result) ->
+                provider.name to result.posts
+            }
+            return@coroutineScope SearchPage(
+                posts = mergeProviderPostsRoundRobin(
+                    providerOrder = providers.map { it.name },
+                    postsByProvider = postsByProvider,
+                    limit = limit,
+                ),
+                hasMore = results.any { it.second.hasMore },
+                providerErrors = errors,
+            )
+        }
         val errors = mutableListOf<String>()
         val result = firstSuccessfulProviderResponse(
             providers = providers,
             request = { provider ->
-                searchProvider(provider, query, rating, page, limit, includeCount = providerName != "All")
+                searchProvider(provider, query, rating, page, limit, includeCount = true)
             },
             hasResult = { it.posts.isNotEmpty() || it.hasMore },
             onFailure = { provider, error ->

@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -115,6 +116,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -298,6 +300,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         AppScreen.DETAIL -> state.detailImage
         else -> null
     }
+    val fullscreenImage = mediaFullscreen && fullscreenPost?.mediaType == "image"
     var previousOrientation by rememberSaveable {
         mutableIntStateOf(activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
     }
@@ -451,46 +454,55 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                     onClose = model::goHome,
                 )
             } else {
-                Scaffold(containerColor = AppBackground, topBar = {
-                    if (!mediaFullscreen) HeaderBar(
-                        isDetail = state.screen == AppScreen.DETAIL,
-                        isGallery = state.screen == AppScreen.GALLERY,
-                        showHome = state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM,
-                        searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
-                        query = state.queryInput,
-                        onQueryChanged = model::updateQuery,
-                        onSearchSubmit = {
-                            keyboardController?.hide()
-                            model.search()
-                        },
-                        onBack = model::backToGallery,
-                        onHome = model::goHome,
-                        onSearch = model::toggleSearch,
-                        onSave = model::saveCurrentImage,
-                        isFavorite = model.isFavorite(if (state.screen == AppScreen.DETAIL) state.detailImage else state.image),
-                        onFavorite = {
-                            val post = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
-                            if (post != null) {
-                                if (model.isFavorite(post)) confirmFavoriteRemoval = post else model.toggleFavorite(post)
-                            }
-                        },
-                        onSettings = model::openSettings,
-                        onOpenFilters = { showGalleryFilters = true },
-                        onDownloads = model::openDownloadQueue,
-                        onFavorites = model::openFavorites,
-                        onAbout = { aboutPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image },
-                        canSave = when (state.screen) {
-                            AppScreen.RANDOM -> state.image != null && !state.isLoading
-                            AppScreen.DETAIL -> state.detailImage != null && !state.isLoading
-                            AppScreen.GALLERY, AppScreen.FAVORITES -> false
-                        },
-                    )
-                }) { padding ->
+                Scaffold(
+                    containerColor = AppBackground,
+                    contentWindowInsets = if (fullscreenImage) {
+                        WindowInsets(0, 0, 0, 0)
+                    } else {
+                        ScaffoldDefaults.contentWindowInsets
+                    },
+                    topBar = {
+                        if (!mediaFullscreen) HeaderBar(
+                            isDetail = state.screen == AppScreen.DETAIL,
+                            isGallery = state.screen == AppScreen.GALLERY,
+                            showHome = state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM,
+                            searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
+                            query = state.queryInput,
+                            onQueryChanged = model::updateQuery,
+                            onSearchSubmit = {
+                                keyboardController?.hide()
+                                model.search()
+                            },
+                            onBack = model::backToGallery,
+                            onHome = model::goHome,
+                            onSearch = model::toggleSearch,
+                            onSave = model::saveCurrentImage,
+                            isFavorite = model.isFavorite(if (state.screen == AppScreen.DETAIL) state.detailImage else state.image),
+                            onFavorite = {
+                                val post = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
+                                if (post != null) {
+                                    if (model.isFavorite(post)) confirmFavoriteRemoval = post else model.toggleFavorite(post)
+                                }
+                            },
+                            onSettings = model::openSettings,
+                            onOpenFilters = { showGalleryFilters = true },
+                            onDownloads = model::openDownloadQueue,
+                            onFavorites = model::openFavorites,
+                            onAbout = { aboutPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image },
+                            canSave = when (state.screen) {
+                                AppScreen.RANDOM -> state.image != null && !state.isLoading
+                                AppScreen.DETAIL -> state.detailImage != null && !state.isLoading
+                                AppScreen.GALLERY, AppScreen.FAVORITES -> false
+                            },
+                        )
+                    },
+                ) { padding ->
+                    val contentModifier = if (fullscreenImage) Modifier else Modifier.padding(padding)
                     when (state.screen) {
                         AppScreen.RANDOM -> RandomScreen(
                             state,
                             imageLoader,
-                            Modifier.padding(padding),
+                            contentModifier,
                             mediaFullscreen,
                             onRefresh = model::refresh,
                             onFullscreenChanged = { mediaFullscreen = it },
@@ -510,7 +522,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             imageLoader,
                             onPageSelected = model::selectDetail,
                             onLoadAdjacentPage = model::loadAdjacentDetailPage,
-                            modifier = Modifier.padding(padding),
+                            modifier = contentModifier,
                             mediaFullscreen = mediaFullscreen,
                             onFullscreenChanged = { mediaFullscreen = it },
                             onVideoResolutionChanged = model::setVideoMaxHeight,
@@ -712,7 +724,7 @@ private fun HeaderBar(
 ) {
     var settingsMenuExpanded by remember { mutableStateOf(false) }
     Surface(color = Panel) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().height(58.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (isGallery) {
                 IconButton(onClick = onHome) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to random")
