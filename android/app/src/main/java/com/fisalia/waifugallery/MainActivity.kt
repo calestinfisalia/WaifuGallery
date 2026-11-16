@@ -59,6 +59,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
@@ -798,7 +802,7 @@ private fun RandomScreen(
             )
         }
         if (state.image == null && !state.isLoading) Text("No image loaded")
-        if (state.isLoading) LoadingSpinner(Modifier.align(Alignment.Center))
+        if (state.isLoading && !mediaFullscreen) LoadingSpinner(Modifier.align(Alignment.Center))
     }
 }
 
@@ -1431,14 +1435,54 @@ private fun ImageFrame(
         else -> emptyList()
     }.ifEmpty { listOf(if (showOriginal) post.imageUrl else url) }
     val displayedUrl = candidates[candidateIndex.coerceAtMost(candidates.lastIndex)]
+    val thumbnailPlaceholderUrl = post.thumbnailUrl.takeIf {
+        post.mediaType == "image" &&
+            zoomEnabled &&
+            playbackAllowed &&
+            !allowThumbnailFallback &&
+            it.isNotBlank() &&
+            it != post.imageUrl &&
+            it != displayedUrl
+    }
     val canLoadOriginal = post.mediaType != "video" &&
         zoomEnabled &&
         !allowThumbnailFallback &&
         !showOriginal &&
         post.thumbnailCandidates.any { it != post.imageUrl }
     var imageLoading by remember(post.id, url) { mutableStateOf(true) }
+    var fullscreenControlsVisible by remember(post.id) { mutableStateOf(true) }
+    var fullscreenControlsInteraction by remember(post.id) { mutableIntStateOf(0) }
+    val showFullscreenImageControls =
+        !mediaFullscreen || post.mediaType != "image" || fullscreenControlsVisible
+    var thumbnailPlaceholderLoaded by remember(
+        post.id,
+        displayedUrl,
+        thumbnailPlaceholderUrl,
+    ) { mutableStateOf(false) }
     var zoom by remember(post.id) { mutableFloatStateOf(1f) }
     var pan by remember(post.id) { mutableStateOf(Offset.Zero) }
+    var animateDoubleTapZoom by remember(post.id) { mutableStateOf(false) }
+    var doubleTapZoomAnimationKey by remember(post.id) { mutableIntStateOf(0) }
+    val zoomAnimationSpec = if (animateDoubleTapZoom) {
+        tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
+    } else {
+        snap<Float>()
+    }
+    val displayedZoom by animateFloatAsState(
+        targetValue = zoom,
+        animationSpec = zoomAnimationSpec,
+        label = "imageZoom",
+    )
+    val displayedPanX by animateFloatAsState(
+        targetValue = pan.x,
+        animationSpec = zoomAnimationSpec,
+        label = "imagePanX",
+    )
+    val displayedPanY by animateFloatAsState(
+        targetValue = pan.y,
+        animationSpec = zoomAnimationSpec,
+        label = "imagePanY",
+    )
     var viewportSize by remember(post.id) { mutableStateOf(IntSize.Zero) }
     fun constrainPan(offset: Offset, scale: Float): Offset {
         val viewportWidth = viewportSize.width.toFloat()
@@ -1455,6 +1499,7 @@ private fun ImageFrame(
         )
     }
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        animateDoubleTapZoom = false
         val newZoom = (zoom * zoomChange).coerceIn(1f, 6f)
         zoom = newZoom
         pan = if (newZoom <= 1f) Offset.Zero else constrainPan(pan + panChange, newZoom)
@@ -1463,9 +1508,17 @@ private fun ImageFrame(
     val currentPan by rememberUpdatedState(pan)
     val zoomGesture = if (zoomEnabled) {
         Modifier
-            .pointerInput(post.id) {
+            .pointerInput(post.id, mediaFullscreen) {
                 detectTapGestures(
+                    onTap = {
+                        if (mediaFullscreen && post.mediaType == "image") {
+                            fullscreenControlsVisible = true
+                            fullscreenControlsInteraction++
+                        }
+                    },
                     onDoubleTap = { tap ->
+                        animateDoubleTapZoom = true
+                        doubleTapZoomAnimationKey++
                         val oldZoom = currentZoom
                         if (oldZoom > 1f) {
                             zoom = 1f
@@ -1517,6 +1570,25 @@ private fun ImageFrame(
             videoFeedback = null
         }
     }
+    LaunchedEffect(doubleTapZoomAnimationKey, animateDoubleTapZoom) {
+        if (animateDoubleTapZoom) {
+            delay(280)
+            animateDoubleTapZoom = false
+        }
+    }
+    LaunchedEffect(
+        mediaFullscreen,
+        post.mediaType,
+        fullscreenControlsVisible,
+        fullscreenControlsInteraction,
+    ) {
+        if (mediaFullscreen && post.mediaType == "image" && fullscreenControlsVisible) {
+            delay(3_000)
+            fullscreenControlsVisible = false
+        } else if (!mediaFullscreen || post.mediaType != "image") {
+            fullscreenControlsVisible = true
+        }
+    }
     LaunchedEffect(post.id, playbackAllowed) {
         if (!playbackAllowed) {
             videoPlaying = false
@@ -1551,18 +1623,31 @@ private fun ImageFrame(
     }
     Box(
         modifier
-            .background(Color.Transparent)
+            .background(if (mediaFullscreen && post.mediaType == "image") Color.Black else Color.Transparent)
             .onSizeChanged { viewportSize = IntSize(it.width, it.height) }
             .then(if (post.mediaType == "video") Modifier else zoomGesture),
         contentAlignment = Alignment.Center,
     ) {
-        if (ambientMode) AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).build(),
+        if (ambientMode && !(mediaFullscreen && post.mediaType == "image")) AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(if (post.mediaType == "video") post.thumbnailUrl else thumbnailPlaceholderUrl ?: displayedUrl)
+                .build(),
             imageLoader = imageLoader,
             contentDescription = null,
             modifier = Modifier.fillMaxSize().blur(28.dp).graphicsLayer { scaleX = 1.12f; scaleY = 1.12f },
             contentScale = ContentScale.Crop,
         )
+        if (thumbnailPlaceholderUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context).data(thumbnailPlaceholderUrl).build(),
+                imageLoader = imageLoader,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+                onSuccess = { thumbnailPlaceholderLoaded = true },
+                onError = { thumbnailPlaceholderLoaded = false },
+            )
+        }
         if (post.mediaType == "video" && videoStarted && playbackAllowed && !allowThumbnailFallback && !videoError) {
             key(videoMaxHeight) {
                 AndroidView(
@@ -1702,10 +1787,10 @@ private fun ImageFrame(
             imageLoader = imageLoader,
             contentDescription = "${post.provider} image, rating ${post.rating}",
             modifier = Modifier.fillMaxSize().graphicsLayer {
-                scaleX = if (zoomEnabled) zoom else 1f
-                scaleY = if (zoomEnabled) zoom else 1f
-                translationX = if (zoomEnabled) pan.x else 0f
-                translationY = if (zoomEnabled) pan.y else 0f
+                scaleX = if (zoomEnabled) displayedZoom else 1f
+                scaleY = if (zoomEnabled) displayedZoom else 1f
+                translationX = if (zoomEnabled) displayedPanX else 0f
+                translationY = if (zoomEnabled) displayedPanY else 0f
             },
             contentScale = ContentScale.Fit,
             onLoading = { imageLoading = true },
@@ -1720,7 +1805,7 @@ private fun ImageFrame(
             },
         )
         }
-        if (post.hasAiGeneratedTag()) {
+        if (post.hasAiGeneratedTag() && showFullscreenImageControls) {
             Surface(
                 modifier = Modifier
                     .align(if (allowThumbnailFallback) Alignment.BottomEnd else Alignment.TopStart)
@@ -1894,7 +1979,8 @@ private fun ImageFrame(
         if (
             post.mediaType != "video" &&
             !allowThumbnailFallback &&
-            playbackAllowed
+            playbackAllowed &&
+            showFullscreenImageControls
         ) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
@@ -1926,10 +2012,15 @@ private fun ImageFrame(
                 Text(feedback, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge)
             }
         }
-        if (showLoadingIndicator && imageLoading) {
+        if (
+            showLoadingIndicator &&
+            imageLoading &&
+            !(thumbnailPlaceholderUrl != null && thumbnailPlaceholderLoaded) &&
+            showFullscreenImageControls
+        ) {
             LoadingSpinner(Modifier.align(Alignment.Center))
         }
-        if (canLoadOriginal) {
+        if (canLoadOriginal && showFullscreenImageControls) {
             Surface(
                 modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).clickable {
                     showOriginal = true
@@ -1945,7 +2036,7 @@ private fun ImageFrame(
                 )
             }
         }
-        if (showMetadata) {
+        if (showMetadata && showFullscreenImageControls) {
             Surface(
                 Modifier.align(Alignment.BottomStart).padding(start = 8.dp, top = 8.dp, bottom = 8.dp + metadataControlInset),
                 color = Color(0xAA15151A),

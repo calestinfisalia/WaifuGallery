@@ -2,11 +2,11 @@
 
 This guide separates the two update paths: platform releases for current clients, and a compatibility release for older clients that still query GitHub `/releases/latest`. Windows, Linux, and Android have independent app versions; a fix for one platform must not bump the versions or manifest entries for the others.
 
-Current published platform versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.21`. Windows source `0.1.22` and Linux source `0.1.19` have been prepared but are not published yet. Current clients use the exact platform tag in `updates.json`. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
+Current published platform versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.22`. Windows source `0.1.22` and Linux source `0.1.19` have been prepared but are not published yet. Current clients use the exact platform tag in `updates.json`. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
 
 ## Release channels
 
-- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform's entry in `updates.json` after its release and assets are verified. This is the path for future releases such as Windows `0.1.23`, Linux `0.1.20`, or Android `0.1.22`.
+- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform's entry in `updates.json` after its release and assets are verified. This is the path for future releases such as Windows `0.1.23`, Linux `0.1.20`, or Android `0.1.23`.
 - **Compatibility update (legacy path):** use the conventional `vX.Y.Z` tag only when intentionally serving clients that still read `/releases/latest`. It must contain the assets required by those legacy clients and be explicitly selected as GitHub Latest. Compatibility releases are coordinated exceptions, not the normal way to publish a platform fix.
 - **Bridge behavior:** the existing `v0.1.16` compatibility release lets older clients install a build that reads `updates.json`. Once updated, clients follow their own platform entry and no longer depend on the global Latest endpoint.
 
@@ -21,7 +21,7 @@ Current published platform versions are Windows `0.1.21`, Linux `0.1.18`, and An
 - Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.21` (`windows-v0.1.21`), Linux `0.1.18` (`linux-v0.1.18`), and Android `0.1.21` (`android-v0.1.21`). Windows `0.1.22` and Linux `0.1.19` are prepared but not published; Linux `0.1.15` was intentionally skipped.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.21` (`windows-v0.1.21`), Linux `0.1.18` (`linux-v0.1.18`), and Android `0.1.22` (`android-v0.1.22`). Windows `0.1.22` and Linux `0.1.19` are prepared but not published; Linux `0.1.15` was intentionally skipped.
 
 ## Previous compatibility release: `v0.1.15`
 
@@ -45,7 +45,7 @@ The compatibility release is published at `v0.1.16` and is marked GitHub Latest.
 
 Assets in `v0.1.16` include `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `Waifu-Gallery-0.1.16-x86_64.AppImage`, `Waifu-Gallery-0.1.16-x86_64.flatpak`, and `app-release.apk`. The Linux packages include the GNU GPL license. Preserve the Android signing setup documented in `android/README.md`; never commit signing keys or credentials.
 
-This compatibility release is the one-time bridge for clients that still query `/releases/latest`. New clients use the platform feed instead. The current public feed points Windows to `windows-v0.1.21`, Linux to `linux-v0.1.18`, and Android to `android-v0.1.21`.
+This compatibility release is the one-time bridge for clients that still query `/releases/latest`. New clients use the platform feed instead. The current public feed points Windows to `windows-v0.1.21`, Linux to `linux-v0.1.18`, and Android to `android-v0.1.22`.
 
 ## Version files
 
