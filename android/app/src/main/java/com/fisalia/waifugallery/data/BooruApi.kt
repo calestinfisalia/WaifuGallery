@@ -802,7 +802,7 @@ class BooruApi(
         val blocked = post.tags.any { it in custom }
         return !blocked && (!filterGore() || post.tags.none { it in GORE_BLOCK_TAGS }) &&
             (mediaFilter() == "all" || post.mediaType == mediaFilter()) &&
-            (!filterAiGenerated() || post.tags.none { it.lowercase() in AI_GENERATED_BLOCK_TAGS })
+            (!filterAiGenerated() || !post.hasAiGeneratedTag())
     }
 
     private fun acceptableGender(post: ImagePost): Boolean {
@@ -814,7 +814,6 @@ class BooruApi(
     private companion object {
         val VIDEO_EXTENSIONS = setOf("mp4", "m4v", "webm", "mov", "mkv", "avi")
         val GORE_BLOCK_TAGS = setOf("amputation", "blood", "blood_splatter", "body_horror", "decapitation", "dismemberment", "disembowelment", "exposed_organs", "gore", "guro", "intestines", "mutilation", "open_wound", "severed_head", "wound")
-        val AI_GENERATED_BLOCK_TAGS = setOf("ai-generated", "ai_generated", "ai-assisted", "ai_assisted")
         val SFW_BLOCK_TAGS = setOf(
             "anal", "blowjob", "cum", "cum_in_pussy", "cum_on_body", "cum_on_face",
             "cumshot", "ejaculation", "explicit", "fellatio", "genital", "hentai",

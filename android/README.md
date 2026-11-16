@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.19` with `versionCode` `17`. Android's version can advance independently from Windows and Linux; this APK is published under the Android-specific `android-v0.1.19` release tag. Continue increasing `versionCode` for each APK update.
+Android's source version is `0.1.20` with `versionCode` `18`; the latest published version remains `0.1.19` (`versionCode` `17`) until the new APK is released. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -13,6 +13,7 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
 - Auto search and random requests run eligible providers concurrently, return the first provider with results, and cancel slower requests. If an Auto random request gets provider errors without a result, it retries once before reporting failure.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
+- AI badge on image posts tagged `ai-generated` or `ai-assisted`, shown in Random, Search, Favorites, and image details.
 - Fullscreen media hides the app chrome and system bars, rotates landscape media to landscape and portrait media to portrait, and restores the previous orientation on exit.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
@@ -32,6 +33,12 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.20 (prepared, not published)
+
+- **AI labels:** show an AI badge on image posts tagged `ai-generated` or `ai-assisted`.
+- Android source version: `0.1.20`; `versionCode`: `18`.
+- Update feed remains on `android-v0.1.19` until the APK is built and its release verified.
 
 ## Android 0.1.19
 
@@ -148,4 +155,4 @@ The release APK is written to `app\build\outputs\apk\release\app-release.apk`.
 
 ## License and attribution
 
-Starting with this source revision, original Waifu Gallery Android application code is copyright (C) 2026 Fisalia Cantarella and licensed under the GNU GPL version 3 or later; see [LICENSE](LICENSE). Android versions published before this license change remain under their included MIT license. NyarchLinux/WaifuDownloader is acknowledged as inspiration for the general random-image feature, not as the source of this Kotlin/Compose implementation. Third-party libraries and Material icons retain their own licenses; consult their respective project notices.
+Starting with this source revision, original Waifu Gallery Android application code is copyright (C) 2026 Calestin Fisalia and licensed under the GNU GPL version 3 or later; see [LICENSE](LICENSE). Android versions published before this license change remain under their included MIT license. NyarchLinux/WaifuDownloader is acknowledged as inspiration for the general random-image feature, not as the source of this Kotlin/Compose implementation. Third-party libraries and Material icons retain their own licenses; consult their respective project notices.

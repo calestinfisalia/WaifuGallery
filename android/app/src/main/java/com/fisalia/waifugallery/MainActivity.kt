@@ -170,6 +170,7 @@ import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.ImagePost
+import com.fisalia.waifugallery.data.hasAiGeneratedTag
 import com.fisalia.waifugallery.data.mediumPreviewCandidates
 import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.UserDataBackup
@@ -1709,6 +1710,20 @@ private fun ImageFrame(
             },
         )
         }
+        if (post.mediaType == "image" && post.hasAiGeneratedTag()) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                color = Color(0xDD111318),
+                shape = RoundedCornerShape(9.dp),
+            ) {
+                Text(
+                    "AI",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
         if (post.mediaType == "video" && !videoStarted && !videoError && !allowThumbnailFallback) {
             Surface(
                 modifier = Modifier.align(Alignment.Center).size(68.dp).clickable {
@@ -2579,7 +2594,7 @@ private fun SettingsScreen(
                                 )
                                 Text(
                                     "Source code: GNU GPL version 3 or later.\n" +
-                                        "Copyright (C) 2026 Fisalia Cantarella. No warranty; see LICENSE.txt.\n" +
+                                        "Copyright (C) 2026 Calestin Fisalia. No warranty; see LICENSE.txt.\n" +
                                         "Bundled icons and artwork retain their own licenses and creator rights.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

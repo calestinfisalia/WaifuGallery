@@ -4,6 +4,12 @@
 
 Waifu Gallery is an independent media browsing application with separate Windows, Linux, and Android implementations.
 
+## Projects
+
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.22; latest published version 0.1.21).
+- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.19; latest published version 0.1.18).
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.20; latest published version 0.1.19, `versionCode` 17).
+
 ## Project documentation
 
 - [SPECIFICATION.md](SPECIFICATION.md) — goals, features, constraints, requirements, and acceptance checklist.
@@ -11,17 +17,11 @@ Waifu Gallery is an independent media browsing application with separate Windows
 - [ROADMAP.md](ROADMAP.md) — completed MVP, current quality work, and candidate next stages.
 - See each platform README for implementation and platform-specific behavior; see [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release procedures.
 
-## Projects
-
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.22; latest published version 0.1.21).
-- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.19; latest published version 0.1.18).
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.19; `versionCode` 17).
-
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows, Linux, and Android include PIN-protected Favorites and parental content controls. These are in-app restrictions, not OS-level supervision; rating and tag filters rely on provider metadata. See each project README for platform-specific behavior and requirements.
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. The latest published versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.19`, as recorded in [`updates.json`](updates.json). Windows source `0.1.22` and Linux source `0.1.19` are prepared but not yet published; the feed stays on the published versions until each release and its assets are verified. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
+Windows, Linux, and Android versions can advance independently. The latest published versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.19`, as recorded in [`updates.json`](updates.json). Windows source `0.1.22`, Linux source `0.1.19`, and Android source `0.1.20` are prepared but not yet published; the feed stays on the published versions until each release and its assets are verified. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
 
 Independent platform releases use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`; compatibility releases for legacy clients may use a shared `vX.Y.Z` tag. Android also increments `versionCode` for every APK. Old clients cannot read the platform update manifest.
 
@@ -30,7 +30,7 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 ## Platform versions
 
 - **Windows:** version 0.1.21 is the latest published build; version 0.1.22 source adds dark-neon wizard styling and installer artwork and is awaiting publication.
-- **Android:** version 0.1.19 is published in GitHub release [`android-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.19); `versionCode` is `17`.
+- **Android:** version 0.1.19 (`versionCode` 17) is the latest published build; version 0.1.20 adds AI labels for tagged images and is awaiting publication.
 - **Linux:** version 0.1.18 is the latest published build; version 0.1.19 source brings the latest shared UI updates and lighter typography and is awaiting publication.
 - Android release signing continues to use the local debug key for now.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
@@ -79,7 +79,7 @@ When reporting a regression, include the OS, whether the media is an image or vi
 
 ## License and credits
 
-Starting with this source revision, original Waifu Gallery application code is licensed under **GNU GPL version 3 or later**; see [LICENSE](LICENSE). Original desktop application code is copyright (C) 2026 Calestin Fisalia; original Android application code is copyright (C) 2026 Fisalia Cantarella. Android includes the same license at [android/LICENSE](android/LICENSE). Versions published before this license change remain available under the license included with those versions (MIT).
+Starting with this source revision, original Waifu Gallery application code is licensed under **GNU GPL version 3 or later**; see [LICENSE](LICENSE). Original desktop and Android application code is copyright (C) 2026 Calestin Fisalia. Android includes the same license at [android/LICENSE](android/LICENSE). Versions published before this license change remain available under the license included with those versions (MIT).
 
 The general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). Waifu Gallery is an independent implementation and does not include its GTK source or artwork.
 

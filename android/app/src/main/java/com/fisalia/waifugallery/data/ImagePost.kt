@@ -22,6 +22,12 @@ data class ImagePost(
 
 data class VideoVariant(val url: String, val width: Int, val height: Int)
 
+private val AI_GENERATED_TAGS =
+    setOf("ai-generated", "ai_generated", "ai-assisted", "ai_assisted")
+
+fun ImagePost.hasAiGeneratedTag(): Boolean =
+    tags.any { it.lowercase() in AI_GENERATED_TAGS }
+
 fun ImagePost.mediumPreviewCandidates(): List<String> {
     val mediumUrl = sampleUrl.takeIf(String::isNotBlank)
         ?: thumbnailCandidates.firstOrNull {
