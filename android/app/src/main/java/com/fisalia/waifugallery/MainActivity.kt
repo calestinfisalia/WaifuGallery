@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -356,7 +357,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     }
     LaunchedEffect(state.screen, state.image?.id, state.detailImage?.id) {
         val currentPost = if (state.screen == AppScreen.DETAIL) state.detailImage else state.image
-        if (currentPost?.mediaType != "video") mediaFullscreen = false
+        if (currentPost == null) mediaFullscreen = false
     }
     BackHandler(
         mediaFullscreen ||
@@ -1624,6 +1625,13 @@ private fun ImageFrame(
     Box(
         modifier
             .background(if (mediaFullscreen && post.mediaType == "image") Color.Black else Color.Transparent)
+            .then(
+                if (mediaFullscreen && post.mediaType == "image") {
+                    Modifier.displayCutoutPadding()
+                } else {
+                    Modifier
+                },
+            )
             .onSizeChanged { viewportSize = IntSize(it.width, it.height) }
             .then(if (post.mediaType == "video") Modifier else zoomGesture),
         contentAlignment = Alignment.Center,
