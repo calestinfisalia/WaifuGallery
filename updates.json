@@ -10,8 +10,8 @@
       "release_tag": "linux-v0.1.18"
     },
     "android": {
-      "version": "0.1.19",
-      "release_tag": "android-v0.1.19"
+      "version": "0.1.20",
+      "release_tag": "android-v0.1.20"
     }
   }
 }
