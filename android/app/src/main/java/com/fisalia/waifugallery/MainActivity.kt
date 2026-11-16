@@ -24,7 +24,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -814,8 +817,22 @@ private fun RandomScreen(
     onFullscreenChanged: (Boolean) -> Unit = {},
     onVideoResolutionChanged: (Int) -> Unit = {},
 ) {
+    val pullRefreshScrollState = rememberScrollableState { 0f }
+    val randomContentModifier = Modifier
+        .fillMaxSize()
+        .then(
+            if (mediaFullscreen) {
+                Modifier
+            } else {
+                Modifier.scrollable(
+                    state = pullRefreshScrollState,
+                    orientation = Orientation.Vertical,
+                    enabled = !state.isLoading,
+                )
+            },
+        )
     val randomContent: @Composable BoxScope.() -> Unit = {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(randomContentModifier, contentAlignment = Alignment.Center) {
             state.image?.let { post ->
                 ImageFrame(
                     post.imageUrl,
