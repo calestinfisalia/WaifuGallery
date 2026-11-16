@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version is `0.1.21` with `versionCode` `19`; the latest published version is `0.1.20` (`versionCode` `18`) under the Android-specific `android-v0.1.20` release tag. Android's version can advance independently from Windows and Linux.
+Android's source version and latest published version are `0.1.21` with `versionCode` `19`, published under the Android-specific `android-v0.1.21` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -35,12 +35,13 @@ Open **Settings → Backup & Restore** to export or import a `.wgbak` file throu
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
 
-## Android 0.1.21 (prepared, not published)
+## Android 0.1.21
 
 - **AI labels:** place the badge on the upper-left of full-size tagged image/video media while leaving thumbnail badges on the lower-right.
 - **Back navigation:** Search detail returns to results; Search results return to Random; Back from Random exits the app.
 - Android source version: `0.1.21`; `versionCode`: `19`.
-- Update feed remains on `android-v0.1.20` until the APK is built and its release verified.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.21/app-release.apk).
+- Update feed: `android-v0.1.21`.
 
 ## Android 0.1.20
 
