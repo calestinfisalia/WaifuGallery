@@ -2,20 +2,20 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source version and latest published version are `0.1.24` with `versionCode` `22`, published under the Android-specific `android-v0.1.24` release tag. Android's version can advance independently from Windows and Linux.
+Android source version `0.1.25` (`versionCode` `23`) is prepared but not published. The latest published version is `0.1.24` (`versionCode` `22`), under the Android-specific `android-v0.1.24` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
 ## Features
 
-- Random image browsing, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider; changing content filters reloads search from page 1.
+- Random image browsing with pull-to-refresh, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider; changing content filters reloads search from page 1.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key. Settings → Providers can test each API connection and show its HTTP status or concise timeout, TLS, DNS, and connection error.
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and animated double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan.
 - Auto search and random requests run eligible providers concurrently, return the first provider with results, and cancel slower requests. If an Auto random request gets provider errors without a result, it retries once before reporting failure.
 - Image and video posts, with fullscreen video playback, circular buffering/loading indicators, dark translucent player controls, double-tap 5-second seeking, right-side volume swipes, left-side brightness swipes, and a preferred video resolution.
 - AI badge on tagged image and video posts, shown on full-size media at the upper left and on thumbnails at the lower right.
 - Back navigation returns from Search details to results, from results to Random, and exits from Random.
-- Fullscreen media hides the app chrome and system bars. Videos rotate to match their media orientation and restore the previous orientation when leaving fullscreen or switching to a photo; photos keep the device orientation. Fullscreen images avoid display cutouts, use a plain black background, and retain fullscreen while swiping between posts; image overlays auto-hide after three seconds and reappear on tap.
+- Fullscreen media hides the app chrome and system bars. Videos rotate to match their media orientation and restore the previous orientation when leaving fullscreen or switching to a photo; photos keep the device orientation. Fullscreen images extend edge-to-edge through display cutouts, use a plain black background, and retain fullscreen while swiping between posts; image overlays auto-hide after three seconds and reappear on tap.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
 - Compact download cards show progress and retry states; cancel an active transfer with the X button. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
@@ -35,6 +35,12 @@ Open **Settings → Backup & Restore** to export or import a `.wgbak` file throu
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
 
+## Android 0.1.25 (source prepared)
+
+- **Random refresh:** pull down on Random to load another image; the toolbar refresh icon is removed, and the current image remains visible while refreshing.
+- **Fullscreen images:** extend edge-to-edge through display cutouts.
+- Android source version: `0.1.25`; `versionCode`: `23`. Not published yet.
+
 ## Android 0.1.24
 
 - **Fullscreen photos:** preserve the device orientation instead of rotating to match the photo.
@@ -44,7 +50,7 @@ The version 2 format is interoperable with Windows and Linux, records included s
 
 ## Android 0.1.23
 
-- **Fullscreen images:** keep zoomed media within the display-cutout safe area and retain fullscreen while swiping between posts.
+- **Fullscreen images:** extend through display cutouts and retain fullscreen while swiping between posts.
 - Android source version: `0.1.23`; `versionCode`: `21`.
 - Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.23/app-release.apk).
 - Update feed: `android-v0.1.23`.

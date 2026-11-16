@@ -2,11 +2,11 @@
 
 This guide separates the two update paths: platform releases for current clients, and a compatibility release for older clients that still query GitHub `/releases/latest`. Windows, Linux, and Android have independent app versions; a fix for one platform must not bump the versions or manifest entries for the others.
 
-Current published platform versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.24`. Windows source `0.1.22` and Linux source `0.1.19` have been prepared but are not published yet. Current clients use the exact platform tag in `updates.json`. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
+Current published platform versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.24`. Windows source `0.1.22`, Linux source `0.1.19`, and Android source `0.1.25` have been prepared but are not published yet. Current clients use the exact platform tag in `updates.json`. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
 
 ## Release channels
 
-- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform's entry in `updates.json` after its release and assets are verified. This is the path for future releases such as Windows `0.1.23`, Linux `0.1.20`, or Android `0.1.25`.
+- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform's entry in `updates.json` after its release and assets are verified. This is the path for future releases such as Windows `0.1.23`, Linux `0.1.20`, or Android `0.1.26`.
 - **Compatibility update (legacy path):** use the conventional `vX.Y.Z` tag only when intentionally serving clients that still read `/releases/latest`. It must contain the assets required by those legacy clients and be explicitly selected as GitHub Latest. Compatibility releases are coordinated exceptions, not the normal way to publish a platform fix.
 - **Bridge behavior:** the existing `v0.1.16` compatibility release lets older clients install a build that reads `updates.json`. Once updated, clients follow their own platform entry and no longer depend on the global Latest endpoint.
 

@@ -424,7 +424,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 terms[index]
             }
         }
-        _state.update { it.copy(screen = AppScreen.RANDOM, detailImage = null, image = null, isLoading = true, error = null, notice = null) }
+        _state.update { current ->
+            current.copy(
+                screen = AppScreen.RANDOM,
+                detailImage = null,
+                image = current.image.takeIf { current.screen == AppScreen.RANDOM },
+                isLoading = true,
+                error = null,
+                notice = null,
+            )
+        }
         viewModelScope.launch {
             try {
                 val maximumRating = if (preferences.parentalControlEnabled) {

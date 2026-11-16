@@ -12,6 +12,7 @@ import android.media.AudioManager
 import android.provider.Settings
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +28,7 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -35,7 +37,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -298,13 +299,27 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         mutableIntStateOf(activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
     }
     var orientationLocked by rememberSaveable { mutableStateOf(false) }
+    var previousCutoutMode by rememberSaveable {
+        mutableIntStateOf(
+            activity?.window?.attributes?.layoutInDisplayCutoutMode
+                ?: WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+        )
+    }
+    var cutoutModeLocked by rememberSaveable { mutableStateOf(false) }
     val latestPreviousOrientation by rememberUpdatedState(previousOrientation)
     val latestOrientationLocked by rememberUpdatedState(orientationLocked)
+    val latestPreviousCutoutMode by rememberUpdatedState(previousCutoutMode)
+    val latestCutoutModeLocked by rememberUpdatedState(cutoutModeLocked)
     DisposableEffect(activity) {
         onDispose {
             activity?.window?.let {
                 WindowCompat.getInsetsController(it, it.decorView)
                     .show(WindowInsetsCompat.Type.systemBars())
+                if (latestCutoutModeLocked) {
+                    it.attributes = it.attributes.apply {
+                        layoutInDisplayCutoutMode = latestPreviousCutoutMode
+                    }
+                }
             }
             if (latestOrientationLocked) {
                 activity?.requestedOrientation = latestPreviousOrientation
@@ -321,6 +336,24 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             controller?.hide(WindowInsetsCompat.Type.systemBars())
         } else {
             controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    LaunchedEffect(mediaFullscreen && fullscreenPost?.mediaType == "image") {
+        val window = activity?.window ?: return@LaunchedEffect
+        if (mediaFullscreen && fullscreenPost?.mediaType == "image") {
+            if (!cutoutModeLocked) {
+                previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
+                cutoutModeLocked = true
+            }
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        } else if (cutoutModeLocked) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = previousCutoutMode
+            }
+            cutoutModeLocked = false
         }
     }
     LaunchedEffect(mediaFullscreen, fullscreenPost?.id) {
@@ -429,7 +462,6 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                         },
                         onBack = model::backToGallery,
                         onHome = model::goHome,
-                        onRefresh = model::refresh,
                         onSearch = model::toggleSearch,
                         onSave = model::saveCurrentImage,
                         isFavorite = model.isFavorite(if (state.screen == AppScreen.DETAIL) state.detailImage else state.image),
@@ -457,6 +489,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             imageLoader,
                             Modifier.padding(padding),
                             mediaFullscreen,
+                            onRefresh = model::refresh,
                             onFullscreenChanged = { mediaFullscreen = it },
                             onVideoResolutionChanged = model::setVideoMaxHeight,
                         )
@@ -663,7 +696,6 @@ private fun HeaderBar(
     onSearchSubmit: () -> Unit,
     onBack: () -> Unit,
     onHome: () -> Unit,
-    onRefresh: () -> Unit,
     onSearch: () -> Unit,
     onSave: () -> Unit,
     isFavorite: Boolean,
@@ -686,8 +718,6 @@ private fun HeaderBar(
                 IconButton(onClick = onSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             } else if (isDetail) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to results") }
-            } else {
-                IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Refresh") }
             }
             if (showHome) IconButton(onClick = onHome) { Icon(Icons.Default.Home, "Home") }
             if (searchVisible) {
@@ -774,32 +804,48 @@ private fun DialogMascot(modifier: Modifier = Modifier) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun RandomScreen(
     state: UiState,
     imageLoader: ImageLoader,
     modifier: Modifier = Modifier,
     mediaFullscreen: Boolean = false,
+    onRefresh: () -> Unit,
     onFullscreenChanged: (Boolean) -> Unit = {},
     onVideoResolutionChanged: (Int) -> Unit = {},
 ) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        state.image?.let { post ->
-            ImageFrame(
-                post.imageUrl,
-                post,
-                imageLoader,
-                Modifier.fillMaxSize(),
-                zoomEnabled = true,
-                showLoadingIndicator = !state.isLoading,
-                ambientMode = state.ambientMode,
-                videoMaxHeight = state.videoMaxHeight,
-                mediaFullscreen = mediaFullscreen,
-                onFullscreenChanged = onFullscreenChanged,
-                onVideoResolutionChanged = onVideoResolutionChanged,
-            )
+    val randomContent: @Composable BoxScope.() -> Unit = {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            state.image?.let { post ->
+                ImageFrame(
+                    post.imageUrl,
+                    post,
+                    imageLoader,
+                    Modifier.fillMaxSize(),
+                    zoomEnabled = true,
+                    showLoadingIndicator = !state.isLoading,
+                    ambientMode = state.ambientMode,
+                    videoMaxHeight = state.videoMaxHeight,
+                    mediaFullscreen = mediaFullscreen,
+                    onFullscreenChanged = onFullscreenChanged,
+                    onVideoResolutionChanged = onVideoResolutionChanged,
+                )
+            }
+            if (state.image == null && !state.isLoading) Text("No image loaded")
+            if (state.image == null && state.isLoading && !mediaFullscreen) {
+                LoadingSpinner(Modifier.align(Alignment.Center))
+            }
         }
-        if (state.image == null && !state.isLoading) Text("No image loaded")
-        if (state.isLoading && !mediaFullscreen) LoadingSpinner(Modifier.align(Alignment.Center))
+    }
+    if (mediaFullscreen) {
+        Box(modifier.fillMaxSize(), content = randomContent)
+    } else {
+        PullToRefreshBox(
+            isRefreshing = state.isLoading && state.image != null,
+            onRefresh = { if (!state.isLoading) onRefresh() },
+            modifier = modifier.fillMaxSize(),
+            content = randomContent,
+        )
     }
 }
 
@@ -1621,13 +1667,6 @@ private fun ImageFrame(
     Box(
         modifier
             .background(if (mediaFullscreen && post.mediaType == "image") Color.Black else Color.Transparent)
-            .then(
-                if (mediaFullscreen && post.mediaType == "image") {
-                    Modifier.displayCutoutPadding()
-                } else {
-                    Modifier
-                },
-            )
             .onSizeChanged { viewportSize = IntSize(it.width, it.height) }
             .then(if (post.mediaType == "video") Modifier else zoomGesture),
         contentAlignment = Alignment.Center,
