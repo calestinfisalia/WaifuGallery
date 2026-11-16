@@ -6,15 +6,15 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.17).
-- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.16). Its published update-manifest version remains 0.1.12 until the Linux 0.1.16 package is added manually.
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.16; `versionCode` 14).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.22; latest published version 0.1.21).
+- [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.18).
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source version 0.1.19; `versionCode` 17).
 
 The desktop and Android applications provide random browsing, tag search, provider and rating filters, media viewing, media information, and downloads. Windows, Linux, and Android include PIN-protected Favorites and parental content controls. These are in-app restrictions, not OS-level supervision; rating and tag filters rely on provider metadata. See each project README for platform-specific behavior and requirements.
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. Windows `0.1.17` is published separately in [`windows-v0.1.17`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.17); Android remains at `0.1.16`, and the published Linux update remains at `0.1.12` until its package is added manually. The Linux 0.1.15 package is intentionally skipped. Clients read their own version and release tag from [`updates.json`](updates.json), then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
+Windows, Linux, and Android versions can advance independently. The latest published versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.19`, as recorded in [`updates.json`](updates.json). Windows source has advanced to `0.1.22`, but its release has not yet been published; the feed intentionally remains on `windows-v0.1.21` until the new release and assets are verified. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
 
 Independent platform releases use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`; compatibility releases for legacy clients may use a shared `vX.Y.Z` tag. Android also increments `versionCode` for every APK. Old clients cannot read the platform update manifest.
 
@@ -22,9 +22,9 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 
 ## Platform versions
 
-- **Windows:** version 0.1.17 fixes the Download action not returning after leaving Search; published in [`windows-v0.1.17`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.17).
-- **Android:** version 0.1.16 is published in GitHub release [`v0.1.16`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/v0.1.16); `versionCode` is `14`.
-- **Linux:** the 0.1.15 package is skipped; add the Linux 0.1.16 package manually after runtime validation. Until then, published Linux 0.1.12 binaries remain under their original MIT license.
+- **Windows:** version 0.1.21 is the latest published build; version 0.1.22 source adds dark-neon wizard styling and installer artwork and is awaiting publication.
+- **Android:** version 0.1.19 is published in GitHub release [`android-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.19); `versionCode` is `17`.
+- **Linux:** version 0.1.18 is published in GitHub release [`linux-v0.1.18`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.18).
 - Android release signing continues to use the local debug key for now.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
 

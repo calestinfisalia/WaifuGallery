@@ -154,9 +154,9 @@ On Windows, the app records its own top-level window and small centered Qt widge
 
 ## Windows 0.1.22
 
-- **Installer:** replace the top-right CD image with the Peace Sign artwork and use the cropped Neon Waves artwork as a lightly blended wizard background.
+- **Installer:** replace the top-right CD image with the Peace Sign artwork and use the Neon Waves artwork in a dark blue wizard theme.
 - Windows source version: 0.1.22.
-- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.22`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.22).
+- Windows Setup and portable 0.1.22 builds have been generated locally; the GitHub release is not published yet. The update feed remains on [`windows-v0.1.21`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.21) until 0.1.22 is released and verified.
 
 ## Windows 0.1.15
 
