@@ -242,9 +242,23 @@ private fun openUpdateInstaller(context: Context, apk: File): String? {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent { WaifuGalleryApp() }
     }
 }
+
+internal fun panAfterCentroidZoom(
+    currentPan: Offset,
+    centroid: Offset,
+    viewportCenter: Offset,
+    zoomChange: Float,
+    panChange: Offset,
+): Offset = Offset(
+    currentPan.x * zoomChange +
+        (centroid.x - viewportCenter.x) * (1f - zoomChange) + panChange.x,
+    currentPan.y * zoomChange +
+        (centroid.y - viewportCenter.y) * (1f - zoomChange) + panChange.y,
+)
 
 @Composable
 private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
@@ -673,6 +687,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             downloads = state.downloads,
             onOpen = model::openSavedDownload,
             onRetry = model::retryDownload,
+            onRetryAll = model::retryAllFailedDownloads,
             onCancel = model::cancelDownload,
             onClearFinished = model::clearFinishedDownloads,
             onDismiss = model::closeDownloadQueue,
@@ -741,7 +756,7 @@ private fun HeaderBar(
                     onValueChange = onQueryChanged,
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(44.dp)
                         .clip(RoundedCornerShape(50.dp))
                         .background(Color(0xFF303038))
                         .padding(horizontal = 10.dp),
@@ -1570,11 +1585,23 @@ private fun ImageFrame(
             offset.y.coerceIn(-maxPanY, maxPanY),
         )
     }
-    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+    val transformState = rememberTransformableState { centroid, zoomChange, panChange, _ ->
         animateDoubleTapZoom = false
-        val newZoom = (zoom * zoomChange).coerceIn(1f, 6f)
+        val previousZoom = zoom
+        val newZoom = (previousZoom * zoomChange).coerceIn(1f, 6f)
         zoom = newZoom
-        pan = if (newZoom <= 1f) Offset.Zero else constrainPan(pan + panChange, newZoom)
+        pan = if (newZoom <= 1f) {
+            Offset.Zero
+        } else {
+            val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            panAfterCentroidZoom(
+                currentPan = pan,
+                centroid = centroid,
+                viewportCenter = center,
+                zoomChange = newZoom / previousZoom,
+                panChange = panChange,
+            ).let { constrainPan(it, newZoom) }
+        }
     }
     val currentZoom by rememberUpdatedState(zoom)
     val currentPan by rememberUpdatedState(pan)
@@ -3697,15 +3724,18 @@ private fun DownloadQueueScreen(
     downloads: List<DownloadItem>,
     onOpen: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onRetryAll: () -> Unit,
     onCancel: (String) -> Unit,
     onClearFinished: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     val hasFinished = downloads.any {
         it.status == DownloadStatus.SAVED ||
             it.status == DownloadStatus.FAILED ||
             it.status == DownloadStatus.CANCELLED
     }
+    val hasFailed = downloads.any { it.status == DownloadStatus.FAILED }
     BackHandler(onBack = onDismiss)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize()) {
@@ -3724,8 +3754,32 @@ private fun DownloadQueueScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = onClearFinished, enabled = hasFinished) {
-                    Text("Clear history")
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Download options")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        if (hasFailed) {
+                            DropdownMenuItem(
+                                text = { Text("Retry all failed") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onRetryAll()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Clear download history") },
+                            enabled = hasFinished,
+                            onClick = {
+                                menuExpanded = false
+                                onClearFinished()
+                            },
+                        )
+                    }
                 }
             }
             if (downloads.isEmpty()) {

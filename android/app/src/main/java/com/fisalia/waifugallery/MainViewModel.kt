@@ -1055,6 +1055,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         processDownloadQueue()
     }
 
+    fun retryAllFailedDownloads() {
+        val failedIds = _state.value.downloads
+            .filter { it.status == DownloadStatus.FAILED }
+            .mapTo(mutableSetOf()) { it.id }
+        if (failedIds.isEmpty()) return
+        _state.update { state ->
+            state.copy(
+                downloads = state.downloads.map {
+                    if (it.id in failedIds && it.status == DownloadStatus.FAILED) {
+                        it.copy(status = DownloadStatus.QUEUED, error = null, progress = 0f)
+                    } else {
+                        it
+                    }
+                },
+            )
+        }
+        persistDownloadHistory()
+        processDownloadQueue()
+    }
+
     fun cancelDownload(id: String) {
         if (activeDownloadId != id) return
         cancelledDownloadIds.add(id)

@@ -14,7 +14,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
 - Optional ambient background blur, which can be turned off in Settings.
-- The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts and can be cleared from the app menu.
+- The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts. Failed downloads can be retried per file or together from the Downloads window's top-right menu, which also clears history.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
 - Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
 - Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
@@ -155,8 +155,10 @@ On Windows, the app records its own top-level window and small centered Qt widge
 ## Windows 0.1.22
 
 - **Installer:** replace the top-right CD image with the Peace Sign artwork and use the Neon Waves artwork in a dark blue wizard theme.
+- **Downloads:** retry failed items individually or retry all failures from the Downloads menu; clear download history from the same menu.
+- **Media Info:** allow resizing from every window edge without the Tags heading forcing an oversized minimum width.
 - Windows source version: 0.1.22.
-- Windows Setup and portable 0.1.22 builds have been generated locally; the GitHub release is not published yet. The update feed remains on [`windows-v0.1.21`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.21) until 0.1.22 is released and verified.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.22`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.22).
 
 ## Windows 0.1.15
 

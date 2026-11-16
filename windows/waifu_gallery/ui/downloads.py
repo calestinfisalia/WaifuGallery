@@ -1,25 +1,30 @@
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Signal, Qt, QUrl
+from PySide6.QtCore import QPoint, QSize, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QProgressBar,
     QPushButton,
     QMessageBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..models import ImagePost
 from .dialog_chrome import DialogTitleBar, FramelessResizableDialog
 
 
 class DownloadsDialog(FramelessResizableDialog):
     cancel_requested = Signal(str)
+    retry_requested = Signal(str)
+    retry_all_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -34,21 +39,31 @@ class DownloadsDialog(FramelessResizableDialog):
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(14, 4, 14, 14)
         layout.setSpacing(12)
-        layout.addWidget(DialogTitleBar(self, "Downloads"))
+        self.menu_button = QToolButton()
+        self.menu_button.setObjectName("downloadsMenuButton")
+        self.menu_button.setFixedSize(30, 30)
+        self.menu_button.setIcon(self._icon("more-vertical"))
+        self.menu_button.setIconSize(QSize(16, 16))
+        self.menu_button.setToolTip("Download history options")
+        self.menu_button.setAccessibleName("Download history options")
+        self.menu = QMenu(self)
+        self.clear_history_action = self.menu.addAction("Clear download history")
+        self.clear_history_action.triggered.connect(self.clear_history)
+        self.retry_all_action = self.menu.addAction("Retry all failed")
+        self.retry_all_action.triggered.connect(
+            lambda checked=False: self.retry_all_requested.emit()
+        )
+        self.menu.aboutToShow.connect(self._update_menu_actions)
+        self.menu_button.clicked.connect(self._show_menu)
+        layout.addWidget(DialogTitleBar(self, "Downloads", self.menu_button))
         self.items = QListWidget()
         self.items.setObjectName("downloadsList")
         self.items.setSpacing(0)
         self.items.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.items, 1)
-        row = QHBoxLayout()
-        clear = QPushButton("Clear history")
-        clear.clicked.connect(self.clear_history)
-        row.addStretch(1)
-        row.addWidget(clear)
-        layout.addLayout(row)
         outer.addWidget(surface)
         self.records: dict[str, tuple[QLabel, QLabel, QProgressBar, QPushButton]] = {}
-        self.history: dict[str, dict[str, str]] = {}
+        self.history: dict[str, dict[str, object]] = {}
         self.settings = getattr(parent, "settings", None)
         icon_factory = getattr(parent, "_icon", None)
         self.download_icon = icon_factory("download") if callable(icon_factory) else QIcon()
@@ -68,8 +83,16 @@ class DownloadsDialog(FramelessResizableDialog):
         status: str = "Queued",
         *,
         persist: bool = True,
+        post: ImagePost | None = None,
     ) -> None:
-        self.history[key] = {"filename": filename, "path": path, "status": status}
+        history_record: dict[str, object] = {
+            "filename": filename,
+            "path": path,
+            "status": status,
+        }
+        if post is not None:
+            history_record["post"] = self._serialize_post(post)
+        self.history[key] = history_record
         item = QListWidgetItem()
         row = QWidget()
         row.setObjectName("downloadItemRow")
@@ -164,7 +187,16 @@ class DownloadsDialog(FramelessResizableDialog):
                 bool(saved_path) and Path(saved_path).parent.is_dir()
             )
             progress_bar.hide()
-        elif state.startswith(("Failed:", "Cancelled", "Interrupted")):
+        elif state.startswith(("Failed:", "Interrupted")):
+            cancel_button.setIcon(self._icon("refresh-cw"))
+            cancel_button.setObjectName("downloadRetryButton")
+            cancel_button.setToolTip("Retry download")
+            cancel_button.setAccessibleName("Retry download")
+            cancel_button.setEnabled(True)
+            retryable = self._deserialize_post(history_record.get("post")) if history_record else None
+            cancel_button.setVisible(retryable is not None)
+            progress_bar.hide()
+        elif state.startswith("Cancelled"):
             cancel_button.hide()
             progress_bar.hide()
         else:
@@ -172,15 +204,54 @@ class DownloadsDialog(FramelessResizableDialog):
             cancel_button.setObjectName("downloadCancelButton")
             cancel_button.setToolTip("Cancel download")
             cancel_button.setAccessibleName("Cancel download")
+            cancel_button.setEnabled(True)
+            cancel_button.show()
+            progress_bar.show()
         if persist and status_changed:
             self._save_history()
 
     def _activate_download_action(self, key: str) -> None:
         record = self.history.get(key)
-        if record and record["status"].startswith("Saved:"):
-            self._open_download_folder(record.get("path", ""))
+        status = str(record.get("status", "")) if record else ""
+        if status.startswith("Saved:"):
+            self._open_download_folder(str(record.get("path", "")))
+        elif status.startswith(("Failed:", "Interrupted")):
+            self.retry_requested.emit(key)
         else:
             self.cancel_requested.emit(key)
+
+    def has_retryable_failures(self) -> bool:
+        return bool(self.retryable_downloads())
+
+    def retryable_downloads(self) -> list[tuple[str, ImagePost, Path]]:
+        downloads = []
+        for key, record in self.history.items():
+            status = str(record.get("status", ""))
+            if not status.startswith(("Failed:", "Interrupted")):
+                continue
+            post = self._deserialize_post(record.get("post"))
+            path = str(record.get("path", ""))
+            if post is not None and path:
+                downloads.append((key, post, Path(path)))
+        return downloads
+
+    def retryable_download(self, key: str) -> tuple[ImagePost, Path] | None:
+        return next(
+            ((post, path) for item_key, post, path in self.retryable_downloads() if item_key == key),
+            None,
+        )
+
+    def _update_menu_actions(self) -> None:
+        self.retry_all_action.setVisible(self.has_retryable_failures())
+
+    def _show_menu(self) -> None:
+        self._update_menu_actions()
+        anchor = self.menu_button.mapToGlobal(
+            QPoint(self.menu_button.width(), self.menu_button.height())
+        )
+        self.menu.popup(
+            QPoint(anchor.x() - self.menu.sizeHint().width(), anchor.y())
+        )
 
     def _open_download_folder(self, path: str) -> None:
         folder = Path(path).parent if path else None
@@ -246,6 +317,7 @@ class DownloadsDialog(FramelessResizableDialog):
                 str(entry.get("path", "")),
                 status,
                 persist=False,
+                post=self._deserialize_post(entry.get("post")),
             )
         if changed:
             self._save_history()
@@ -258,3 +330,34 @@ class DownloadsDialog(FramelessResizableDialog):
             for key, record in self.history.items()
         ]
         self.settings.set("downloads/history", json.dumps(entries))
+
+    @staticmethod
+    def _serialize_post(post: ImagePost) -> dict[str, str]:
+        return {
+            "post_id": post.post_id,
+            "provider": post.provider,
+            "image_url": post.image_url,
+            "media_type": post.media_type,
+        }
+
+    @staticmethod
+    def _deserialize_post(value: object) -> ImagePost | None:
+        if not isinstance(value, dict):
+            return None
+        post_id = value.get("post_id")
+        provider = value.get("provider")
+        image_url = value.get("image_url")
+        media_type = value.get("media_type", "image")
+        if not all(isinstance(item, str) and item for item in (post_id, provider, image_url)):
+            return None
+        if not isinstance(media_type, str):
+            return None
+        return ImagePost(
+            post_id=post_id,
+            provider=provider,
+            image_url=image_url,
+            preview_urls=(),
+            rating="",
+            tags=frozenset(),
+            media_type=media_type,
+        )

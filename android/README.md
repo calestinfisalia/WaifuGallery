@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source and latest published version are `0.1.27` (`versionCode` `25`), under the Android-specific `android-v0.1.27` release tag. Android's version can advance independently from Windows and Linux.
+Android's source version is `0.1.28` (`versionCode` `26`), under the Android-specific `android-v0.1.28` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -18,7 +18,7 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Fullscreen media hides the app chrome and system bars. Videos rotate to match their media orientation and restore the previous orientation when leaving fullscreen or switching to a photo; photos keep the device orientation. Fullscreen images extend edge-to-edge through display cutouts, use a plain black background, and retain fullscreen while swiping between posts; image overlays auto-hide after three seconds and reappear on tap.
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
-- Compact download cards show progress and retry states; cancel an active transfer with the X button. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
+- Compact download cards show progress and retry states; cancel an active transfer with the X button. Use the Downloads screen's top-right menu to retry all failed downloads or clear finished history. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
 - Local favorites with image/video badges and separate totals; long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/AI-generated/tag filters, and optional ambient blurred backgrounds.
 - Safety & Privacy controls with PIN-protected Favorites and parental maximum-rating/allowed-tag filters. PINs are salted and hashed locally and are excluded from encrypted user-data backups; parental filtering relies on provider metadata and is not OS-level supervision.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
@@ -34,6 +34,15 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+
+## Android 0.1.28
+
+- **Downloads:** add a top-right menu to retry all failed downloads or clear download history.
+- **Search:** reduce the search field height to 44 dp.
+- **Image zoom:** keep pinch zoom anchored to the gesture centroid to prevent horizontal images jumping while zooming.
+- Android source version: `0.1.28`; `versionCode`: `26`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.28/app-release.apk).
+- Update feed: `android-v0.1.28`.
 
 ## Android 0.1.27
 

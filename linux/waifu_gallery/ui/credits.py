@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ImagePost
+from .dialog_chrome import FramelessResizableDialog
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
 
@@ -73,7 +74,7 @@ class MediaInfoTitleBar(QWidget):
         super().mouseReleaseEvent(event)
 
 
-class ImageCreditsDialog(QDialog):
+class ImageCreditsDialog(FramelessResizableDialog):
     def __init__(self, post: ImagePost, parent=None) -> None:
         super().__init__(parent)
         self.post = post
@@ -82,6 +83,7 @@ class ImageCreditsDialog(QDialog):
         self.setWindowTitle("Media Info")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setMinimumSize(400, 320)
         self.resize(520, 440)
 
         outer = QVBoxLayout(self)
@@ -137,6 +139,7 @@ class ImageCreditsDialog(QDialog):
         layout.addWidget(source_label)
 
         tags_heading = QLabel(f"Tags ({len(post.tags)}) - Select a tag to find similar media")
+        tags_heading.setWordWrap(True)
         tags_heading.setStyleSheet("font-weight: 600; margin-top: 4px;")
         layout.addWidget(tags_heading)
 

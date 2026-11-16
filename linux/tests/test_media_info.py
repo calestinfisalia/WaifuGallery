@@ -3,10 +3,12 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QGridLayout, QScrollArea, QToolButton
 
 from waifu_gallery.models import ImagePost
 from waifu_gallery.ui.credits import ImageCreditsDialog
+from waifu_gallery.ui.dialog_chrome import FramelessResizableDialog
 
 
 class MediaInfoTagLayoutTests(unittest.TestCase):
@@ -26,6 +28,9 @@ class MediaInfoTagLayoutTests(unittest.TestCase):
         )
         dialog = ImageCreditsDialog(post)
         self.addCleanup(dialog.close)
+        self.assertIsInstance(dialog, FramelessResizableDialog)
+        dialog.layout().activate()
+        self.assertLessEqual(dialog.minimumSizeHint().width(), dialog.minimumWidth())
 
         scroll = dialog.findChild(QScrollArea, "mediaInfoScrollArea")
         self.assertIsNotNone(scroll)
@@ -40,4 +45,12 @@ class MediaInfoTagLayoutTests(unittest.TestCase):
                 for button in buttons
             ],
             [(index // 2, index % 2) for index in range(len(tags))],
+        )
+
+        dialog.show()
+        self.app.processEvents()
+        bottom_right = dialog.mapToGlobal(QPoint(dialog.width() - 1, dialog.height() - 1))
+        self.assertEqual(
+            dialog._resize_edges(bottom_right),
+            Qt.Edge.RightEdge | Qt.Edge.BottomEdge,
         )

@@ -266,6 +266,8 @@ class MainWindow(QMainWindow):
         self._icon_buttons: list[QPushButton] = []
         self.downloads = DownloadsDialog(self)
         self.downloads.cancel_requested.connect(self._cancel_download)
+        self.downloads.retry_requested.connect(self._retry_download)
+        self.downloads.retry_all_requested.connect(self._retry_failed_downloads)
         self._fullscreen_idle_timer = QTimer(self)
         self._fullscreen_idle_timer.setSingleShot(True)
         self._fullscreen_idle_timer.setInterval(1000)
@@ -1340,9 +1342,11 @@ class MainWindow(QMainWindow):
             QLabel#downloadStatus { color: __MUTED__; font-size: 9pt; }
             QProgressBar#downloadProgress { background: __PANEL__; border: 0; border-radius: 2px; }
             QProgressBar#downloadProgress::chunk { background: __ACCENT__; border-radius: 2px; }
-            QPushButton#downloadCancelButton, QPushButton#downloadOpenFolderButton { background: transparent; border: 0; border-radius: 8px; padding: 2px; }
-            QPushButton#downloadCancelButton:hover, QPushButton#downloadOpenFolderButton:hover { background: __ACTIVE__; }
+            QPushButton#downloadCancelButton, QPushButton#downloadOpenFolderButton, QPushButton#downloadRetryButton { background: transparent; border: 0; border-radius: 8px; padding: 2px; }
+            QPushButton#downloadCancelButton:hover, QPushButton#downloadOpenFolderButton:hover, QPushButton#downloadRetryButton:hover { background: __ACTIVE__; }
             QPushButton#downloadCancelButton:disabled { background: transparent; }
+            QToolButton#downloadsMenuButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; background: transparent; border: 0; border-radius: 8px; padding: 0; }
+            QToolButton#downloadsMenuButton:hover { background: __ACTIVE__; color: __STRONG__; }
             QLabel#releaseNotesHeading { color: __STRONG__; font-size: 15pt; font-weight: 600; }
             QLabel#releaseNotesVersion { color: __MUTED__; }
             QLabel#favoritesWindowTitle { color: __STRONG__; font-size: 11pt; font-weight: 600; }
@@ -1719,6 +1723,16 @@ class MainWindow(QMainWindow):
             return
         self.downloads.mark_cancelling(download_key)
         task.cancel()
+
+    def _retry_download(self, download_key: str) -> None:
+        retry = self.downloads.retryable_download(download_key)
+        if retry is not None:
+            post, path = retry
+            self._start_download(post, path, download_key=download_key)
+
+    def _retry_failed_downloads(self) -> None:
+        for download_key, post, path in self.downloads.retryable_downloads():
+            self._start_download(post, path, download_key=download_key)
 
     def _task_cancelled(self, download_key: str) -> None:
         self.tasks.pop(f"download:{download_key}", None)
@@ -3181,10 +3195,18 @@ class MainWindow(QMainWindow):
         return Path(folder) / f"waifu_{post.post_id}{extension}"
 
     def _start_download(
-        self, post: ImagePost, path: Path, catalog: BooruCatalog | None = None
+        self,
+        post: ImagePost,
+        path: Path,
+        catalog: BooruCatalog | None = None,
+        *,
+        download_key: str | None = None,
     ) -> None:
-        key = str(uuid4())
-        self.downloads.add_download(key, path.name, str(path))
+        key = download_key or str(uuid4())
+        if download_key is None:
+            self.downloads.add_download(key, path.name, str(path), post=post)
+        else:
+            self.downloads.update_download(key, "Queued", 0)
         task = FileDownloadTask(key, catalog or self._catalog(), post, path)
         task.signals.result.connect(lambda download_key, result: self._task_succeeded(f"download:{download_key}", result))
         task.signals.error.connect(lambda download_key, error: self._task_failed(f"download:{download_key}", error))

@@ -93,7 +93,12 @@ class FramelessResizableDialog(QDialog):
 
 
 class DialogTitleBar(QWidget):
-    def __init__(self, dialog: QDialog, title_text: str) -> None:
+    def __init__(
+        self,
+        dialog: QDialog,
+        title_text: str,
+        trailing_widget: QWidget | None = None,
+    ) -> None:
         super().__init__(dialog)
         self._drag_offset: QPoint | None = None
         self.setObjectName("dialogTitleBar")
@@ -105,6 +110,8 @@ class DialogTitleBar(QWidget):
         title.setObjectName("downloadsWindowTitle")
         layout.addWidget(title)
         layout.addStretch(1)
+        if trailing_widget is not None:
+            layout.addWidget(trailing_widget)
         close = QPushButton()
         icon_factory = getattr(dialog.parent(), "_icon", None)
         icon = icon_factory("close") if callable(icon_factory) else QIcon(

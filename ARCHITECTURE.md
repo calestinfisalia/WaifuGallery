@@ -80,6 +80,10 @@ When modifying the format, update all three codecs and cross-platform tests/fixt
 
 Platform releases are independent (`windows-vX.Y.Z`, `linux-vX.Y.Z`, `android-vX.Y.Z`). The compatibility release path for old clients is separate. Never update a feed entry to a source version until the release artifact is published and verified. See `RELEASE_UPDATE.md` for release operations.
 
+### Current Linux release handoff
+
+The desktop Downloads retry menu and Media Info resize fix are already present in both Windows and Linux source. Linux remains at source version `0.1.19`; it has not been built or released as part of the current Windows/Android release work, and its feed must remain on `linux-v0.1.18` until a separate Linux build is validated and published. A Linux agent should continue from the existing Linux source rather than reimplementing these changes, validate runtime behavior on Linux, and follow `RELEASE_UPDATE.md` before changing the version or feed.
+
 ## External systems and trust boundaries
 
 - Provider APIs and media hosts are untrusted external network services. They can fail, change schemas, rate-limit, or return incomplete metadata.
