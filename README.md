@@ -4,6 +4,13 @@
 
 Waifu Gallery is an independent media browsing application with separate Windows, Linux, and Android implementations.
 
+## Project documentation
+
+- [SPECIFICATION.md](SPECIFICATION.md) — goals, features, constraints, requirements, and acceptance checklist.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — platform structure, module responsibilities, data flows, backup format, and trust boundaries.
+- [ROADMAP.md](ROADMAP.md) — completed MVP, current quality work, and candidate next stages.
+- See each platform README for implementation and platform-specific behavior; see [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release procedures.
+
 ## Projects
 
 - [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.22; latest published version 0.1.21).
