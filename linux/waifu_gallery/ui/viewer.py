@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent
+from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy
 
 from .indicators import CircularProgressIndicator
@@ -14,6 +14,8 @@ class ZoomImage(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(1, 1)
         self.original = QPixmap()
+        self._rendered_size: QSize | None = None
+        self._rendered_fast: bool | None = None
         self.factor = 1.0
         self.base_scale = 1.0
         self._pending_zoom_state: tuple[float, float, float] | None = None
@@ -31,6 +33,10 @@ class ZoomImage(QLabel):
             zoom_state = self._capture_zoom_state()
         self._pending_zoom_state = None
         self.original = pixmap
+        self.setText("")
+        self.setPixmap(QPixmap())
+        self._rendered_size = None
+        self._rendered_fast = None
         self.factor = (
             zoom_state[0]
             if preserve_zoom and zoom_state and not pixmap.isNull()
@@ -102,6 +108,8 @@ class ZoomImage(QLabel):
 
     def _prepare_placeholder(self) -> None:
         self.original = QPixmap()
+        self._rendered_size = None
+        self._rendered_fast = None
         self.factor = 1.0
         self.setPixmap(QPixmap())
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -130,24 +138,45 @@ class ZoomImage(QLabel):
             available = self.size()
         if available.width() < 50 or available.height() < 50:
             available = self.original.size()
-        # Scale the displayed preview to the available viewer area even when
-        # the provider's sample is smaller than the window. The explicit
-        # original-resolution action remains available for pixel-level detail.
-        self.base_scale = min(available.width() / self.original.width(),
-                              available.height() / self.original.height())
+        self.base_scale = min(
+            available.width() / self.original.width(),
+            available.height() / self.original.height(),
+        )
         self._render(fast=fast)
+
+    def _fit_to_viewport_async(self, *, fast: bool = False) -> None:
+        # Resizing the viewer only changes the target widget geometry. Qt paints
+        # the source pixmap into that geometry, avoiding a blocking rescale.
+        self._fit_to_viewport(fast=fast)
 
     def _render(self, *, fast: bool = False) -> None:
         if self.original.isNull():
             return
         scale = self.base_scale * self.factor
-        target = QSize(max(1, round(self.original.width() * scale)),
-                       max(1, round(self.original.height() * scale)))
-        self.setPixmap(self.original.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.FastTransformation
-                                            if fast
-                                            else Qt.TransformationMode.SmoothTransformation))
-        self.adjustSize()
+        target = QSize(
+            max(1, round(self.original.width() * scale)),
+            max(1, round(self.original.height() * scale)),
+        )
+        if self._rendered_size == target and self._rendered_fast == fast:
+            return
+        self._rendered_size = target
+        self._rendered_fast = fast
+        self.resize(target)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if self.original.isNull():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        if not self._rendered_fast:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(self.rect(), self.original, self.original.rect())
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.viewport and event.type() == QEvent.Type.Resize:
+            self._fit_to_viewport(fast=True)
+        return super().eventFilter(watched, event)
 
     def wheelEvent(self, event) -> None:
         if self.original.isNull():

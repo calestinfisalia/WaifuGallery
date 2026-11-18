@@ -12,9 +12,11 @@ On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery
 ## Features
 
 - Random browsing, tag search, paged results, zoom/pan, favorites, downloads, and media information.
+- Search autocomplete queries provider tag APIs after a 300 ms debounce, shows locally cached provider/tag-prefix results immediately, and refreshes cache entries after 24 hours. Recent searches appear when the search field is clicked or edited; click a suggestion to search immediately or its trailing X to remove a history entry. Suggestion data is stored separately from the favorite image cache.
+- Manage provider keyword cache and recent searches in separate Settings → General → Keyword cache and Search history pages; both can be cleared independently or together.
 - With provider set to All, Search merges deduplicated results from eligible providers for each page, while Random selects by the first successful metadata response and loads the preview asynchronously, trying another provider if that preview fails. Selecting a specific provider keeps requests on that provider.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers; Gelbooru and Rule34.xxx require provider credentials.
-- SFW/NSFW rating, male-only and gore filters, optional AI-generated post filtering, custom blocked tags, image/video selection, and configurable video stream resolution. AI filtering uses provider tags (`ai-generated`, `ai-assisted`, and underscore variants); untagged posts may remain visible.
+- SFW/NSFW rating, male-only and gore filters, optional AI-generated post filtering, custom blocked tags, image/video selection, PNG-only filtering, and configurable video stream resolution. PNG Only requests PNG files; transparency depends on the individual file. AI filtering uses provider tags (`ai-generated`, `ai-assisted`, and underscore variants); untagged posts may remain visible.
 - Video play/pause, seeking, volume/mute, buffering and playback-error feedback, and fullscreen controls.
 - Display settings can automatically load the original-resolution image after showing its preview; the manual full-image button is hidden while this option is on and remains available when it is off.
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.

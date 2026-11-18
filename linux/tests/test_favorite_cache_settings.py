@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget
 from waifu_gallery.models import ImagePost
 from waifu_gallery.ui.preferences import PreferencesDialog
 from waifu_gallery.ui.main_window import MainWindow
+from waifu_gallery.suggestion_cache import SuggestionCache
 
 
 class MemorySettings:
@@ -81,6 +82,42 @@ class FavoriteCacheSettingsTests(unittest.TestCase):
         ) as clear_cache:
             dialog._clear_image_cache()
         clear_cache.assert_called_once_with()
+
+    def test_general_search_history_page_lists_and_clears_search_data(self):
+        settings = MemorySettings()
+        settings.set("search/recent_queries", ["rei_ayanami"])
+        SuggestionCache(settings).set("Danbooru", "rei", ["rei_ayanami"])
+        with patch(
+            "waifu_gallery.ui.preferences.favorite_thumbnail_cache_size",
+            return_value=0,
+        ):
+            dialog = PreferencesDialog(settings)
+        self.addCleanup(dialog.close)
+        general_index = next(
+            index for index, button in enumerate(dialog.nav_buttons)
+            if button.text().strip() == "General"
+        )
+        general_page = dialog.pages.widget(general_index)
+        stack = general_page.findChild(QStackedWidget, "settingsSubpages")
+        cache_button = next(
+            button for button in stack.widget(0).findChildren(QPushButton)
+            if button.text().strip().startswith("Keyword cache\n")
+        )
+        cache_button.click()
+        self.assertEqual(dialog.suggestion_cache_list.count(), 1)
+        self.assertIn("Danbooru", dialog.suggestion_cache_list.item(0).text())
+        dialog.clear_suggestion_cache_button.click()
+        self.assertEqual(SuggestionCache(settings).entries(), [])
+        self.assertEqual(settings.get("search/recent_queries"), ["rei_ayanami"])
+
+        history_button = next(
+            button for button in stack.widget(0).findChildren(QPushButton)
+            if button.text().strip().startswith("Search history\n")
+        )
+        history_button.click()
+        self.assertEqual(dialog.recent_history_list.count(), 1)
+        dialog.clear_search_history_button.click()
+        self.assertEqual(settings.get("search/recent_queries"), [])
 
     def test_disabled_cache_skips_disk_reads_and_writes(self):
         settings = MemorySettings()

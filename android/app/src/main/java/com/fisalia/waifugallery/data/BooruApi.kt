@@ -416,6 +416,129 @@ class BooruApi(
         )
     }
 
+    suspend fun suggestTags(query: String, providerName: String, limit: Int = 12): List<String> =
+        coroutineScope {
+            val prefix = query.trim().replace(Regex("\\s+"), "_").lowercase()
+            if (prefix.length < 2) return@coroutineScope emptyList()
+            val availableProviders = buildList {
+                add(yandere)
+                if (hasGelbooruCredentials()) add(gelbooru)
+                if (hasRule34Credentials()) add(rule34)
+                add(danbooru)
+            }
+            val targets = when (providerName) {
+                "Auto", "All" -> availableProviders
+                "Danbooru" -> listOf(danbooru)
+                "yande.re" -> listOf(yandere)
+                "Gelbooru" -> listOf(gelbooru).takeIf { hasGelbooruCredentials() }
+                    ?: throw IOException("Gelbooru is locked. Add your Gelbooru user ID and API key in Settings.")
+                "Rule34.xxx" -> listOf(rule34).takeIf { hasRule34Credentials() }
+                    ?: throw IOException("Rule34.xxx is locked. Add your user ID and API key in Settings.")
+                else -> throw IllegalArgumentException("Unknown provider: $providerName")
+            }
+            val cappedLimit = limit.coerceIn(1, 20)
+            val results = targets.map { provider ->
+                async { runCatching { suggestProviderTags(provider, prefix, cappedLimit * 4) } }
+            }.awaitAll()
+            val successful = results.mapNotNull { it.getOrNull() }
+            if (successful.isEmpty()) {
+                throw results.firstNotNullOfOrNull { it.exceptionOrNull() }
+                    ?: IOException("Could not load tag suggestions from the selected provider.")
+            }
+            successful.flatten()
+                .groupBy { it.first }
+                .map { (name, values) -> name to (values.maxOfOrNull { it.second } ?: 0) }
+                .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
+                .take(cappedLimit)
+                .map { it.first }
+        }
+
+    private suspend fun suggestProviderTags(
+        provider: Provider,
+        prefix: String,
+        limit: Int,
+    ): List<Pair<String, Int>> = coroutineScope {
+        val payloads = if (provider.yandere) {
+            listOf("3", "4").map { category ->
+                async { runCatching { requestTagEntries(provider, prefix, limit, category) }.getOrDefault(emptyList()) }
+            }.awaitAll().flatten()
+        } else {
+            requestTagEntries(provider, prefix, limit)
+        }
+        payloads.mapNotNull { tag ->
+            val name = tag.optString("name").trim().lowercase()
+            val rawCategory = tag.opt("category") ?: tag.opt("type")
+            val category = when (rawCategory) {
+                is Number -> rawCategory.toInt()
+                else -> rawCategory?.toString()?.toIntOrNull()
+            }
+            if (name.isBlank() || !name.startsWith(prefix) || category !in setOf(3, 4)) {
+                return@mapNotNull null
+            }
+            val count = (tag.opt("post_count") ?: tag.opt("count"))
+                .let { value ->
+                    when (value) {
+                        is Number -> value.toInt()
+                        else -> value?.toString()?.toIntOrNull()
+                    }
+                }?.coerceAtLeast(0) ?: 0
+            name to count
+        }
+    }
+
+    private suspend fun requestTagEntries(
+        provider: Provider,
+        prefix: String,
+        limit: Int,
+        category: String? = null,
+    ): List<JSONObject> {
+        val urlBuilder = when {
+            provider.name == "Danbooru" -> {
+                provider.endpoint.replace("posts.json", "tags.json").toHttpUrl().newBuilder()
+                    .addQueryParameter("search[name_matches]", "$prefix*")
+                    .addQueryParameter("search[category]", "3,4")
+                    .addQueryParameter("search[hide_empty]", "true")
+                    .addQueryParameter("search[order]", "count")
+                    .addQueryParameter("limit", limit.toString())
+            }
+            provider.yandere -> provider.endpoint.replace("post.json", "tag.json")
+                .toHttpUrl().newBuilder()
+                .addQueryParameter("name", "$prefix*")
+                .addQueryParameter("limit", limit.toString())
+                .addQueryParameter("type", category ?: "3")
+            provider.name == "Gelbooru" || provider.name == "Rule34.xxx" ->
+                provider.endpoint.toHttpUrl().newBuilder()
+                    .addQueryParameter("page", "dapi")
+                    .addQueryParameter("s", "tag")
+                    .addQueryParameter("q", "index")
+                    .addQueryParameter("json", "1")
+                    .addQueryParameter("name_pattern", "$prefix%")
+                    .addQueryParameter("limit", limit.toString())
+            else -> throw IllegalArgumentException("Unsupported tag provider: ${provider.name}")
+        }
+        addGelbooruCredentials(provider, urlBuilder)
+        addRule34Credentials(provider, urlBuilder)
+        val requestBuilder = Request.Builder()
+            .url(urlBuilder.build())
+            .header("User-Agent", "Waifu Gallery/0.1 (search suggestions)")
+            .header("Accept", "application/json")
+        if (provider.name == "Danbooru") requestBuilder.header("Accept-Version", "v7")
+        apiClient().newCall(requestBuilder.build()).awaitResponse().use { response ->
+            if (!response.isSuccessful) throw IOException("${provider.name} returned HTTP ${response.code}")
+            val body = response.body?.string().orEmpty()
+            if (body.isBlank()) throw IOException("${provider.name} returned an empty tag response")
+            val array = runCatching { JSONArray(body) }.getOrNull()
+            if (array != null) return (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+            val root = JSONObject(body)
+            val entries = root.optJSONArray("tags") ?: root.optJSONArray("tag")
+            return when {
+                entries != null -> (0 until entries.length()).mapNotNull { entries.optJSONObject(it) }
+                root.optJSONObject("tag") != null -> listOfNotNull(root.optJSONObject("tag"))
+                else -> throw IOException("${provider.name} returned an unexpected tag response")
+            }
+        }
+    }
+
     private suspend fun searchProvider(
         provider: Provider,
         query: String,
@@ -437,11 +560,12 @@ class BooruApi(
                 val queryRating = ratingTag?.let { providerRatingTag(provider, it) }
                 val requestTags = tags + listOfNotNull(
                     if (mediaFilter() == "video") "video" else null,
+                    if (mediaFilter() == "png" && (provider.name == "Danbooru" || provider.yandere)) "filetype:png" else null,
                     queryRating?.let { "rating:$it" },
                 )
                 val params = mutableMapOf(
                     "tags" to requestTags.joinToString(" "),
-                    "limit" to minOf(limit + 1, 100).toString(),
+                    "limit" to if (mediaFilter() == "png" && (provider.name == "Gelbooru" || provider.name == "Rule34.xxx")) "100" else minOf(limit + 1, 100).toString(),
                     "page" to page.toString(),
                 )
                 if (provider.yandere) params["api_version"] = "2"
@@ -453,10 +577,13 @@ class BooruApi(
                     ratingMatches(it, rating) && (!excludeMale() || acceptableGender(it)) &&
                     (rating != RatingFilter.SFW || safeForSfw(it)) && acceptedPost(it)
             }
-            val count = if (includeCount) {
+            val count = if (includeCount && !(mediaFilter() == "png" && (provider.name == "Gelbooru" || provider.name == "Rule34.xxx"))) {
                 countMatches(
                     provider,
-                    tags + listOfNotNull(if (mediaFilter() == "video") "video" else null),
+                    tags + listOfNotNull(
+                        if (mediaFilter() == "video") "video" else null,
+                        if (mediaFilter() == "png" && (provider.name == "Danbooru" || provider.yandere)) "filetype:png" else null,
+                    ),
                     rating,
                 )
             } else null
@@ -565,6 +692,7 @@ class BooruApi(
             for (rating in wantedRatings) {
                 val requestTags = tags + listOfNotNull(
                     if (mediaFilter() == "video") "video" else null,
+                    if (mediaFilter() == "png" && (provider.name == "Danbooru" || provider.yandere)) "filetype:png" else null,
                     "rating:${providerRatingTag(provider, rating)}",
                 )
                 val params = mutableMapOf("tags" to requestTags.joinToString(" "), "limit" to "100")
@@ -872,7 +1000,8 @@ class BooruApi(
         val custom = customBlockTags().split(Regex("[,\\s]+")).filter(String::isNotBlank).map { it.lowercase().replace(' ', '_') }.toSet()
         val blocked = post.tags.any { it in custom }
         return !blocked && (!filterGore() || post.tags.none { it in GORE_BLOCK_TAGS }) &&
-            (mediaFilter() == "all" || post.mediaType == mediaFilter()) &&
+            (mediaFilter() == "all" || post.mediaType == mediaFilter() ||
+                mediaFilter() == "png" && post.imageUrl.substringBefore('?').substringBefore('#').endsWith(".png", ignoreCase = true)) &&
             (!filterAiGenerated() || !post.hasAiGeneratedTag())
     }
 

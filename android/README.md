@@ -2,13 +2,13 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-Android's source and latest published version is `0.1.30` (`versionCode` `28`), under the Android-specific `android-v0.1.30` release tag. Android's version can advance independently from Windows and Linux.
+The latest published Android version is `0.1.30` (`versionCode` `28`), under the Android-specific `android-v0.1.30` release tag. The current source includes unreleased search autocomplete changes; Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
 ## Features
 
-- Random image browsing with pull-to-refresh, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies image/video filters at the provider; changing content filters reloads search from page 1.
+- Random image browsing with pull-to-refresh, comma-separated and prefix tag search, provider selection, and SFW/NSFW rating filters. Search autocomplete fetches character and series tags from the selected provider, debounces requests, and persists suggestions by keyword prefix for instant and offline reuse. Focusing an empty search field shows recent searches; choosing a suggestion starts the search immediately. Media filters include images, videos, PNG files, or both images and videos; PNG format alone does not guarantee transparency. Auto mode falls back across providers and adds the video tag to random requests when video-only is selected. Search follows the selected default provider and applies media filters at the provider; changing content filters reloads search from page 1.
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers. Gelbooru and Rule34.xxx are enabled after signing in with each provider's user ID and API key. Settings → Providers can test each API connection and show its HTTP status or concise timeout, TLS, DNS, and connection error.
 - Paged search results, full-size image viewing, swipe navigation, pinch-to-zoom, and animated double-tap focal zoom; double-tap again to reset and swipe while zoomed to pan. An optional Display setting automatically loads full-size images after their previews.
 - All-provider Search runs eligible providers concurrently and merges deduplicated results in round-robin order. Random requests return the first eligible provider with results and cancel slower requests; if an Auto random request gets provider errors without a result, it retries once before reporting failure.
@@ -19,7 +19,7 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Media info for the artist, provider, rating, source, post ID, and tags.
 - Image source/artist information when provided by the upstream post.
 - Compact download cards show progress and retry states; cancel an active transfer with the X button. Use the Downloads screen's top-right menu to retry all failed downloads or clear finished history. Download history and each saved file's destination are retained locally across app restarts. Tap a completed item to open the saved media in an installed gallery or video app.
-- Local favorites with image/video badges and separate totals; choose newest-first or oldest-first order, and optionally cache favorite thumbnails with controls to view cache usage or clear it. Long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/AI-generated/tag filters, and optional ambient blurred backgrounds.
+- Local favorites with image/video badges and separate totals; filter by all media, images, videos, or transparent PNGs, then choose newest-first or oldest-first order. These filter choices persist. Favorite thumbnails can be cached with controls to view cache usage or clear it. Long-press a favorite to download it, select it, or remove it. Selection mode supports select/deselect all, bulk removal with confirmation, and bulk download that skips duplicate or already queued/saved media. Search results and favorite video thumbnails show a play icon. Also includes custom random-search terms, configurable male-only/gore/AI-generated/tag filters, and optional ambient blurred backgrounds.
 - Safety & Privacy controls with PIN-protected Favorites and parental maximum-rating/allowed-tag filters. PINs are salted and hashed locally and are excluded from encrypted user-data backups; parental filtering relies on provider metadata and is not OS-level supervision.
 - Optional DNS over HTTPS using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom HTTPS resolver URL.
 - Asynchronous GitHub release checks on app launch, with a dismissible in-app update prompt for newer stable versions. You can also check manually in **Settings → Updates**. Update downloads show determinate or indeterminate progress and verify the APK checksum before installation. About and update dialogs feature the Iro-chan mascot.
@@ -27,7 +27,7 @@ The custom Waifu Gallery launcher icon is not included yet. Android uses its gen
 - Encrypted, cross-platform user data backup and restore, including favorites, provider credentials, and portable preferences.
 
 Android Settings, Favorites, and Downloads open full-screen as separate app-styled screens. Settings has categories for Browsing, Providers, Network, Filters, Display, Downloads, Favorites, Safety & Privacy, Backup & Restore, Updates, and About. **Settings → Providers** opens a submenu with separate pages for the default provider, provider accounts, and connection status, following the Safety & Privacy navigation pattern. The **Safety & Privacy** category can require a PIN to enter Favorites and can restrict content by maximum rating and optional allowed tags; a guardian PIN protects the parental policy and protected settings. The **Filters** category controls image/video selection, default rating, built-in filters, and custom blocked tags, which can be added or removed individually. From search results, open Filters through the toolbar's three-dot menu to choose a provider and rating. Gelbooru and Rule34.xxx require your own user ID and API key; enter them under **Settings → Providers → Provider accounts**. Credentials are stored in app-private SharedPreferences, are not separately encrypted by Waifu Gallery, and are not included in the APK. Logging out immediately clears the saved credentials and updates the account state.
-The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL.
+The preferred video resolution selects the largest listed provider rendition at or below the chosen height when available; otherwise playback uses the source URL. **Settings → Browsing → Search data** lists cached provider keyword prefixes and recent searches, and lets you clear the keyword cache, search history, or both. Search suggestions and history are stored separately from the image cache.
 
 ## Encrypted user data backup
 
@@ -35,7 +35,21 @@ Open **Settings → Backup & Restore** to export or import a `.wgbak` file throu
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
 
+## Android 0.1.31 (release candidate)
+
+These source changes are built locally but are not published yet.
+
+- **Search:** retain provider-backed autocomplete, instant persistent cache, offline suggestions, and one-tap suggestion search; apply provider-aware PNG Only filtering for transparent PNG searches.
+- **Favorites:** add persistent media-type filters for all media, images, videos, and transparent PNGs, alongside newest/oldest ordering.
+- **Android source version:** `0.1.31`; `versionCode`: `29`.
+- **Release candidate:** `app-release.apk`; not published. The update feed still points to `android-v0.1.30`.
+
 ## Android 0.1.30
+
+The source changes below are not included in the published `0.1.30` APK and do not bump the Android version.
+
+- **Search:** add provider-backed autocomplete with a 180 ms typing debounce, persistent 24-hour keyword-prefix cache, instant cache-first results, and cached offline suggestions. Focus the empty field to show recent searches; tapping a suggestion starts the search immediately. Recent searches can be removed from the dropdown.
+- **Settings:** add Search data controls under Browsing to review and clear keyword cache and search history independently or together. This data uses SharedPreferences and remains separate from the image cache.
 
 - **Images:** show an animated progress bar below the header while automatically loading the full-resolution image, keeping the image unobstructed.
 - Android source version: `0.1.30`; `versionCode`: `28`.

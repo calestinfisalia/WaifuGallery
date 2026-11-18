@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
@@ -98,8 +99,8 @@ class FavoritesTitleBar(QWidget):
         sort_button.setIconSize(QSize(16, 16))
         sort_button.setObjectName("favoritesSortButton")
         sort_button.setFixedSize(30, 30)
-        sort_button.setToolTip("Sort favorites")
-        sort_button.setAccessibleName("Sort favorites")
+        sort_button.setToolTip("Filter and sort favorites")
+        sort_button.setAccessibleName("Filter and sort favorites")
         sort_button.clicked.connect(dialog._show_sort_menu)
         layout.addWidget(sort_button)
         self.sort_button = sort_button
@@ -147,6 +148,7 @@ class FavoritesDialog(FramelessResizableDialog):
     deleteSelectedRequested = Signal(object)
     downloadSelectedRequested = Signal(object)
     sortOrderChanged = Signal(str)
+    mediaFilterChanged = Signal(str)
 
     def __init__(
         self,
@@ -155,6 +157,7 @@ class FavoritesDialog(FramelessResizableDialog):
         remove_post,
         parent=None,
         sort_order: str = "newest",
+        media_filter: str = "all",
     ) -> None:
         super().__init__(parent)
         self.setObjectName("favoritesDialog")
@@ -164,7 +167,9 @@ class FavoritesDialog(FramelessResizableDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(820, 620)
         self.sort_order = sort_order if sort_order in {"newest", "oldest"} else "newest"
-        self.posts = self._ordered_posts(posts)
+        self.media_filter = media_filter if media_filter in {"all", "image", "video", "png"} else "all"
+        self.all_posts = list(posts)
+        self.posts = self._ordered_posts(self._filtered_posts())
         self._open_post = open_post
         self._remove_post = remove_post
         self._selection_mode = False
@@ -264,9 +269,32 @@ class FavoritesDialog(FramelessResizableDialog):
             ordered.reverse()
         return ordered
 
+    def _filtered_posts(self) -> list[ImagePost]:
+        if self.media_filter == "video":
+            return [post for post in self.all_posts if post.media_type == "video"]
+        if self.media_filter in {"image", "png"}:
+            posts = [post for post in self.all_posts if post.media_type != "video"]
+            if self.media_filter == "png":
+                posts = [
+                    post for post in posts
+                    if "transparent_png" in {tag.casefold() for tag in post.tags}
+                    and urlparse(post.image_url).path.casefold().endswith(".png")
+                ]
+            return posts
+        return list(self.all_posts)
+
     def set_posts(self, posts: list[ImagePost]) -> None:
-        self.posts = self._ordered_posts(posts)
+        self.all_posts = list(posts)
+        self.posts = self._ordered_posts(self._filtered_posts())
         self._rebuild()
+
+    def _set_media_filter(self, media_filter: str) -> None:
+        if media_filter not in {"all", "image", "video", "png"} or media_filter == self.media_filter:
+            return
+        self.media_filter = media_filter
+        self.posts = self._ordered_posts(self._filtered_posts())
+        self._rebuild()
+        self.mediaFilterChanged.emit(media_filter)
 
     def _set_sort_order(self, sort_order: str) -> None:
         if sort_order not in {"newest", "oldest"} or sort_order == self.sort_order:
@@ -278,6 +306,15 @@ class FavoritesDialog(FramelessResizableDialog):
 
     def _show_sort_menu(self) -> None:
         menu = QMenu(self)
+        media_menu = menu.addMenu("Media type")
+        media_actions = {}
+        for label, value in (("Show All", "all"), ("Image Only", "image"), ("Video Only", "video"), ("PNG Only", "png")):
+            action = media_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.media_filter == value)
+            media_actions[action] = value
+        menu.addSeparator()
+        menu.addSection("Time")
         newest = menu.addAction("Newest first")
         newest.setCheckable(True)
         newest.setChecked(self.sort_order == "newest")
@@ -291,6 +328,8 @@ class FavoritesDialog(FramelessResizableDialog):
             self._set_sort_order("newest")
         elif selected == oldest:
             self._set_sort_order("oldest")
+        elif selected in media_actions:
+            self._set_media_filter(media_actions[selected])
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -340,6 +379,9 @@ class FavoritesDialog(FramelessResizableDialog):
             f"{len(self.posts)} media · {images} images · {videos} videos"
         )
         self.empty_label.setVisible(not self.posts)
+        self.empty_label.setText(
+            "No favorite images yet." if not self.all_posts else "No favorites match the current filters."
+        )
         self.scroll.setVisible(bool(self.posts))
 
         self._pending_tile_posts = list(self.posts)

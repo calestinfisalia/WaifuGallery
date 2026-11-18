@@ -49,6 +49,94 @@ class ImageResponse:
 
 
 class ProviderMediaTests(unittest.TestCase):
+    def test_suggest_tags_uses_provider_prefix_and_popularity(self):
+        catalog = BooruCatalog()
+        payload = [
+            {"name": "rei_ayanami", "post_count": 42, "category": 4},
+            {"name": "rei", "post_count": 500, "category": 0},
+            {"name": "rei_channel", "count": 70, "type": 3},
+            {"name": "rei_ayanami_(plug_suit)", "post_count": 7, "category": 4},
+            {"name": "asuka", "post_count": 1000, "category": 4},
+            {"name": "rei_artist", "post_count": 900, "category": 1},
+            {"name": "", "post_count": 10, "category": 4},
+        ]
+
+        with patch.object(catalog, "_request_provider_json", return_value=payload) as request:
+            suggestions = catalog.suggest_tags("Rei", "Danbooru", limit=2)
+
+        self.assertEqual(suggestions, ["rei_channel", "rei_ayanami"])
+        endpoint, params = request.call_args.args[1:3]
+        self.assertEqual(endpoint, "https://danbooru.donmai.us/tags.json")
+        self.assertEqual(params["search[name_matches]"], "rei*")
+        self.assertEqual(params["search[category]"], "3,4")
+        self.assertEqual(params["limit"], 8)
+
+    def test_yande_suggest_tags_queries_character_and_series_categories(self):
+        catalog = BooruCatalog()
+
+        def request(_provider, _endpoint, params, _headers):
+            if params["type"] == "3":
+                return [{"name": "rei_channel", "type": 3, "count": 18}]
+            return [{"name": "rei_ayanami", "type": 4, "count": 42}]
+
+        with patch.object(catalog, "_request_provider_json", side_effect=request) as api:
+            suggestions = catalog.suggest_tags("rei", "yande.re")
+
+        self.assertEqual(suggestions, ["rei_ayanami", "rei_channel"])
+        self.assertEqual(
+            [call.args[2]["type"] for call in api.call_args_list], ["3", "4"]
+        )
+
+    def test_suggest_tags_all_combines_provider_popularity(self):
+        catalog = BooruCatalog()
+
+        def provider_tags(provider, _prefix, _limit):
+            return {
+                "yande.re": [("rei_ayanami", 10), ("rei", 5)],
+                "Danbooru": [("rei_ayanami", 20), ("rei", 1)],
+            }[provider]
+
+        with (
+            patch.object(catalog, "_available_providers", return_value=["yande.re", "Danbooru"]),
+            patch.object(catalog, "_suggest_provider_tags", side_effect=provider_tags),
+        ):
+            suggestions = catalog.suggest_tags("rei", "All", limit=2)
+
+        self.assertEqual(suggestions, ["rei_ayanami", "rei"])
+
+    def test_suggest_tags_reports_failure_when_no_provider_returns_data(self):
+        catalog = BooruCatalog()
+        with (
+            patch.object(catalog, "_available_providers", return_value=["Danbooru"]),
+            patch.object(
+                catalog,
+                "_suggest_provider_tags",
+                side_effect=ProviderError("offline"),
+            ),
+            self.assertRaises(ProviderError),
+        ):
+            catalog.suggest_tags("rei", "All")
+
+    def test_suggest_tags_accepts_legacy_dapi_xml(self):
+        for provider in ("Gelbooru", "Rule34.xxx"):
+            with self.subTest(provider=provider):
+                response = XmlDapiResponse()
+                response.text = (
+                    '<tags count="2">'
+                    '<tag name="rei_ayanami" count="42" type="4" />'
+                    '<tag name="rei_channel" count="7" type="3" />'
+                    "</tags>"
+                )
+                session = XmlDapiSession(response)
+                catalog = BooruCatalog(
+                    credentials=("test-user", "test-key"),
+                    rule34_credentials=("test-user", "test-key"),
+                )
+                with patch.object(catalog, "_session", return_value=session):
+                    suggestions = catalog.suggest_tags("rei", provider)
+
+                self.assertEqual(suggestions, ["rei_ayanami", "rei_channel"])
+
     def test_ai_generated_filter_hides_tagged_posts_when_enabled(self):
         catalog = BooruCatalog(filter_ai_generated=True)
         payload = [

@@ -164,7 +164,7 @@ def normalize_payload(payload: object) -> dict:
         raise ValueError("The selected provider is missing its backup credentials.")
     if rating not in {"sfw", "nsfw", "all"}:
         raise ValueError("The backup contains an unsupported rating setting.")
-    if media_filter not in {"image", "video", "all"}:
+    if media_filter not in {"image", "video", "png", "all"}:
         raise ValueError("The backup contains an unsupported media filter.")
     if doh_provider not in _DOH_PROVIDERS:
         raise ValueError("The backup contains an unsupported DNS provider.")

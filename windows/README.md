@@ -11,19 +11,20 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Rating choices for SFW, NSFW, or all results. NSFW results require enabling the option in Settings.
     - Optional tag-based gore and AI-generated post filtering, male-only tag exclusion, and custom blocked tags configured in Settings. AI filtering uses provider tags such as `ai-generated` and `ai-assisted`; untagged content may remain visible.
 - Search gallery with 50 results per page and provider filters. Changing content filters reloads the search from page 1.
+- When the search field is not focused, **R** refreshes the active view and **Left/Right** navigate adjacent media in the detail viewer. Search keeps up to 10 recent queries locally (shown with a clock-arrow icon) and suggests only character and series tags from the selected provider (or eligible providers under All), marked with a search icon. Clicking or editing the search field shows recent queries. Suggestions appear from a persistent provider-and-prefix cache immediately while typing, then refresh in the background after a 300 ms debounce when older than 24 hours; cached suggestions remain available offline. A no-results typo suggestion is clickable and never rewrites the query automatically.
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
-- Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
+- Random and searched image/video posts, configurable in Settings and the main window's Media Type menu. Choose PNG Only to request PNG files; transparency depends on the individual file. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
 - Display settings can automatically load the original-resolution image after showing its preview; the manual full-image button is hidden while this option is on and remains available when it is off.
 - Optional ambient background blur, which can be turned off in Settings.
 - The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts. Failed downloads can be retried per file or together from the Downloads window's top-right menu, which also clears history.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
 - Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
-- Favorites can be ordered newest-to-oldest or oldest-to-newest from the top-right filter button. Favorite thumbnails are cached locally by default; toggle caching, view disk usage, or clear the cache under Settings → General → Image cache. Turning caching off stops disk reads and writes but keeps existing files until cleared.
+- Favorites can be filtered by media type (all, images, videos, or transparent PNGs) and ordered newest-to-oldest or oldest-to-newest from the top-right filter button. Both selections persist. Favorite thumbnails are cached locally by default; toggle caching, view disk usage, or clear the cache under Settings → General → Image cache. Turning caching off stops disk reads and writes but keeps existing files until cleared.
 - Settings content adapts to the window size, and long image-viewer error messages wrap instead of being clipped.
 - Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
 - The Favorites image count is shown in the window footer. Downloading from Favorites queues the file without automatically opening Downloads.
 - User-defined search terms used by Random.
-- Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms, download folder, and favorite image cache are under General; the default rating is under Filters.
+- Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms, download folder, favorite image cache, keyword cache, and search history have separate pages under General; the default rating is under Filters.
 - Display settings include Dark, Light, System, and OLED Dark themes with color previews, plus optional automatic full-resolution image loading.
 - Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available. You can also check manually in Settings → Updates.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
@@ -54,7 +55,7 @@ Export and import use the native Windows file picker to open or save backup file
 - The toolbar download action is hidden on Search results until a media item is opened.
 - Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
 - Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
-- Video buffering shows a centered spinner without a surrounding card. Compact player controls use the active theme's purple accent; buffered media uses a brighter solid segment.
+- Video buffering shows a centered spinner without a surrounding card. Compact player controls use the active theme's purple accent, a round seek knob, and a thin gray buffered segment.
 - The bottom media footer shows `16 images, 4 videos`-style counts on Search results. For an image in Random or a Search/Favorites detail, both manual and automatic loading show `Load Full Image` with animated dots, followed by the full dimensions when complete. Before loading, manual mode shows only the preview dimensions; automatic mode shows `Load full size...` without full dimensions. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
 - Main, Favorites, Settings, Downloads, and other app windows follow the focused window in the stacking order.
 - App windows remember their sizes and provide minimize controls. Resizing Favorites avoids rebuilding its tiles or repeatedly scanning thumbnails; the main image uses a fast preview during resizing and restores final scaling when resizing settles. Closing the main window also closes its open dialogs.
@@ -63,6 +64,17 @@ Export and import use the native Windows file picker to open or save backup file
 - The update dialog uses the full `assets/Iro-chan-update-pose.png` artwork in a clear right-side column; the release notes and download status stay readable beside/below it. Download percentage is a separate label beside a thin progress bar.
 
 For a reproducible bug report, include Windows version, image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../linux/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
+
+### Search suggestions: development handoff
+
+- The search field is shared by Random and Search views. Suggestion generation must remain page-independent; `test_async_search_suggestions_open_popup_with_search_icon` in `tests/test_window_focus.py` covers the async result path while Random is active.
+- `waifu_gallery/ui/main_window.py` owns the query debounce, local history, stale-request checks, and popup placement. Suggestions start after two characters and replace only the final comma-separated term. The popup matches the search field width, sits 6 px below it, and moves above it when there is not enough screen space below.
+- `waifu_gallery/providers.py` implements `BooruCatalog.suggest_tags`. Suggestions are restricted to character (category 4) and series/copyright (category 3) tags. All uses eligible providers; Gelbooru and Rule34.xxx require configured credentials.
+- `waifu_gallery/suggestion_cache.py` persists up to 256 provider/prefix entries in the app's QSettings store with a 24-hour freshness window. Stale values remain visible when the provider request fails or the app is offline. This data is separate from the favorite image cache and is not included in backup/export behavior.
+- Recent queries are stored locally under `search/recent_queries` (maximum 10). Do not include them in backup/export behavior. The dropdown intentionally uses icons, not thumbnails: search icon for tag suggestions, the clock-arrow `waifu_gallery/assets/history.svg` for history, and `waifu_gallery/assets/x.svg` to remove an individual history entry.
+- Typo correction remains a separate, explicit action after a search returns no results; selecting it applies the corrected tag. Suggestions and corrections must not silently rewrite or submit the user's query.
+- Focused UI/provider coverage is in `tests/test_window_focus.py` and `tests/test_provider_media.py`. From `windows/`, run `.\.venv\Scripts\python.exe -m pytest -q`; also run `.\.venv\Scripts\python.exe -m compileall -q waifu_gallery tests` and `git diff --check`. At this handoff, the full suite passed: 104 tests and 14 subtests.
+- These source changes are not committed or pushed. The Setup and Portable files in `dist-release` predate the search-suggestion UI changes, so testing those binaries will not validate the current source. No rebuild or GitHub release has been made.
 
 ### Update dialog preview and window diagnostics
 

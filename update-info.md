@@ -1,35 +1,42 @@
-# Windows 0.1.24 and Android 0.1.29 Release Notes
+# Update notes — unreleased source changes
 
-These notes describe the Windows and Android packages in this release. Linux source includes the desktop updates but is not built or released here.
+These notes compare the current release candidates with the latest published releases in [calestinfisalia/WaifuGallery](https://github.com/calestinfisalia/WaifuGallery/releases). The source versions below have been prepared, but their releases are not published and `updates.json` still points to the latest published builds.
 
-## Favorites
+## Version comparison
 
-- Added newest-first and oldest-first sorting for favorites.
-- Added a local thumbnail image cache, enabled by default, to speed up loading.
-- On Windows and Linux, made large Favorites windows appear sooner by building tiles in small batches, showing pending-thumbnail placeholders, and loading cached previews off the UI thread.
-- On Windows and Linux, made window resizing more responsive by updating image and gallery previews during resize, then applying high-quality scaling after resizing settles.
-- Moved the Favorites image count into its footer and kept Favorites downloads from automatically opening the Downloads window.
-- Added Settings controls to enable or disable caching, check its disk usage, and clear cached files. Disabling the cache stops disk reads and writes but does not remove existing files.
+| Platform | Previous published version | Current source version | Status |
+| --- | --- | --- | --- |
+| Windows | [0.1.25](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.25) | 0.1.26 | Release candidate built locally; not published yet. |
+| Linux | [0.1.18](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.18) | 0.1.19 | Source 0.1.19 and the current working-tree changes are not published. |
+| Android | [0.1.30](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.30) | 0.1.31 (`versionCode` 29) | Release candidate built locally; not published yet. |
 
-## Settings and image viewing
+Windows 0.1.25 restored the opaque fullscreen photo controls while ambient backgrounds update. Linux 0.1.18 added the AI-generated content filter and Settings polish. The current desktop source adds the following changes on top of those published builds; Linux also carries the shared desktop source updates made for 0.1.19.
 
-- Adjusted Settings layouts so their content makes better use of the available window size.
-- Long image-viewer error messages now wrap to fit instead of being clipped.
-- Added an optional setting to load the original-resolution image automatically after its preview appears. It is off by default; when enabled, the manual full-image button is hidden.
-- Updated the image footer: both manual and automatic loading show `Load Full Image` with animated dots, followed by the full dimensions when complete. Before loading, manual mode shows the preview dimensions; automatic mode shows `Load full size...` without full dimensions.
-- Fixed Windows window stacking by clearing native owner HWNDs for non-modal app dialogs and raising the active HWND without stealing focus; Linux continues to detach transient parents. This lets the focused main window move above inactive Settings/Media Info windows without repeatedly lowering siblings.
-- Enabled Windows native resize/snap styles and the custom maximize-button hit target so edge-drag snapping and Windows 11 Snap Layouts work with the frameless title bar.
-- Added a fade-in when the Windows or Linux ambient background first appears; it clears while a new image is loading and returns when its preview is ready. Windows keeps blur rendering on the original label and applies fade opacity during painting to avoid nested graphics-effect compositing.
-- Restored the ambient background when zooming back to fit, and preserved zoom level and pan position while the original-resolution image loads on Windows and Linux.
-- Reworked detail-navigation arrows as transparent overlays on the media surface and made search pagination a compact, translucent capsule over the gallery.
-- Added remembered window sizes for the main window, Favorites, Downloads, Settings, and Media Info; closing the main window now closes its open dialogs. Added minimize controls to the four dialogs and separate Windows taskbar previews grouped under the Waifu Gallery app identity.
+## New in the current desktop source
 
-## Verification
+- Added provider-backed search autocomplete for eligible character and series tags. Suggestions are requested after a typing debounce and cached locally by provider and keyword prefix, separately from favorite image thumbnails.
+- Added persistent offline suggestion caching and recent search history. Clicking the search field shows history; clicking a suggestion starts the search immediately.
+- Added separate **General → Keyword cache** and **General → Search history** pages. Each can be cleared independently, and both can be cleared together. The existing image cache remains separate.
+- Added Linux parity for the Windows autocomplete, local history, cache management, and suggestion-row controls.
+- Added a dedicated tag icon for Keyword cache so it is visually distinct from Image cache.
+- Added a **PNG Only** Media Type filter for provider search and random browsing. Use the provider file-type operator where supported, and verify returned file extensions; other providers return a larger candidate set for local PNG filtering. PNG format alone does not guarantee transparency.
+- Reworked the Favorites filter into separate **Media type** and **Time** groups on Windows and Linux. Media choices include Show All, Image Only, Video Only, and **PNG Only (transparent)**; the selected media filter and time order persist locally.
+- Added the same media and time filters to Android Favorites, including persisted filter selection. **PNG Only (transparent)** requires both a PNG file extension and the provider's `transparent_png` tag.
+- Refined fullscreen desktop video controls: restore a round seek knob and use a thin gray buffered segment.
 
-- Added or updated focused tests for the Windows and Linux desktop implementations.
+## Fixed and refined
+
+- Fixed autocomplete dropdowns remaining visible as blank panels when the current query has no matching rows. The popup is now hidden for empty or non-matching results and filtered by the start of the query.
+- Refined dropdown placement and theme styling. The popup stays aligned with the search field, keeps a consistent 4 px gap, and uses the active application theme.
+- Fixed history-row delete controls so pressing the X removes the entry without starting a search.
+- Improved fast window resizing: image previews use throttled, fast scaling during the drag, while final-quality rendering and gallery reflow happen after resizing settles.
 
 ## Android
 
-- Added optional automatic full-resolution loading after the preview; the manual full-image action is hidden while auto-load is enabled.
-- Added newest-first and oldest-first Favorites sorting and a dedicated thumbnail cache with enable, usage, and clear controls.
-- Kept the preview visible and showed a wrapping error message if the full-size image fails to load.
+Android 0.1.30 remains the latest published build. Source 0.1.31 adds provider-backed search autocomplete, persistent search data, and Favorites media filters:
+
+- Fetch character and series tag suggestions directly from the selected provider after a 180 ms debounce. Cache results by provider and keyword prefix for 24 hours, show cached matches immediately, and reuse cached suggestions offline.
+- Show recent search history when the empty search field receives focus. Selecting a history item or provider suggestion starts the search in one tap; history entries can be removed from the dropdown.
+- Add **Settings > Browsing > Search data** to inspect cached keyword prefixes and recent searches, then clear either collection or both. Suggestion/history storage remains separate from the image cache.
+- Add a **PNG Only** media filter on desktop and Android. Provider search uses provider-supported PNG filtering and verifies file extensions; transparent-only results use the `transparent_png` tag. Favorites now have separate media-type and time filters on all three platforms.
+- Release candidate: 0.1.31 (`versionCode` 29), built locally and not yet published. The update feed still points to Android 0.1.30 (`versionCode` 28).

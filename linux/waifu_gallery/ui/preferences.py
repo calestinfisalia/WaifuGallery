@@ -45,6 +45,7 @@ from ..favorite_cache import clear_favorite_thumbnail_cache, favorite_thumbnail_
 from ..pin_security import has_pin, set_pin, verify_pin
 from ..providers import BooruCatalog, PROVIDERS
 from ..settings import AppSettings
+from ..suggestion_cache import SuggestionCache
 from .backup_file_dialog import BackupFileDialog
 from .backup_prompts import BackupMessageDialog, BackupPassphraseDialog, BackupSectionsDialog
 from .dialog_chrome import FramelessResizableDialog, create_minimize_button
@@ -335,6 +336,7 @@ class PreferencesDialog(FramelessResizableDialog):
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
         self.settings = settings
+        self.suggestion_cache = SuggestionCache(settings)
         self._update_pool = QThreadPool.globalInstance()
         self._update_check_task = None
         self._provider_connection_tasks: dict[str, ProviderConnectionTask] = {}
@@ -541,15 +543,59 @@ class PreferencesDialog(FramelessResizableDialog):
         cache_layout.addWidget(clear_cache)
         self.cache_clear_button = clear_cache
         self._refresh_image_cache_info()
+        keyword_cache_section, keyword_cache_layout = _settings_section("Keyword cache")
+        keyword_cache_layout.addWidget(QLabel(
+            "Review cached recommendations from search providers."
+        ))
+        self.suggestion_cache_count = QLabel()
+        keyword_cache_layout.addWidget(self.suggestion_cache_count)
+        self.suggestion_cache_list = QListWidget()
+        self.suggestion_cache_list.setObjectName("suggestionKeywordCacheList")
+        self.suggestion_cache_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.suggestion_cache_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.suggestion_cache_list.setMaximumHeight(140)
+        keyword_cache_layout.addWidget(self.suggestion_cache_list, 1)
+        self.clear_suggestion_cache_button = QPushButton("Clear keyword cache")
+        self.clear_suggestion_cache_button.clicked.connect(
+            self._clear_suggestion_keyword_cache
+        )
+        keyword_cache_layout.addWidget(self.clear_suggestion_cache_button)
+        history_section, history_layout = _settings_section("Search history")
+        history_layout.addWidget(QLabel("Review and clear recent searches."))
+        self.recent_history_count = QLabel()
+        history_layout.addWidget(self.recent_history_count)
+        self.recent_history_list = QListWidget()
+        self.recent_history_list.setObjectName("recentSearchHistoryList")
+        self.recent_history_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.recent_history_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.recent_history_list.setMaximumHeight(140)
+        history_layout.addWidget(self.recent_history_list, 1)
+        self.clear_search_history_button = QPushButton("Clear search history")
+        self.clear_search_history_button.clicked.connect(self._clear_search_history)
+        history_layout.addWidget(self.clear_search_history_button)
+        self.clear_all_search_data_button = QPushButton("Clear cache and history")
+        self.clear_all_search_data_button.clicked.connect(self._clear_search_data)
+        history_layout.addWidget(self.clear_all_search_data_button)
+        self._refresh_search_history_info()
         page = self._section_menu_page(
             "General",
-            "Manage saved search terms, download location, and image cache.",
+            "Manage saved terms, search history, download location, and caches.",
             (
                 ("Search terms", "Choose which saved terms Random can use.", "search", search_section),
                 ("Downloads", "Choose where downloaded files are saved.", "download", download_section),
                 ("Image cache", "View or clear cached favorite thumbnails.", "archive", cache_section),
+                ("Keyword cache", "View or clear cached provider recommendations.", "tag", keyword_cache_section),
+                ("Search history", "View or clear recent search terms.", "history", history_section),
             ),
-            open_callbacks={"Image cache": self._refresh_image_cache_info},
+            open_callbacks={
+                "Image cache": self._refresh_image_cache_info,
+                "Search history": self._refresh_search_history_info,
+                "Keyword cache": self._refresh_search_history_info,
+            },
         )
         self._add_page(page, "General", "search")
 
@@ -577,6 +623,59 @@ class PreferencesDialog(FramelessResizableDialog):
             self._refresh_image_cache_info()
             return
         self._refresh_image_cache_info()
+
+    def _refresh_search_history_info(self) -> None:
+        entries = self.suggestion_cache.entries()
+        self.suggestion_cache_list.clear()
+        for entry in entries:
+            self.suggestion_cache_list.addItem(
+                f"{entry['provider']}  ·  {entry['prefix']}  ·  "
+                f"{len(entry['suggestions'])} suggestions"
+            )
+        self.suggestion_cache_count.setText(
+            f"Keyword cache ({len(entries)})"
+        )
+
+        raw_history = self.settings.get("search/recent_queries", [])
+        values = [raw_history] if isinstance(raw_history, str) else (
+            raw_history if isinstance(raw_history, (list, tuple)) else []
+        )
+        history = []
+        seen = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            query = value.strip()
+            if query and query.casefold() not in seen:
+                history.append(query)
+                seen.add(query.casefold())
+            if len(history) >= 10:
+                break
+        self.recent_history_list.clear()
+        self.recent_history_list.addItems(history)
+        self.recent_history_count.setText(f"Recent searches ({len(history)})")
+        self.clear_suggestion_cache_button.setEnabled(bool(entries))
+        self.clear_search_history_button.setEnabled(bool(history))
+        self.clear_all_search_data_button.setEnabled(bool(entries or history))
+
+    def _clear_suggestion_keyword_cache(self) -> None:
+        self.suggestion_cache.clear()
+        self._refresh_search_history_info()
+
+    def _clear_search_history(self) -> None:
+        self.settings.set("search/recent_queries", [])
+        dismiss = getattr(self.parent(), "_dismiss_search_suggestions", None)
+        if callable(dismiss):
+            dismiss()
+        self._refresh_search_history_info()
+
+    def _clear_search_data(self) -> None:
+        self.suggestion_cache.clear()
+        self.settings.set("search/recent_queries", [])
+        dismiss = getattr(self.parent(), "_dismiss_search_suggestions", None)
+        if callable(dismiss):
+            dismiss()
+        self._refresh_search_history_info()
 
     def _build_provider_tab(self) -> None:
         page = QWidget()

@@ -5,8 +5,25 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.Locale
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+
+data class SearchSuggestionCacheEntry(
+    val provider: String,
+    val prefix: String,
+    val suggestions: List<String>,
+    val updatedAt: Long,
+) {
+    fun isFresh(now: Long = System.currentTimeMillis()): Boolean =
+        now >= updatedAt && now - updatedAt < SUGGESTION_CACHE_TTL_MILLIS
+
+    companion object {
+        const val SUGGESTION_CACHE_TTL_MILLIS = 24L * 60 * 60 * 1000
+    }
+}
+
+data class SearchSuggestion(val query: String, val fromHistory: Boolean)
 
 class AppPreferences(context: Context) {
     private val store = context.getSharedPreferences("waifu_gallery", Context.MODE_PRIVATE)
@@ -99,6 +116,15 @@ class AppPreferences(context: Context) {
         set(value) {
             require(value in setOf("newest", "oldest"))
             store.edit().putString("favorites/sort_order", value).apply()
+        }
+
+    var favoritesMediaFilter: String
+        get() = store.getString("favorites/media_filter", "all")?.takeIf {
+            it in setOf("all", "image", "video", "png")
+        } ?: "all"
+        set(value) {
+            require(value in setOf("all", "image", "video", "png"))
+            store.edit().putString("favorites/media_filter", value).apply()
         }
 
     var favoritesImageCacheEnabled: Boolean
@@ -227,6 +253,149 @@ class AppPreferences(context: Context) {
         store.edit().putString("custom_search_terms", array.toString()).apply()
     }
 
+    fun recentSearchHistory(): List<String> = try {
+        val array = JSONArray(store.getString(RECENT_SEARCHES_KEY, "[]"))
+        (0 until array.length())
+            .mapNotNull { array.optString(it).trim().takeIf(String::isNotBlank) }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+            .take(MAX_RECENT_SEARCHES)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    fun recordRecentSearch(query: String) {
+        val cleaned = query.trim()
+        if (cleaned.isBlank()) return
+        val updated = listOf(cleaned) + recentSearchHistory().filterNot {
+            it.equals(cleaned, ignoreCase = true)
+        }
+        writeRecentSearchHistory(updated.take(MAX_RECENT_SEARCHES))
+    }
+
+    fun removeRecentSearch(query: String) {
+        writeRecentSearchHistory(recentSearchHistory().filterNot {
+            it.equals(query, ignoreCase = true)
+        })
+    }
+
+    fun clearRecentSearchHistory() = writeRecentSearchHistory(emptyList())
+
+    private fun writeRecentSearchHistory(queries: List<String>) {
+        val array = JSONArray()
+        queries.forEach(array::put)
+        store.edit().putString(RECENT_SEARCHES_KEY, array.toString()).apply()
+    }
+
+    fun searchSuggestionCacheEntries(): List<SearchSuggestionCacheEntry> {
+        val entries = readSuggestionCache()
+        return entries.keys().asSequence().mapNotNull { key ->
+            val entry = entries.optJSONObject(key) ?: return@mapNotNull null
+            val provider = entry.optString("provider").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val prefix = entry.optString("prefix").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val rawSuggestions = entry.optJSONArray("suggestions") ?: return@mapNotNull null
+            val suggestions = (0 until rawSuggestions.length())
+                .mapNotNull { rawSuggestions.optString(it).takeIf(String::isNotBlank) }
+            SearchSuggestionCacheEntry(
+                provider = provider,
+                prefix = prefix,
+                suggestions = suggestions,
+                updatedAt = entry.optLong("updated_at", 0L),
+            )
+        }.sortedByDescending(SearchSuggestionCacheEntry::updatedAt).toList()
+    }
+
+    fun getSearchSuggestionCache(provider: String, prefix: String): SearchSuggestionCacheEntry? =
+        searchSuggestionCacheEntries().firstOrNull {
+            it.provider.equals(provider, ignoreCase = true) &&
+                it.prefix.equals(normalizeSuggestionPrefix(prefix), ignoreCase = true)
+        }
+
+    fun findSearchSuggestionCache(provider: String, prefix: String): SearchSuggestionCacheEntry? {
+        val normalizedPrefix = normalizeSuggestionPrefix(prefix)
+        return searchSuggestionCacheEntries()
+            .asSequence()
+            .filter { it.provider.equals(provider, ignoreCase = true) }
+            .filter { normalizedPrefix.startsWith(it.prefix, ignoreCase = true) }
+            .maxByOrNull { it.prefix.length }
+    }
+
+    fun setSearchSuggestionCache(provider: String, prefix: String, suggestions: List<String>) {
+        val normalizedProvider = provider.trim().ifBlank { "All" }
+        val normalizedPrefix = normalizeSuggestionPrefix(prefix)
+        if (normalizedPrefix.isBlank()) return
+        val entries = readSuggestionCache()
+        val key = suggestionCacheKey(normalizedProvider, normalizedPrefix)
+        val array = JSONArray()
+        suggestions.map(String::trim).filter(String::isNotBlank).distinct().forEach(array::put)
+        entries.put(
+            key,
+            JSONObject()
+                .put("provider", normalizedProvider)
+                .put("prefix", normalizedPrefix)
+                .put("suggestions", array)
+                .put("updated_at", System.currentTimeMillis()),
+        )
+        if (entries.length() > MAX_SUGGESTION_CACHE_ENTRIES) {
+            val ordered = searchSuggestionCacheEntriesFrom(entries)
+                .sortedByDescending(SearchSuggestionCacheEntry::updatedAt)
+                .take(MAX_SUGGESTION_CACHE_ENTRIES)
+            val trimmed = JSONObject()
+            ordered.forEach { entry ->
+                trimmed.put(suggestionCacheKey(entry.provider, entry.prefix), entry.toJson())
+            }
+            store.edit().putString(SUGGESTION_CACHE_KEY, trimmed.toString()).apply()
+        } else {
+            store.edit().putString(SUGGESTION_CACHE_KEY, entries.toString()).apply()
+        }
+    }
+
+    fun clearSearchSuggestionCache() {
+        store.edit().putString(SUGGESTION_CACHE_KEY, "{}").apply()
+    }
+
+    fun clearSearchCacheAndHistory() {
+        store.edit()
+            .putString(SUGGESTION_CACHE_KEY, "{}")
+            .putString(RECENT_SEARCHES_KEY, "[]")
+            .apply()
+    }
+
+    private fun readSuggestionCache(): JSONObject = try {
+        JSONObject(store.getString(SUGGESTION_CACHE_KEY, "{}") ?: "{}")
+    } catch (_: Exception) {
+        JSONObject()
+    }
+
+    private fun searchSuggestionCacheEntriesFrom(entries: JSONObject): List<SearchSuggestionCacheEntry> =
+        entries.keys().asSequence().mapNotNull { key ->
+            val entry = entries.optJSONObject(key) ?: return@mapNotNull null
+            val provider = entry.optString("provider").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val prefix = entry.optString("prefix").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val suggestions = entry.optJSONArray("suggestions") ?: return@mapNotNull null
+            SearchSuggestionCacheEntry(
+                provider,
+                prefix,
+                (0 until suggestions.length()).mapNotNull { suggestions.optString(it).takeIf(String::isNotBlank) },
+                entry.optLong("updated_at", 0L),
+            )
+        }.toList()
+
+    private fun SearchSuggestionCacheEntry.toJson(): JSONObject {
+        val suggestionsJson = JSONArray()
+        suggestions.forEach(suggestionsJson::put)
+        return JSONObject()
+            .put("provider", provider)
+            .put("prefix", prefix)
+            .put("suggestions", suggestionsJson)
+            .put("updated_at", updatedAt)
+    }
+
+    private fun suggestionCacheKey(provider: String, prefix: String): String =
+        "${provider.lowercase(Locale.ROOT)}|${normalizeSuggestionPrefix(prefix)}"
+
+    private fun normalizeSuggestionPrefix(prefix: String): String =
+        prefix.trim().replace(Regex("\\s+"), "_").lowercase(Locale.ROOT)
+
     private fun validPin(pin: String): Boolean =
         pin.length in MIN_PIN_LENGTH..MAX_PIN_LENGTH && pin.all { it in '0'..'9' }
 
@@ -247,6 +416,10 @@ class AppPreferences(context: Context) {
     }
 
     private companion object {
+        const val RECENT_SEARCHES_KEY = "search/recent_queries"
+        const val SUGGESTION_CACHE_KEY = "search/suggestion_cache"
+        const val MAX_RECENT_SEARCHES = 10
+        const val MAX_SUGGESTION_CACHE_ENTRIES = 256
         val SAFETY_PIN_SCOPES = setOf("favorites_lock", "parent")
         const val PIN_ITERATIONS = 310_000
         const val MIN_PIN_LENGTH = 4

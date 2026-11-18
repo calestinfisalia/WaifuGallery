@@ -388,7 +388,7 @@ object UserDataBackupCodec {
         require(data.rating in setOf("sfw", "nsfw", "all")) {
             "The backup contains an unsupported rating setting."
         }
-        require(data.mediaFilter in setOf("image", "video", "all")) {
+        require(data.mediaFilter in setOf("image", "video", "png", "all")) {
             "The backup contains an unsupported media filter."
         }
         require(data.dohProvider in setOf(

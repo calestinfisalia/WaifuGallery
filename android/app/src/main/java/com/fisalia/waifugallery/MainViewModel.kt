@@ -19,6 +19,8 @@ import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.ReleaseUpdate
 import com.fisalia.waifugallery.data.ReleaseUpdateChecker
 import com.fisalia.waifugallery.data.SearchPage
+import com.fisalia.waifugallery.data.SearchSuggestion
+import com.fisalia.waifugallery.data.SearchSuggestionCacheEntry
 import com.fisalia.waifugallery.data.UserDataBackup
 import com.fisalia.waifugallery.data.UserDataBackupCodec
 import com.fisalia.waifugallery.data.VideoVariant
@@ -39,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 enum class AppScreen { RANDOM, GALLERY, FAVORITES, DETAIL }
@@ -64,6 +67,10 @@ data class UiState(
     val detailImage: ImagePost? = null,
     val detailOrigin: AppScreen = AppScreen.RANDOM,
     val queryInput: String = "",
+    val searchSuggestions: List<SearchSuggestion> = emptyList(),
+    val showSearchSuggestions: Boolean = false,
+    val recentSearchHistory: List<String> = emptyList(),
+    val searchSuggestionCacheEntries: List<SearchSuggestionCacheEntry> = emptyList(),
     val galleryQuery: String = "",
     val gallery: List<ImagePost> = emptyList(),
     val galleryProviderErrors: List<String> = emptyList(),
@@ -72,6 +79,7 @@ data class UiState(
     val providerConnectionError: String? = null,
     val favorites: List<ImagePost> = emptyList(),
     val favoritesSortOrder: String = "newest",
+    val favoritesMediaFilter: String = "all",
     val favoritesImageCacheEnabled: Boolean = true,
     val favoritesLockEnabled: Boolean = false,
     val favoritesPinSet: Boolean = false,
@@ -165,6 +173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             provider = preferences.selectedProvider,
             favorites = preferences.backupFavoritePosts(),
             favoritesSortOrder = preferences.favoritesSortOrder,
+            favoritesMediaFilter = preferences.favoritesMediaFilter,
             favoritesImageCacheEnabled = preferences.favoritesImageCacheEnabled,
             favoritesLockEnabled = preferences.favoritesLockEnabled,
             favoritesPinSet = preferences.hasSafetyPin("favorites_lock"),
@@ -173,6 +182,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             parentalMaximumRating = preferences.parentalMaximumRating,
             parentalAllowedTags = preferences.parentalAllowedTags,
             customTerms = preferences.customSearchTerms(),
+            recentSearchHistory = preferences.recentSearchHistory(),
+            searchSuggestionCacheEntries = preferences.searchSuggestionCacheEntries(),
             saveFolderLabel = preferences.saveFolderUri?.let { runCatching { DocumentFile.fromTreeUri(application, Uri.parse(it))?.name }.getOrNull() },
             downloads = restoreDownloadHistory(preferences.downloadHistoryJson),
         ),
@@ -183,6 +194,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var activeDownloadCall: Call? = null
     private val cancelledDownloadIds = ConcurrentHashMap.newKeySet<String>()
     private var releaseDownloadJob: Job? = null
+    private var searchSuggestionJob: Job? = null
     private var pendingGalleryFilters: Pair<String, RatingFilter>? = null
 
     init {
@@ -272,7 +284,200 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun reportReleaseInstallError(message: String) {
         _state.update { it.copy(releaseDownloadError = message) }
     }
-    fun updateQuery(value: String) = _state.update { it.copy(queryInput = value) }
+    fun updateQuery(value: String) {
+        val query = value
+        val (completionPrefix, fragment) = searchQueryParts(query)
+        val provider = suggestionProviderName()
+        searchSuggestionJob?.cancel()
+
+        val cached = if (fragment.length >= 2) {
+            preferences.findSearchSuggestionCache(provider, fragment)
+        } else null
+        val cachedTags = cached?.suggestions.orEmpty().filter {
+            it.startsWith(fragment, ignoreCase = true)
+        }
+        val history = preferences.recentSearchHistory()
+        _state.update {
+            it.copy(
+                queryInput = value,
+                recentSearchHistory = history,
+                searchSuggestions = buildSearchSuggestions(query, completionPrefix, fragment, cachedTags),
+                searchSuggestionCacheEntries = preferences.searchSuggestionCacheEntries(),
+            )
+        }
+
+        if (fragment.length < 2) return
+        searchSuggestionJob = viewModelScope.launch {
+            delay(180)
+            val exactCache = preferences.getSearchSuggestionCache(provider, fragment)
+            if (exactCache?.isFresh() == true) return@launch
+            try {
+                val tags = api.suggestTags(fragment, provider, 12)
+                preferences.setSearchSuggestionCache(provider, fragment, tags)
+                val current = _state.value
+                if (
+                    current.queryInput != query ||
+                    suggestionProviderName() != provider
+                ) return@launch
+                val (latestPrefix, latestFragment) = searchQueryParts(current.queryInput)
+                val updatedHistory = preferences.recentSearchHistory()
+                _state.update {
+                    it.copy(
+                        recentSearchHistory = updatedHistory,
+                        searchSuggestions = buildSearchSuggestions(
+                            current.queryInput,
+                            latestPrefix,
+                            latestFragment,
+                            tags,
+                        ),
+                        searchSuggestionCacheEntries = preferences.searchSuggestionCacheEntries(),
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Cached suggestions and search history remain available offline.
+            }
+        }
+    }
+
+    fun setSearchFieldFocused(focused: Boolean) {
+        val query = _state.value.queryInput
+        val history = preferences.recentSearchHistory()
+        _state.update { current ->
+            current.copy(
+                showSearchSuggestions = focused,
+                recentSearchHistory = history,
+                searchSuggestions = if (focused && current.queryInput.isBlank()) {
+                    buildSearchSuggestions("", "", "", emptyList())
+                } else if (focused) {
+                    current.searchSuggestions
+                } else {
+                    emptyList()
+                },
+            )
+        }
+        if (focused && query.isNotBlank()) updateQuery(query)
+        if (!focused) searchSuggestionJob?.cancel()
+    }
+
+    fun selectSearchSuggestion(query: String) {
+        searchSuggestionJob?.cancel()
+        _state.update { it.copy(queryInput = query, showSearchSuggestions = false, searchSuggestions = emptyList()) }
+        search()
+    }
+
+    fun removeRecentSearch(query: String) {
+        preferences.removeRecentSearch(query)
+        val current = _state.value
+        val history = preferences.recentSearchHistory()
+        val (prefix, fragment) = searchQueryParts(current.queryInput)
+        _state.update {
+            it.copy(
+                recentSearchHistory = history,
+                searchSuggestions = buildSearchSuggestions(
+                    current.queryInput,
+                    prefix,
+                    fragment,
+                    emptyList(),
+                ),
+            )
+        }
+    }
+
+    fun clearSearchSuggestionCache() {
+        searchSuggestionJob?.cancel()
+        preferences.clearSearchSuggestionCache()
+        val current = _state.value
+        val (prefix, fragment) = searchQueryParts(current.queryInput)
+        _state.update {
+            it.copy(
+                searchSuggestionCacheEntries = emptyList(),
+                searchSuggestions = buildSearchSuggestions(
+                    current.queryInput,
+                    prefix,
+                    fragment,
+                    emptyList(),
+                ),
+            )
+        }
+    }
+
+    fun clearSearchHistory() {
+        preferences.clearRecentSearchHistory()
+        refreshSearchHistoryState()
+    }
+
+    fun clearSearchCacheAndHistory() {
+        searchSuggestionJob?.cancel()
+        preferences.clearSearchCacheAndHistory()
+        _state.update {
+            it.copy(
+                recentSearchHistory = emptyList(),
+                searchSuggestionCacheEntries = emptyList(),
+                searchSuggestions = emptyList(),
+                showSearchSuggestions = false,
+            )
+        }
+    }
+
+    private fun refreshSearchHistoryState() {
+        val history = preferences.recentSearchHistory()
+        val current = _state.value
+        val (prefix, fragment) = searchQueryParts(current.queryInput)
+        _state.update {
+            it.copy(
+                recentSearchHistory = history,
+                searchSuggestionCacheEntries = preferences.searchSuggestionCacheEntries(),
+                searchSuggestions = buildSearchSuggestions(
+                    current.queryInput,
+                    prefix,
+                    fragment,
+                    emptyList(),
+                ),
+            )
+        }
+    }
+
+    private fun suggestionProviderName(): String =
+        if (preferences.selectedProvider == "Auto") "All" else preferences.selectedProvider
+
+    private fun buildSearchSuggestions(
+        query: String,
+        completionPrefix: String,
+        fragment: String,
+        tags: List<String>,
+    ): List<SearchSuggestion> {
+        val normalizedQuery = normalizeSearchQuery(query)
+        val recent = preferences.recentSearchHistory()
+            .filter { query.isBlank() || normalizeSearchQuery(it).startsWith(normalizedQuery, ignoreCase = true) }
+            .map { SearchSuggestion(it, fromHistory = true) }
+        val historyQueries = recent.map { normalizeSearchQuery(it.query) }.toSet()
+        val tagSuggestions = tags
+            .filter { it.startsWith(fragment, ignoreCase = true) }
+            .map { SearchSuggestion(completionPrefix + it, fromHistory = false) }
+            .filterNot { normalizeSearchQuery(it.query) in historyQueries }
+        return (recent + tagSuggestions)
+            .distinctBy { normalizeSearchQuery(it.query) }
+            .take(8)
+    }
+
+    private fun searchQueryParts(query: String): Pair<String, String> {
+        val comma = query.lastIndexOf(',')
+        val previousTags = if (comma >= 0) query.substring(0, comma + 1) else ""
+        val fragmentText = if (comma >= 0) query.substring(comma + 1) else query
+        val leadingWhitespace = fragmentText.takeWhile(Char::isWhitespace)
+        val fragment = fragmentText.trim().replace(Regex("\\s+"), "_")
+        return (previousTags + leadingWhitespace) to fragment
+    }
+
+    private fun normalizeSearchQuery(query: String): String {
+        val comma = query.lastIndexOf(',')
+        val head = if (comma >= 0) query.substring(0, comma + 1) else ""
+        val tail = if (comma >= 0) query.substring(comma + 1) else query
+        val leading = tail.takeWhile(Char::isWhitespace)
+        return (head + leading + tail.trim().replace(Regex("\\s+"), "_")).lowercase()
+    }
     fun toggleSearch() {
         _state.update { it.copy(searchVisible = !it.searchVisible, queryInput = if (it.searchVisible) "" else it.queryInput) }
         if (!_state.value.searchVisible && _state.value.screen == AppScreen.GALLERY) refreshRandom()
@@ -286,6 +491,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setFavoritesSortOrder(order: String) {
         preferences.favoritesSortOrder = order
         _state.update { it.copy(favoritesSortOrder = order) }
+    }
+    fun setFavoritesMediaFilter(filter: String) {
+        preferences.favoritesMediaFilter = filter
+        _state.update { it.copy(favoritesMediaFilter = filter) }
     }
     fun setFavoritesImageCacheEnabled(enabled: Boolean) {
         preferences.favoritesImageCacheEnabled = enabled
@@ -414,9 +623,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun search() {
         val query = _state.value.queryInput.trim()
         if (query.isBlank()) { refreshRandom(); return }
+        searchSuggestionJob?.cancel()
+        preferences.recordRecentSearch(query)
         val selectedProvider = preferences.selectedProvider
         val galleryProvider = if (selectedProvider == "Auto") "All" else selectedProvider
-        _state.update { it.copy(galleryQuery = query, galleryProvider = galleryProvider, page = 1, totalPages = null, totalResults = null, hasMore = false, screen = AppScreen.GALLERY, detailPosts = emptyList()) }
+        _state.update {
+            it.copy(
+                galleryQuery = query,
+                galleryProvider = galleryProvider,
+                page = 1,
+                totalPages = null,
+                totalResults = null,
+                hasMore = false,
+                screen = AppScreen.GALLERY,
+                detailPosts = emptyList(),
+                recentSearchHistory = preferences.recentSearchHistory(),
+                showSearchSuggestions = false,
+                searchSuggestions = emptyList(),
+            )
+        }
         loadGallery()
     }
 
@@ -886,6 +1111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         preferences.selectedProvider = value
         _state.update { it.copy(provider = value) }
+        if (_state.value.queryInput.isNotBlank()) updateQuery(_state.value.queryInput)
         if (_state.value.screen == AppScreen.RANDOM) refreshRandom()
     }
     fun hasGelbooruCredentials(): Boolean =

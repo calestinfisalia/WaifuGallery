@@ -31,6 +31,7 @@ import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -89,6 +90,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
@@ -107,6 +109,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -156,6 +159,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -165,6 +169,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -186,6 +192,7 @@ import kotlin.math.abs
 import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
 import com.fisalia.waifugallery.data.AppPreferences
+import com.fisalia.waifugallery.data.SearchSuggestion
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.hasAiGeneratedTag
 import com.fisalia.waifugallery.data.mediumPreviewCandidates
@@ -506,7 +513,12 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             showHome = state.screen == AppScreen.DETAIL && state.detailOrigin != AppScreen.RANDOM,
                             searchVisible = state.searchVisible && state.screen != AppScreen.DETAIL,
                             query = state.queryInput,
+                            searchSuggestions = state.searchSuggestions,
+                            showSearchSuggestions = state.showSearchSuggestions,
                             onQueryChanged = model::updateQuery,
+                            onSearchFocusChanged = model::setSearchFieldFocused,
+                            onSuggestionSelected = model::selectSearchSuggestion,
+                            onRemoveRecentSearch = model::removeRecentSearch,
                             onSearchSubmit = {
                                 keyboardController?.hide()
                                 model.search()
@@ -747,7 +759,12 @@ private fun HeaderBar(
     showHome: Boolean,
     searchVisible: Boolean,
     query: String,
+    searchSuggestions: List<SearchSuggestion>,
+    showSearchSuggestions: Boolean,
     onQueryChanged: (String) -> Unit,
+    onSearchFocusChanged: (Boolean) -> Unit,
+    onSuggestionSelected: (String) -> Unit,
+    onRemoveRecentSearch: (String) -> Unit,
     onSearchSubmit: () -> Unit,
     onBack: () -> Unit,
     onHome: () -> Unit,
@@ -776,42 +793,82 @@ private fun HeaderBar(
             }
             if (showHome) IconButton(onClick = onHome) { Icon(Icons.Default.Home, "Home") }
             if (searchVisible) {
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChanged,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50.dp))
-                        .background(Color(0xFF303038))
-                        .padding(horizontal = 10.dp),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    decorationBox = { innerTextField ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray)
-                            Box(Modifier.weight(1f).padding(horizontal = 8.dp).offset(y = 2.dp)) {
-                                if (query.isEmpty()) {
-                                    Text("Search name or tags", maxLines = 1, color = Color.LightGray, style = MaterialTheme.typography.bodyMedium)
+                BoxWithConstraints(Modifier.weight(1f).height(44.dp)) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChanged,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .onFocusChanged { onSearchFocusChanged(it.isFocused) }
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(Color(0xFF303038))
+                            .padding(horizontal = 10.dp),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        decorationBox = { innerTextField ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray)
+                                Box(Modifier.weight(1f).padding(horizontal = 8.dp).offset(y = 2.dp)) {
+                                    if (query.isEmpty()) {
+                                        Text("Search name or tags", maxLines = 1, color = Color.LightGray, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    innerTextField()
                                 }
-                                innerTextField()
+                                if (query.isNotEmpty()) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = Color.LightGray,
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable { onQueryChanged("") }
+                                            .padding(6.dp),
+                                    )
+                                }
                             }
-                            if (query.isNotEmpty()) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clickable { onQueryChanged("") }
-                                        .padding(6.dp),
-                                )
-                            }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
+                    )
+                    DropdownMenu(
+                        expanded = showSearchSuggestions && searchSuggestions.isNotEmpty(),
+                        onDismissRequest = { onSearchFocusChanged(false) },
+                        modifier = Modifier.width(maxWidth).heightIn(max = 360.dp),
+                        offset = DpOffset(0.dp, 8.dp),
+                        properties = PopupProperties(focusable = false),
+                    ) {
+                        searchSuggestions.forEach { suggestion ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        suggestion.query.replace('_', ' '),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (suggestion.fromHistory) Icons.Default.History else Icons.Default.Search,
+                                        contentDescription = if (suggestion.fromHistory) "Recent search" else "Search suggestion",
+                                    )
+                                },
+                                trailingIcon = if (suggestion.fromHistory) {
+                                    {
+                                        IconButton(
+                                            onClick = { onRemoveRecentSearch(suggestion.query) },
+                                            modifier = Modifier.size(40.dp),
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Remove search history")
+                                        }
+                                    }
+                                } else null,
+                                onClick = { onSuggestionSelected(suggestion.query) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
                         }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
-                )
+                    }
+                }
             } else {
                 if (!isDetail) IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Search") }
                 Spacer(Modifier.weight(1f))
@@ -1004,6 +1061,7 @@ private fun GalleryScreen(
             val videoCount = state.gallery.size - imageCount
             val mediaCount = when (state.mediaFilter) {
                 "video" -> "$videoCount videos"
+                "png" -> "$imageCount PNG images"
                 "all" -> "$imageCount images, $videoCount videos"
                 else -> "$imageCount images"
             }
@@ -1136,8 +1194,18 @@ private fun FavoritesScreen(
     onRequestRemoval: (ImagePost) -> Unit,
     onClose: () -> Unit,
 ) {
+    var favoritesFilterMenuExpanded by remember { mutableStateOf(false) }
+    val mediaFilteredFavorites = state.favorites.filter { post ->
+        model.parentalAllows(post) && when (state.favoritesMediaFilter) {
+            "image" -> post.mediaType != "video"
+            "video" -> post.mediaType == "video"
+            "png" -> post.mediaType != "video" && post.extension.equals("png", ignoreCase = true) &&
+                post.tags.any { it.equals("transparent_png", ignoreCase = true) }
+            else -> true
+        }
+    }
     val visibleFavorites = orderedFavorites(
-        state.favorites.filter(model::parentalAllows),
+        mediaFilteredFavorites,
         newestFirst = state.favoritesSortOrder == "newest",
     )
     val imageCount = visibleFavorites.count { it.mediaType != "video" }
@@ -1195,21 +1263,36 @@ private fun FavoritesScreen(
                         Icon(Icons.Default.Download, contentDescription = "Download selected images")
                     }
                 } else {
-                    IconButton(
-                        onClick = {
-                            model.setFavoritesSortOrder(
-                                if (state.favoritesSortOrder == "newest") "oldest" else "newest",
-                            )
-                        },
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Sort,
-                            contentDescription = if (state.favoritesSortOrder == "newest") {
-                                "Sort oldest first"
-                            } else {
-                                "Sort newest first"
-                            },
-                        )
+                    Box {
+                        IconButton(onClick = { favoritesFilterMenuExpanded = true }) {
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Filter and sort favorites")
+                        }
+                        DropdownMenu(
+                            expanded = favoritesFilterMenuExpanded,
+                            onDismissRequest = { favoritesFilterMenuExpanded = false },
+                        ) {
+                            Text("Media type", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            listOf("all" to "Show All", "image" to "Image Only", "video" to "Video Only", "png" to "PNG Only").forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(if (state.favoritesMediaFilter == value) "✓  $label" else label) },
+                                    onClick = {
+                                        model.setFavoritesMediaFilter(value)
+                                        favoritesFilterMenuExpanded = false
+                                    },
+                                )
+                            }
+                            HorizontalDivider()
+                            Text("Time", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            listOf("newest" to "Newest first", "oldest" to "Oldest first").forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(if (state.favoritesSortOrder == value) "✓  $label" else label) },
+                                    onClick = {
+                                        model.setFavoritesSortOrder(value)
+                                        favoritesFilterMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1220,7 +1303,7 @@ private fun FavoritesScreen(
                 ) {
                     Text(
                         if (state.favorites.isEmpty()) "No favorites yet"
-                        else "No favorites match the parental content policy",
+                        else "No favorites match the current filters",
                     )
                 }
             } else {
@@ -2331,6 +2414,8 @@ private fun SettingsScreen(
     var selectedPage by rememberSaveable { mutableStateOf("") }
     var customTerm by rememberSaveable { mutableStateOf("") }
     var showCustomTermsDialog by rememberSaveable { mutableStateOf(false) }
+    var showSearchCacheDialog by rememberSaveable { mutableStateOf(false) }
+    var showSearchHistoryDialog by rememberSaveable { mutableStateOf(false) }
     var newBlockedTags by rememberSaveable { mutableStateOf("") }
     var showBlockedTagsDialog by rememberSaveable { mutableStateOf(false) }
     var providerMenu by remember { mutableStateOf(false) }
@@ -2527,6 +2612,90 @@ private fun SettingsScreen(
                                     },
                                 )
                             }
+                            SettingsSectionCard(
+                                title = "Search data",
+                                description = "Manage cached provider suggestions and recent searches.",
+                            ) {
+                                SettingsValueRow(
+                                    "Keyword cache",
+                                    "${state.searchSuggestionCacheEntries.size} cached prefixes",
+                                    grouped = true,
+                                ) { showSearchCacheDialog = true }
+                                SettingsPreferenceDivider()
+                                SettingsValueRow(
+                                    "Search history",
+                                    "${state.recentSearchHistory.size} saved searches",
+                                    grouped = true,
+                                ) { showSearchHistoryDialog = true }
+                                SettingsPreferenceDivider()
+                                TextButton(
+                                    onClick = model::clearSearchCacheAndHistory,
+                                    enabled = state.searchSuggestionCacheEntries.isNotEmpty() || state.recentSearchHistory.isNotEmpty(),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Clear cache and history") }
+                            }
+                            if (showSearchCacheDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showSearchCacheDialog = false },
+                                    title = { Text("Keyword cache") },
+                                    text = {
+                                        Column(
+                                            Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            if (state.searchSuggestionCacheEntries.isEmpty()) {
+                                                Text("No cached provider keywords.")
+                                            } else {
+                                                state.searchSuggestionCacheEntries.forEach { entry ->
+                                                    Text("${entry.provider} · ${entry.prefix} · ${entry.suggestions.size} suggestions")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                model.clearSearchSuggestionCache()
+                                                showSearchCacheDialog = false
+                                            },
+                                            enabled = state.searchSuggestionCacheEntries.isNotEmpty(),
+                                        ) { Text("Clear keyword cache") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showSearchCacheDialog = false }) { Text("Done") }
+                                    },
+                                )
+                            }
+                            if (showSearchHistoryDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showSearchHistoryDialog = false },
+                                    title = { Text("Search history") },
+                                    text = {
+                                        Column(
+                                            Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            if (state.recentSearchHistory.isEmpty()) {
+                                                Text("No recent searches.")
+                                            } else {
+                                                state.recentSearchHistory.forEach { Text(it.replace('_', ' ')) }
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                model.clearSearchHistory()
+                                                showSearchHistoryDialog = false
+                                            },
+                                            enabled = state.recentSearchHistory.isNotEmpty(),
+                                        ) { Text("Clear search history") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showSearchHistoryDialog = false }) { Text("Done") }
+                                    },
+                                )
+                            }
                         }
                         "providerDefault" -> {
                             SettingsSectionCard(
@@ -2680,6 +2849,7 @@ private fun SettingsScreen(
                                         when (state.mediaFilter) {
                                             "image" -> "Images only"
                                             "video" -> "Videos only"
+                                            "png" -> "PNG only"
                                             else -> "Images and videos"
                                         },
                                         grouped = true,
@@ -2688,6 +2858,7 @@ private fun SettingsScreen(
                                         listOf(
                                             "image" to "Images only",
                                             "video" to "Videos only",
+                                            "png" to "PNG only",
                                             "all" to "Images and videos",
                                         ).forEach { (value, label) ->
                                             DropdownMenuItem(

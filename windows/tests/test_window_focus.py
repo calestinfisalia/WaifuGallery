@@ -4,13 +4,14 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QResizeEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog
 from waifu_gallery.models import ImagePost
 from waifu_gallery.ui.workers import FileDownloadTask
 
-from waifu_gallery.ui.main_window import MainWindow
+from waifu_gallery.ui.main_window import HISTORY_QUERY_ROLE, MainWindow
 
 
 class MemorySettings:
@@ -97,6 +98,278 @@ class WindowFocusTests(unittest.TestCase):
         self.assertEqual(center.alpha(), 255)
         self.assertLess(corner.alpha(), center.alpha())
 
+    def test_search_tag_fragment_only_replaces_last_comma_separated_term(self):
+        prefix, fragment = MainWindow._search_tag_fragment("1girl, rei ayaami")
+
+        self.assertEqual(prefix, "1girl, ")
+        self.assertEqual(fragment, "rei_ayaami")
+
+    def test_search_completion_preserves_preceding_terms(self):
+        window = self._create_window()
+        window.search_input.setText("1girl, rei aya")
+        window._on_search_query_edited("1girl, rei aya")
+        window._refresh_search_completion_model(
+            "1girl, rei aya", ["rei_ayanami"]
+        )
+        completion = window._search_suggestion_model.item(0).data(
+            Qt.ItemDataRole.UserRole
+        )
+        self.assertEqual(completion, "1girl, rei_ayanami")
+        window._search_completer.setCompletionPrefix("1girl, rei_aya")
+        self.assertEqual(window._search_completer.completionCount(), 1)
+        self.assertEqual(window._search_completer.currentCompletion(), completion)
+        with patch.object(window, "load_page") as load_page:
+            window._search_completer.activated.emit(completion)
+
+        self.assertEqual(window.search_input.text(), "1girl, rei_ayanami")
+        self.assertEqual(window.current_query, "1girl, rei_ayanami")
+        load_page.assert_called_once_with(1)
+
+    def test_recent_searches_are_shown_and_repeated_search_moves_to_top(self):
+        settings = MemorySettings()
+        settings.set(
+            "search/recent_queries", ["1girl, rei_ayanami", "asuka"]
+        )
+        window = self._create_window(settings)
+        window.search_input.setFocus()
+        self.app.processEvents()
+
+        self.assertEqual(window._search_suggestion_model.rowCount(), 0)
+        self.assertFalse(window.search_suggestion_panel.isVisible())
+        QTest.mouseClick(
+            window.search_input, Qt.MouseButton.LeftButton,
+            pos=QPoint(window.search_input.width() // 2, window.search_input.height() // 2),
+        )
+        self.app.processEvents()
+        self.assertEqual(window._search_suggestion_model.rowCount(), 2)
+        self.assertTrue(window.search_suggestion_panel.isVisible())
+
+        window.search_input.setText("a")
+        window._on_search_query_edited("a")
+        self.assertEqual(window._search_suggestion_model.rowCount(), 1)
+        self.assertTrue(window.search_suggestion_panel.isVisible())
+        self.assertEqual(
+            window._search_suggestion_model.item(0).text(), "asuka"
+        )
+        self.assertFalse(window._search_suggestion_model.item(0).icon().isNull())
+        self.assertIn(
+            ("history", window.current_theme), window._icon_cache
+        )
+
+        window.search_input.setText("asuka")
+        with patch.object(window, "load_page"):
+            window.start_search()
+
+        self.assertEqual(
+            settings.get("search/recent_queries"),
+            ["asuka", "1girl, rei_ayanami"],
+        )
+
+    def test_search_history_matches_every_query_containing_typed_text(self):
+        settings = MemorySettings()
+        settings.set(
+            "search/recent_queries",
+            ["firefly_(honkai_star_rail)", "fischl", "asuka"],
+        )
+        window = self._create_window(settings)
+        window.search_input.setText("f")
+        window._on_search_query_edited("f")
+
+        self.assertEqual(window._search_suggestion_model.rowCount(), 2)
+        values = {
+            window._search_suggestion_model.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(window._search_suggestion_model.rowCount())
+        }
+        self.assertEqual(values, {"firefly_(honkai_star_rail)", "fischl"})
+
+    def test_suggestion_popup_tracks_the_active_theme_colors(self):
+        window = self._create_window()
+        popup = window.search_suggestion_panel
+
+        window.change_theme("Light")
+        self.assertIn("background-color: #FFFFFF", popup.styleSheet())
+        self.assertIn("color: #252B40", popup.styleSheet())
+
+        window.change_theme("OLED Dark")
+        self.assertIn("background-color: #101116", popup.styleSheet())
+
+    def test_history_x_button_removes_only_the_clicked_search(self):
+        settings = MemorySettings()
+        settings.set("search/recent_queries", ["rei_ayanami", "rei_hino"])
+        window = self._create_window(settings)
+        window.search_input.setText("rei")
+        window._on_search_query_edited("rei")
+        popup = window._search_suggestion_view
+        self.app.processEvents()
+        first_row = popup.visualRect(popup.model().index(0, 0))
+        remove_point = first_row.topRight() + QPoint(-16, first_row.height() // 2)
+        clicked_query = popup.indexAt(remove_point).data(HISTORY_QUERY_ROLE)
+        self.assertIn(clicked_query, {"rei_ayanami", "rei_hino"})
+
+        QTest.mouseClick(
+            popup.viewport(), Qt.MouseButton.LeftButton, pos=remove_point
+        )
+        self.app.processEvents()
+
+        self.assertEqual(
+            settings.get("search/recent_queries"),
+            [query for query in ("rei_ayanami", "rei_hino") if query != clicked_query],
+        )
+        self.assertEqual(window._search_suggestion_model.rowCount(), 1)
+        self.assertEqual(
+            window._search_suggestion_model.item(0).data(Qt.ItemDataRole.UserRole),
+            settings.get("search/recent_queries")[0],
+        )
+
+    def test_async_search_suggestions_open_popup_with_search_icon(self):
+        window = self._create_window()
+        window.pages.setCurrentWidget(window.random_page)
+        self.assertIs(window.pages.currentWidget(), window.random_page)
+        window.search_input.setFocus()
+        self.app.processEvents()
+        window.search_input.setText("charlotta")
+        window._on_search_query_edited("charlotta")
+        generation = window._search_suggestion_generation
+
+        window._task_succeeded(
+            f"tag-suggestions:{generation}",
+            ["charlotta_(granblue_fantasy)"],
+        )
+        self.app.processEvents()
+
+        self.assertEqual(window._search_suggestion_model.rowCount(), 1)
+        self.assertTrue(window.search_suggestion_panel.isVisible())
+        item = window._search_suggestion_model.item(0)
+        self.assertEqual(
+            item.data(Qt.ItemDataRole.UserRole),
+            "charlotta_(granblue_fantasy)",
+        )
+        self.assertFalse(item.icon().isNull())
+        self.assertIn(("search", window.current_theme), window._icon_cache)
+        self.assertEqual(
+            window.search_suggestion_panel.width(),
+            window.search_input.width(),
+        )
+        input_bottom = window.search_input.mapToGlobal(
+            window.search_input.rect().bottomLeft()
+        ).y()
+        self.assertGreaterEqual(
+            window.search_suggestion_panel.mapToGlobal(QPoint(0, 0)).y(),
+            input_bottom + 4,
+        )
+
+    def test_empty_search_results_hide_previous_completion_popup(self):
+        settings = MemorySettings()
+        settings.set("search/recent_queries", ["rei_ayanami"])
+        window = self._create_window(settings)
+        with patch.object(window.search_input, "hasFocus", return_value=True):
+            window.search_input.setText("rei")
+            window._refresh_search_completion_model("rei", [])
+            window._show_search_completion_popup()
+            self.app.processEvents()
+            self.assertTrue(window.search_suggestion_panel.isVisible())
+
+            query = "eika_(trick_or_treat)_(strinova)"
+            window.search_input.setText(query)
+            window._on_search_query_edited(query)
+
+        self.assertEqual(window._search_suggestion_model.rowCount(), 0)
+        self.assertFalse(window.search_suggestion_panel.isVisible())
+
+    def test_typing_unmatched_query_does_not_leave_blank_popup(self):
+        settings = MemorySettings()
+        settings.set("search/recent_queries", ["rei_ayanami"])
+        window = self._create_window(settings)
+        QTest.mouseClick(window.search_input, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        QTest.keyClick(window.search_input, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClicks(window.search_input, "toxikasi kurumi")
+        QTest.qWait(20)
+
+        self.assertEqual(window._search_suggestion_model.rowCount(), 0)
+        self.assertFalse(window.search_suggestion_panel.isVisible())
+
+    def test_fresh_suggestion_cache_is_shown_without_an_api_request(self):
+        settings = MemorySettings()
+        window = self._create_window(settings)
+        window.search_input.setText("rei aya")
+        window._on_search_query_edited("rei aya")
+        window._suggestion_cache.set("All", "rei_aya", ["rei_ayanami"])
+
+        with patch.object(window, "_submit") as submit:
+            window._request_search_suggestions()
+
+        submit.assert_not_called()
+        self.assertEqual(window._search_suggestion_model.rowCount(), 1)
+        self.assertEqual(
+            window._search_suggestion_model.item(0).data(Qt.ItemDataRole.UserRole),
+            "rei_ayanami",
+        )
+        self.assertEqual(window._search_suggestion_view.sizeHintForRow(0), 34)
+        window._dismiss_search_suggestions()
+        window.close()
+        self.app.processEvents()
+
+    def test_opening_a_search_result_dismisses_suggestion_popup(self):
+        window = self._create_window()
+        window.search_input.setFocus()
+        self.app.processEvents()
+        window._refresh_search_completion_model("rei", ["rei_ayanami"])
+        window._show_search_completion_popup()
+        self.assertTrue(window.search_suggestion_panel.isVisible())
+
+        with (
+            patch.object(window, "_parent_allows_post", return_value=False),
+            patch("waifu_gallery.ui.main_window.BackupMessageDialog.notify"),
+        ):
+            window.open_post(object())
+
+        self.assertFalse(window.search_suggestion_panel.isVisible())
+        self.assertEqual(window._search_suggestion_model.rowCount(), 0)
+        window.close()
+        self.app.processEvents()
+
+    def test_media_shortcuts_are_enabled_only_for_navigable_detail_view(self):
+        window = self._create_window()
+        window.search_input.clearFocus()
+        window.pages.setCurrentWidget(window.detail_page)
+
+        with patch.object(window, "_detail_has_navigation", return_value=True):
+            window._update_keyboard_shortcuts()
+            self.assertTrue(window.previous_media_shortcut.isEnabled())
+            self.assertTrue(window.next_media_shortcut.isEnabled())
+            with patch.object(window, "_swipe_detail") as swipe:
+                window._navigate_detail_media(-1)
+            swipe.assert_called_once_with(-1)
+
+        window.search_input.setFocus()
+        self.app.processEvents()
+        self.assertTrue(window.search_input.hasFocus())
+        self.assertFalse(window.refresh_shortcut.isEnabled())
+        self.assertFalse(window.previous_media_shortcut.isEnabled())
+
+        window.pages.setCurrentWidget(window.random_page)
+        window._update_keyboard_shortcuts()
+        self.assertFalse(window.previous_media_shortcut.isEnabled())
+        self.assertFalse(window.next_media_shortcut.isEnabled())
+
+    def test_typo_correction_is_explicit_and_preserves_other_terms(self):
+        window = self._create_window()
+        window._show_tag_correction(
+            "1girl, rei ayaami", ["rei_ayanami"]
+        )
+
+        self.assertTrue(window.search_correction_button.isVisible())
+        self.assertEqual(
+            window.search_correction_button.text(), "You mean 'rei ayanami'?"
+        )
+        with patch.object(window, "load_page") as load_page:
+            window._apply_search_correction()
+
+        self.assertEqual(window.search_input.text(), "1girl, rei_ayanami")
+        self.assertEqual(window.current_query, "1girl, rei_ayanami")
+        load_page.assert_called_once_with(1)
+
     def test_closing_main_window_cancels_downloads_and_clears_queued_work(self):
         window = self._create_window()
         task = FileDownloadTask("download-1", object(), object(), object())
@@ -112,22 +385,21 @@ class WindowFocusTests(unittest.TestCase):
         self.assertTrue(task._cancel_event.is_set())
         pool.clear.assert_called_once_with()
 
-    def test_main_image_rescales_while_window_is_being_resized(self):
+    def test_main_image_rescales_after_window_resize_settles(self):
         window = self._create_window()
         self.app.processEvents()
         window.pages.setCurrentWidget(window.random_page)
-        window._resize_preview_timer.stop()
         window._resize_settle_timer.stop()
 
-        with patch.object(window.random_image, "_fit_to_viewport") as fit_image:
+        with patch.object(window, "_render_random_image") as render_image:
             current_size = window.size()
             next_size = QSize(current_size.width() + 40, current_size.height() + 40)
             window.resizeEvent(QResizeEvent(next_size, current_size))
-            self.assertTrue(window._resize_preview_timer.isActive())
-            window._resize_preview_timer.stop()
-            window._refresh_resize_preview()
+            self.assertTrue(window._resize_settle_timer.isActive())
+            render_image.assert_not_called()
+            window._finish_resize_settle()
 
-        fit_image.assert_called_once_with(fast=True)
+        render_image.assert_called_once_with()
 
     def test_resize_settle_only_renders_visible_image_page(self):
         window = self._create_window()

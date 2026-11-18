@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, QSizeF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QIcon, QPainter
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -39,7 +39,7 @@ class BufferedVideoSlider(QSlider):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._buffer_progress = 0.0
         self._track_color = QColor("#292b32")
-        self._buffer_color = QColor("#E2D3FF")
+        self._buffer_color = QColor("#777982")
         self._played_color = QColor("#BB9AF7")
 
     def set_buffer_progress(self, progress: float) -> None:
@@ -99,23 +99,38 @@ class BufferedVideoSlider(QSlider):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        track = QRectF(groove.left(), center_y - 2.5, groove.width(), 5)
+        track = QRectF(groove.left(), center_y - 2, groove.width(), 4)
         painter.setBrush(self._track_color)
-        painter.drawRoundedRect(track, 2.5, 2.5)
-        painter.setBrush(self._buffer_color)
-        painter.drawRoundedRect(
-            QRectF(min(start_x, buffer_x), center_y - 2.5, abs(buffer_x - start_x), 5),
-            2.5,
-            2.5,
-        )
+        painter.drawRoundedRect(track, 2, 2)
+        if buffer_x > start_x:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(
+                self._buffer_color,
+                2,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            ))
+            painter.drawLine(
+                round(start_x), round(center_y), round(buffer_x), round(center_y)
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._played_color)
-        painter.drawRoundedRect(
-            QRectF(min(start_x, played_x), center_y - 2.5, abs(played_x - start_x), 5),
-            2.5,
-            2.5,
-        )
-        option.subControls = QStyle.SubControl.SC_SliderHandle
-        style.drawComplexControl(QStyle.ComplexControl.CC_Slider, option, painter, self)
+        if played_x > start_x:
+            painter.setBrush(self._played_color)
+            painter.drawRoundedRect(
+                QRectF(min(start_x, played_x), center_y - 2, abs(played_x - start_x), 4),
+                2,
+                2,
+            )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._played_color)
+        handle_radius = max(5.0, handle.width() / 2)
+        painter.drawEllipse(QRectF(
+            handle.center().x() - handle_radius,
+            center_y - handle_radius,
+            handle_radius * 2,
+            handle_radius * 2,
+        ))
 
 
 class VideoPlayerWidget(QWidget):
@@ -152,6 +167,8 @@ class VideoPlayerWidget(QWidget):
         self._slider_target = 0
         self._stream_proxy = None
         self._controls_visible = True
+        self._fullscreen_controls_visible = True
+        self._fullscreen_actions_visible: bool | None = None
         self._buffering_backdrop_active = False
         self._buffering_active = False
         self._has_video_frame = False
@@ -474,34 +491,53 @@ class VideoPlayerWidget(QWidget):
 
     def set_fullscreen_toggle_visible(self, visible: bool) -> None:
         if hasattr(self, "fullscreen_toggle"):
-            self.fullscreen_toggle.setVisible(visible and self._has_started and self.has_source)
+            target = visible and self._has_started and self.has_source
+            if self.fullscreen_toggle.isVisible() != target:
+                self.fullscreen_toggle.setVisible(target)
 
     def set_fullscreen_mode(self, enabled: bool) -> None:
         if self._fullscreen_mode == enabled:
             return
         self._fullscreen_mode = enabled
+        self._fullscreen_controls_visible = True
         self._controls_visible = True
+        self.controls_layout.setContentsMargins(
+            16 if enabled else 12,
+            10 if enabled else 6,
+            16 if enabled else 12,
+            10 if enabled else 6,
+        )
         self.controls_frame.setVisible(self._has_started)
+        self._position_controls_overlay()
         self._schedule_reflow()
 
     def set_fullscreen_controls_visible(self, visible: bool) -> None:
+        if (
+            self._fullscreen_controls_visible == visible
+            and self._controls_visible == visible
+            and self.controls_frame.isVisible() == (self._has_started and visible)
+        ):
+            return
+        self._fullscreen_controls_visible = visible
         self.set_controls_visible(visible)
 
     def set_controls_visible(self, visible: bool) -> None:
+        target_visible = self._has_started and visible
+        if self._controls_visible == visible and self.controls_frame.isVisible() == target_visible:
+            return
         self._controls_visible = visible
-        self.controls_frame.setVisible(self._has_started and visible)
-        if visible:
+        self.controls_frame.setVisible(target_visible)
+        if target_visible:
             self.controls_frame.raise_()
 
     def set_fullscreen_actions_visible(self, visible: bool) -> None:
-        changed = False
+        if self._fullscreen_actions_visible == visible:
+            return
+        self._fullscreen_actions_visible = visible
         for button in self._fullscreen_actions:
-            if button.isHidden() == visible:
-                button.setVisible(visible)
-                changed = True
-        if changed:
-            self.controls_layout.activate()
-            self._position_controls_overlay()
+            button.setVisible(visible)
+        self.controls_layout.activate()
+        self._position_controls_overlay()
 
     def set_source(self, url: str, autoplay: bool = False, stream_proxy=None) -> None:
         self.audio.setMuted(False)
@@ -660,11 +696,11 @@ class VideoPlayerWidget(QWidget):
         if not accent.isValid():
             return
         self._accent_color = accent.name()
-        self._buffered_color = accent.lighter(150).name()
+        self._buffered_color = "#777982"
         self.position.setStyleSheet(
-            "QSlider#videoPositionSlider { min-height: 18px; }"
+            "QSlider#videoPositionSlider { min-height: 24px; }"
             "QSlider#videoPositionSlider::handle:horizontal { "
-            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
+            f"width: 14px; margin: -4px 0; border-radius: 7px; background: {self._accent_color}; }}"
         )
         self.position.set_progress_colors(self._accent_color, self._buffered_color)
         self.volume_slider.setStyleSheet(
@@ -673,7 +709,7 @@ class VideoPlayerWidget(QWidget):
             f"background: {self._accent_color}; border-radius: 2px; }}"
             "QSlider#videoVolumeSlider::add-page:horizontal { background: #292b32; border-radius: 2px; }"
             "QSlider#videoVolumeSlider::handle:horizontal { "
-            f"width: 12px; margin: -4px 0; border-radius: 6px; background: {self._buffered_color}; }}"
+            f"width: 14px; margin: -4px 0; border-radius: 7px; background: {self._accent_color}; }}"
         )
 
     def _update_buffer_progress(self, progress: float) -> None:
@@ -871,8 +907,9 @@ class VideoPlayerWidget(QWidget):
         if canvas_width <= 0 or canvas_height <= 0:
             return
         bar_height = self.controls_frame.sizeHint().height()
-        available_width = max(1, canvas_width - 48)
-        bar_width = min(available_width, 820)
+        fullscreen = self._fullscreen_mode or self.window().isFullScreen()
+        available_width = max(1, canvas_width - (24 if fullscreen else 48))
+        bar_width = available_width if fullscreen else min(available_width, 820)
         bar_x = (canvas_width - bar_width) // 2
         bar_y = canvas_height - bar_height - 28
         self.controls_frame.setGeometry(

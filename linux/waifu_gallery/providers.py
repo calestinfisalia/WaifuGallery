@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import logging
 from pathlib import Path
 import random
 import secrets
@@ -15,6 +16,9 @@ from urllib3.util.retry import Retry
 
 from .models import ImagePost, SearchPage
 from .doh import set_doh_enabled
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -236,7 +240,7 @@ class BooruCatalog:
             for tag in str(value).replace(",", " ").split()
             if tag.strip()
         )
-        self.media_filter = media_filter if media_filter in {"image", "video", "all"} else "image"
+        self.media_filter = media_filter if media_filter in {"image", "video", "png", "all"} else "image"
         self.parent_max_rating = (
             parent_max_rating if parent_max_rating in {"s", "q", "e"}
             else ("s" if parent_max_rating is not None else None)
@@ -272,6 +276,133 @@ class BooruCatalog:
         # belongs to All so results never unexpectedly come from another board.
         posts, has_more = self._search_provider(provider, query, rating, page, page_size)
         return SearchPage(tuple(posts[:page_size]), has_more)
+
+    def suggest_tags(self, query: str, provider: str, limit: int = 12) -> list[str]:
+        if provider not in (*PROVIDERS, "All"):
+            raise ProviderError(f"Unknown provider: {provider}")
+        prefix = query.strip().replace(" ", "_").casefold()
+        if len(prefix) < 2:
+            return []
+
+        available = ["yande.re"]
+        if self.user_id and self.api_key:
+            available.append("Gelbooru")
+        if self.rule34_user_id and self.rule34_api_key:
+            available.append("Rule34.xxx")
+        available.append("Danbooru")
+        if provider != "All" and provider not in available:
+            raise ProviderError(
+                f"{provider} needs valid API credentials before tag suggestions can be loaded."
+            )
+        targets = available if provider == "All" else [provider]
+        limit = min(100, max(1, int(limit)))
+        provider_limit = min(100, limit * 4)
+        results: dict[str, list[tuple[str, int]]] = {}
+        succeeded = False
+        with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+            jobs = {
+                executor.submit(
+                    self._suggest_provider_tags, name, prefix, provider_limit
+                ): name
+                for name in targets
+            }
+            for job in as_completed(jobs):
+                source = jobs[job]
+                try:
+                    results[source] = job.result()
+                    succeeded = True
+                except (ProviderError, requests.RequestException, ValueError) as error:
+                    _LOGGER.debug("Tag suggestions failed for %s: %s", source, error)
+        if not succeeded:
+            raise ProviderError("Could not load tag suggestions from the selected provider.")
+
+        popularity: dict[str, int] = {}
+        for tags in results.values():
+            for name, count in tags:
+                popularity[name] = popularity.get(name, 0) + count
+        return [
+            name
+            for name, _count in sorted(
+                popularity.items(), key=lambda item: (-item[1], item[0])
+            )[:limit]
+        ]
+
+    def _suggest_provider_tags(
+        self, provider: str, prefix: str, limit: int
+    ) -> list[tuple[str, int]]:
+        headers = {"Accept": "application/json"}
+        if provider == "Danbooru":
+            endpoint = "https://danbooru.donmai.us/tags.json"
+            headers["Accept-Version"] = "v7"
+            params = {
+                "search[name_matches]": f"{prefix}*",
+                "search[category]": "3,4",
+                "search[hide_empty]": "true",
+                "search[order]": "count",
+                "limit": limit,
+            }
+        elif provider == "yande.re":
+            endpoint = "https://yande.re/tag.json"
+            params = {"name": f"{prefix}*", "limit": limit}
+        elif provider == "Gelbooru":
+            endpoint = "https://gelbooru.com/index.php"
+            params = {
+                "page": "dapi", "s": "tag", "q": "index", "json": 1,
+                "name_pattern": f"{prefix}%", "limit": limit,
+                "user_id": self.user_id, "api_key": self.api_key,
+            }
+        else:
+            endpoint = "https://api.rule34.xxx/index.php"
+            params = {
+                "page": "dapi", "s": "tag", "q": "index", "json": 1,
+                "name_pattern": f"{prefix}%", "limit": limit,
+                "user_id": self.rule34_user_id, "api_key": self.rule34_api_key,
+            }
+
+        if provider == "yande.re":
+            payloads = []
+            errors = []
+            for category in ("3", "4"):
+                try:
+                    payloads.append(self._request_provider_json(
+                        provider, endpoint, {**params, "type": category}, headers
+                    ))
+                except (ProviderError, requests.RequestException, ValueError) as error:
+                    errors.append(error)
+            if not payloads and errors:
+                raise ProviderError("Could not load tag suggestions from yande.re.")
+        else:
+            payloads = [self._request_provider_json(provider, endpoint, params, headers)]
+
+        tags = []
+        for payload in payloads:
+            if isinstance(payload, dict):
+                entries = payload.get("tags", payload.get("tag", []))
+                if isinstance(entries, dict):
+                    entries = [entries]
+            elif isinstance(payload, list):
+                entries = payload
+            else:
+                raise ProviderError(f"{provider} returned an unexpected tag response.")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "")).strip().casefold()
+                raw_category = entry.get("category", entry.get("type"))
+                if raw_category is None:
+                    continue
+                try:
+                    category = int(raw_category)
+                except (TypeError, ValueError):
+                    continue
+                if category not in {3, 4} or not name.startswith(prefix):
+                    continue
+                try:
+                    count = max(0, int(entry.get("post_count", entry.get("count", 0))))
+                except (TypeError, ValueError):
+                    count = 0
+                tags.append((name, count))
+        return tags
 
     def _search_all(self, query: str, rating: str, providers: list[str], page: int, page_size: int) -> SearchPage:
         results: dict[str, tuple[list[ImagePost], bool]] = {}
@@ -414,7 +545,7 @@ class BooruCatalog:
                 break
 
         if not posts:
-            media_name = {"image": "image", "video": "video", "all": "media"}[self.media_filter]
+            media_name = {"image": "image", "video": "video", "png": "PNG image", "all": "media"}[self.media_filter]
             raise ProviderError(f"No matching {media_name} was returned.")
 
         if not candidates:
@@ -609,6 +740,14 @@ class BooruCatalog:
                 request_tags = list(tags)
                 if self.media_filter == "video" and provider != "yande.re":
                     request_tags.append("video")
+                if self.media_filter == "png":
+                    if provider == "yande.re":
+                        if "transparent_png" not in {
+                            tag.casefold() for tag in request_tags
+                        }:
+                            request_tags.append("transparent_png")
+                    elif provider == "Danbooru":
+                        request_tags.append("filetype:png")
                 if rating_tag:
                     rating_names = {
                         "Gelbooru": {"s": "general", "q": "questionable", "e": "explicit"},
@@ -621,7 +760,12 @@ class BooruCatalog:
                     provider_rating = rating_names.get(provider, {}).get(rating_tag, rating_tag)
                     request_tags.append(f"rating:{provider_rating}")
 
-                params = {"tags": " ".join(request_tags), "limit": min(limit + 1, 100), "page": page}
+                request_limit = (
+                    100
+                    if self.media_filter == "png" and provider in {"Gelbooru", "Rule34.xxx"}
+                    else min(limit + 1, 100)
+                )
+                params = {"tags": " ".join(request_tags), "limit": request_limit, "page": page}
                 headers = {"Accept": "application/json"}
                 if provider == "Danbooru":
                     endpoint = "https://danbooru.donmai.us/posts.json"
@@ -674,7 +818,10 @@ class BooruCatalog:
                         continue
                     if not self._parent_policy_matches(post):
                         continue
-                    if self.media_filter != "all" and post.media_type != self.media_filter:
+                    if self.media_filter == "png":
+                        if Path(urlparse(post.image_url).path).suffix.casefold() != ".png":
+                            continue
+                    elif self.media_filter != "all" and post.media_type != self.media_filter:
                         continue
                     if rating == "sfw" and post.tags.intersection(SFW_BLOCK_TAGS):
                         continue

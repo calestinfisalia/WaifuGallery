@@ -1,4 +1,5 @@
 import ctypes
+import difflib
 import os
 import re
 import sys
@@ -16,16 +17,21 @@ from PySide6.QtCore import (
     QEvent,
     QPoint,
     QPropertyAnimation,
+    QRect,
     Qt,
     QThreadPool,
     QSize,
     QTimer,
 )
-from PySide6.QtGui import QActionGroup, QColor, QCursor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import (
+    QActionGroup, QColor, QCursor, QFontMetrics, QIcon, QPainter, QPalette,
+    QPixmap, QStandardItem, QStandardItemModel,
+)
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (
     QDialog,
+    QCompleter,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -40,12 +46,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QLineEdit,
+    QListView,
     QMenu,
     QSizeGrip,
     QGraphicsDropShadowEffect,
     QGraphicsBlurEffect,
     QGraphicsOpacityEffect,
     QApplication,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
 )
 
 from .. import __version__
@@ -53,6 +62,7 @@ from ..favorite_cache import load_favorite_thumbnail, remove_favorite_thumbnail,
 from ..models import ImagePost, SearchPage
 from ..providers import AI_GENERATED_BLOCK_TAGS, BooruCatalog, ProviderError
 from ..settings import AppSettings
+from ..suggestion_cache import SuggestionCache
 from .backup_prompts import BackupMessageDialog
 from .downloads import DownloadsDialog
 from .credits import ImageCreditsDialog, rating_label
@@ -68,14 +78,46 @@ from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 from .workers import BackgroundTask, FileDownloadTask, decode_image_bytes
 
 
+HISTORY_QUERY_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
 class SearchLineEdit(QLineEdit):
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
-        QTimer.singleShot(0, self._clear_automatic_selection)
+        if event.reason() != Qt.FocusReason.MouseFocusReason:
+            QTimer.singleShot(0, self._clear_automatic_selection)
 
     def _clear_automatic_selection(self) -> None:
         if self.text() and self.selectedText() == self.text():
             self.deselect()
+
+
+class SearchSuggestionDelegate(QStyledItemDelegate):
+    """Render a trailing, easy-to-hit remove control on history rows."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.window = window
+
+    @staticmethod
+    def remove_rect(row_rect: QRect) -> QRect:
+        return QRect(row_rect.right() - 43, row_rect.top(), 40, row_rect.height())
+
+    def paint(self, painter, option, index) -> None:
+        is_history = bool(index.data(HISTORY_QUERY_ROLE))
+        item_option = QStyleOptionViewItem(option)
+        if is_history:
+            item_option.text = QFontMetrics(item_option.font).elidedText(
+                str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
+                Qt.TextElideMode.ElideRight,
+                max(0, item_option.rect.width() - 50),
+            )
+        super().paint(painter, item_option, index)
+        if is_history:
+            hit_rect = self.remove_rect(option.rect)
+            icon_rect = QRect(0, 0, 16, 16)
+            icon_rect.moveCenter(hit_rect.center())
+            self.window._icon("x").paint(painter, icon_rect)
 
 
 class GalleryTitleBar(QWidget):
@@ -172,11 +214,19 @@ class GalleryTitleBar(QWidget):
         super().resizeEvent(event)
         central = self.main_window.centralWidget()
         search_width = min(560, max(280, round(self.main_window.width() * 0.42)))
+        suggestion_panel = getattr(self.main_window, "search_suggestion_panel", None)
+        if suggestion_panel is not None and suggestion_panel.width() != search_width:
+            suggestion_panel.setFixedWidth(search_width)
         center_in_window = central.mapTo(self.main_window, QPoint(central.width() // 2, 0)).x()
         title_left_in_window = self.mapTo(self.main_window, QPoint(0, 0)).x()
         search_x = center_in_window - title_left_in_window - search_width // 2
-        self.search_input.setGeometry(search_x, 4, search_width, 34)
-        self.home_button.move(search_x - self.home_button.width() - 8, 4)
+        search_geometry = QRect(search_x, 4, search_width, 34)
+        if self.search_input.geometry() != search_geometry:
+            self.search_input.setGeometry(search_geometry)
+        self.main_window._position_search_suggestion_panel()
+        home_position = QPoint(search_x - self.home_button.width() - 8, 4)
+        if self.home_button.pos() != home_position:
+            self.home_button.move(home_position)
 
     def add_navigation_action(self, button: QPushButton) -> None:
         self.navigation_layout.addWidget(button)
@@ -304,6 +354,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.settings = AppSettings()
+        self._suggestion_cache = SuggestionCache(self.settings)
+        self._suggestion_refreshing: set[tuple[str, str]] = set()
+        self._suggestion_request_keys: dict[str, tuple[str, str]] = {}
+        self._ignore_search_popup_release = False
         self.pool = QThreadPool.globalInstance()
         self.pool.setMaxThreadCount(8)
         self.tasks = {}
@@ -362,16 +416,12 @@ class MainWindow(QMainWindow):
         self._ambient_restore_timer.setSingleShot(True)
         self._ambient_restore_timer.setInterval(120)
         self._ambient_restore_timer.timeout.connect(self._refresh_ambient_layers)
-        # Refresh image and grid previews at a limited rate while resizing;
-        # blur and high-quality image scaling run after the resize settles.
+        # Keep low-cost previews responsive, then do final-quality reflow on settle.
         self._resize_settle_timer = QTimer(self)
         self._resize_settle_timer.setSingleShot(True)
-        self._resize_settle_timer.setInterval(55)
+        self._resize_settle_timer.setInterval(180)
         self._resize_settle_timer.timeout.connect(self._finish_resize_settle)
-        self._resize_preview_timer = QTimer(self)
-        self._resize_preview_timer.setSingleShot(True)
-        self._resize_preview_timer.setInterval(33)
-        self._resize_preview_timer.timeout.connect(self._refresh_resize_preview)
+        self._resize_in_progress = False
         self._resize_cursor_active = False
         self._gallery_notice_timer = QTimer(self)
         self._gallery_notice_timer.setSingleShot(True)
@@ -410,6 +460,13 @@ class MainWindow(QMainWindow):
             self.resize(size.expandedTo(self.minimumSize()))
         if self.settings.get_bool("windows/main/maximized", False):
             self.showMaximized()
+        else:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is not None:
+                available = screen.availableGeometry()
+                x = available.x() + max(0, (available.width() - self.width()) // 2)
+                y = available.y() + max(0, (available.height() - self.height()) // 2)
+                self.move(x, y)
 
     def closeEvent(self, event) -> None:
         dialogs = list(self.findChildren(QDialog))
@@ -449,11 +506,35 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget()
         root.setObjectName("appRoot")
+        self._root_widget = root
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
         self.title_bar = GalleryTitleBar(self)
         root_layout.addWidget(self.title_bar)
+        self.search_suggestion_panel = QFrame(root)
+        self.search_suggestion_panel.setObjectName("searchSuggestionPanel")
+        suggestion_panel_layout = QVBoxLayout(self.search_suggestion_panel)
+        suggestion_panel_layout.setContentsMargins(5, 5, 5, 5)
+        suggestion_panel_layout.setSpacing(0)
+        self._search_suggestion_view = QListView(self.search_suggestion_panel)
+        self._search_suggestion_view.setObjectName("searchSuggestionList")
+        self._search_suggestion_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._search_suggestion_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._search_suggestion_view.setMouseTracking(True)
+        self._search_suggestion_view.setUniformItemSizes(True)
+        self._search_suggestion_view.setIconSize(QSize(16, 16))
+        self._search_suggestion_view.setItemDelegate(SearchSuggestionDelegate(self))
+        self._search_suggestion_view.clicked.connect(
+            lambda index: self._apply_search_completion(
+                str(index.data(Qt.ItemDataRole.UserRole) or "")
+            )
+        )
+        self._search_suggestion_viewport = self._search_suggestion_view.viewport()
+        self._search_suggestion_viewport.installEventFilter(self)
+        suggestion_panel_layout.addWidget(self._search_suggestion_view)
+        self._search_suggestion_row = self.search_suggestion_panel
+        self.search_suggestion_panel.hide()
 
         body = QWidget()
         body_layout = QHBoxLayout(body)
@@ -471,6 +552,29 @@ class MainWindow(QMainWindow):
         self.title_bar.add_navigation_action(self.back_button)
         self.search_input = self.title_bar.search_input
         self.search_input.installEventFilter(self)
+        self.search_input.textEdited.connect(self._on_search_query_edited)
+        self._search_suggestion_generation = 0
+        self._search_suggestions_suppressed = True
+        self._search_suggestion_query = ""
+        self._search_suggestion_fragment = ""
+        self._suggested_search_query = ""
+        self._search_suggestion_model = QStandardItemModel(self)
+        self._search_completer = QCompleter(self._search_suggestion_model, self)
+        self._search_completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+        self._search_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._search_completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+        self._search_completer.setCompletionMode(
+            QCompleter.CompletionMode.PopupCompletion
+        )
+        self._search_completer.setMaxVisibleItems(8)
+        self._search_completer.activated.connect(self._apply_search_completion)
+        self._search_suggestion_view.setModel(self._search_suggestion_model)
+        self._search_suggestion_timer = QTimer(self)
+        self._search_suggestion_timer.setSingleShot(True)
+        self._search_suggestion_timer.setInterval(300)
+        self._search_suggestion_timer.timeout.connect(
+            self._request_search_suggestions
+        )
         self.selected_provider = str(self.settings.get("search/provider", "All"))
         if self.selected_provider not in ("All", "Danbooru", "yande.re", "Gelbooru", "Rule34.xxx"):
             self.selected_provider = "All"
@@ -478,9 +582,9 @@ class MainWindow(QMainWindow):
         if self.selected_rating not in ("sfw", "nsfw", "all"):
             self.selected_rating = "sfw"
         self.selected_media = str(self.settings.get("search/media_filter", "image"))
-        if self.selected_media not in ("image", "video", "all"):
+        if self.selected_media not in ("image", "video", "png", "all"):
             self.selected_media = "image"
-        self.settings_button = self._icon_button("menu", "Settings and options")
+        self.settings_button = self._icon_button("menu", "More option")
         self.fullscreen_button = self._icon_button("expand", "Fullscreen")
         self.fullscreen_button.hide()
         self.favorite_button = self._icon_button("heart", "Add to favorites")
@@ -502,6 +606,7 @@ class MainWindow(QMainWindow):
         self.title_bar.add_action(self.settings_button)
 
         self.pages = QStackedWidget()
+        self.pages.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.random_page = QWidget()
         random_layout = QVBoxLayout(self.random_page)
         random_layout.setContentsMargins(0, 0, 0, 0)
@@ -518,6 +623,7 @@ class MainWindow(QMainWindow):
         self.random_image.setMinimumSize(1, 1)
         self.random_scroll.setWidget(self.random_image)
         self.random_image.viewport = self.random_scroll.viewport()
+        self.random_image.viewport.installEventFilter(self.random_image)
         self.random_image.scroll_area = self.random_scroll
         self.random_ai_badge = self._create_ai_badge(self.random_scroll.viewport())
         self.random_image.zoomChanged.connect(
@@ -704,6 +810,7 @@ class MainWindow(QMainWindow):
         self.detail_image.setMinimumSize(1, 1)
         self.detail_scroll.setWidget(self.detail_image)
         self.detail_image.viewport = self.detail_scroll.viewport()
+        self.detail_image.viewport.installEventFilter(self.detail_image)
         self.detail_image.scroll_area = self.detail_scroll
         self.detail_ai_badge = self._create_ai_badge(self.detail_scroll.viewport())
         self.detail_image.zoomChanged.connect(
@@ -886,6 +993,7 @@ class MainWindow(QMainWindow):
         footer_layout.setColumnStretch(2, 1)
         status.addPermanentWidget(self.footer_widget, 1)
         self.pages.currentChanged.connect(self._update_page_navigation_visibility)
+        self.pages.currentChanged.connect(self._suppress_search_suggestions_on_page_change)
         self._update_page_navigation_visibility()
 
         self.download_button.clicked.connect(self.download_active_image)
@@ -933,7 +1041,7 @@ class MainWindow(QMainWindow):
         media_menu.setObjectName("mediaTypeMenu")
         media_menu.setMinimumWidth(132)
         media_menu.setMaximumWidth(150)
-        for title, value in (("Image Only", "image"), ("Video Only", "video"), ("Show All", "all")):
+        for title, value in (("Image Only", "image"), ("Video Only", "video"), ("PNG Only", "png"), ("Show All", "all")):
             action = media_menu.addAction(title)
             action.setCheckable(True)
             action.setChecked(value == self.selected_media)
@@ -956,14 +1064,8 @@ class MainWindow(QMainWindow):
         self._update_filter_tooltip()
 
     def _update_filter_tooltip(self) -> None:
-        rating_names = {"sfw": "Only SFW", "nsfw": "Only NSFW", "all": "Show All"}
-        media_names = {"image": "Image Only", "video": "Video Only", "all": "Show All"}
-        tooltip = (
-            f"Settings | {self.selected_provider} | {rating_names[self.selected_rating]}"
-            f" | {media_names[self.selected_media]}"
-        )
-        self.settings_button.setToolTip(tooltip)
-        self.settings_button.setAccessibleName(tooltip)
+        self.settings_button.setToolTip("More option")
+        self.settings_button.setAccessibleName("More option")
 
     def _favorite_posts(self) -> list[ImagePost]:
         saved = self.settings.get("favorites/posts", [])
@@ -1238,6 +1340,7 @@ class MainWindow(QMainWindow):
             self._remove_favorite,
             self,
             sort_order=str(self.settings.get("favorites/sort_order", "newest")),
+            media_filter=str(self.settings.get("favorites/media_filter", "all")),
         )
         self.favorites_dialog = dialog
         self.favorites_dialog_token = token
@@ -1247,6 +1350,9 @@ class MainWindow(QMainWindow):
         dialog.downloadSelectedRequested.connect(self._download_selected_favorites)
         dialog.sortOrderChanged.connect(
             lambda value: self.settings.set("favorites/sort_order", value)
+        )
+        dialog.mediaFilterChanged.connect(
+            lambda value: self.settings.set("favorites/media_filter", value)
         )
         dialog.thumbnailRequested.connect(
             lambda favorite_id, current=token: self._request_favorite_thumbnail(
@@ -1643,6 +1749,11 @@ class MainWindow(QMainWindow):
             QComboBox { padding-right: 28px; }
             QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; width: 26px; border: 0; }
             QComboBox QAbstractItemView { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; selection-background-color: __ACTIVE__; outline: 0; padding: 4px; }
+            QFrame#searchSuggestionPanel { background: __PANEL__; color: __STRONG__; border: 1px solid __BORDER__; border-radius: 12px; }
+            QListView#searchSuggestionList { background: transparent; color: __STRONG__; border: 0; padding: 0; outline: 0; }
+            QListView#searchSuggestionList::item { padding: 6px 10px; border-radius: 7px; }
+            QListView#searchSuggestionList::item:hover { background: __HOVER__; color: __STRONG__; }
+            QListView#searchSuggestionList::item:selected { background: __ACTIVE__; color: __STRONG__; }
             QPushButton { background: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 14px; padding: 8px 12px; }
             QPushButton:hover { background: __HOVER__; border-color: __MUTED__; color: __STRONG__; }
             QPushButton:pressed { background: __PRESSED__; }
@@ -1713,6 +1824,19 @@ class MainWindow(QMainWindow):
         checkmark = str(Path(__file__).resolve().parent.parent / "assets" / "check.svg").replace("\\", "/")
         stylesheet = stylesheet.replace("__CHECKMARK__", checkmark)
         self.setStyleSheet(stylesheet)
+        suggestion_panel = getattr(self, "search_suggestion_panel", None)
+        if suggestion_panel is not None:
+            suggestion_panel.setStyleSheet(
+                "QFrame#searchSuggestionPanel {"
+                f"background-color: {palette['PANEL']}; color: {palette['STRONG']}; "
+                f"border: 1px solid {palette['BORDER']}; border-radius: 12px; }}"
+                "QListView#searchSuggestionList {"
+                "background: transparent; border: 0; padding: 0; outline: 0; "
+                f"color: {palette['STRONG']}; selection-background-color: {palette['ACTIVE']}; "
+                f"selection-color: {palette['STRONG']}; }} "
+                "QListView#searchSuggestionList::item {padding: 6px 10px; border-radius: 7px;}"
+                f"QListView#searchSuggestionList::item:hover {{background: {palette['HOVER']}; color: {palette['STRONG']};}}"
+            )
         for player in (
             getattr(self, "random_video", None),
             getattr(self, "detail_video", None),
@@ -1764,7 +1888,9 @@ class MainWindow(QMainWindow):
         label.lower()
         return label
 
-    def _set_ambient_image(self, label: AmbientLayer, pixmap: QPixmap, page: QWidget) -> None:
+    def _set_ambient_image(
+        self, label: AmbientLayer, pixmap: QPixmap, page: QWidget, *, fast: bool = False
+    ) -> None:
         previous_source = getattr(label, "_ambient_source", QPixmap())
         changed = previous_source.cacheKey() != pixmap.cacheKey()
         if pixmap.isNull():
@@ -1779,8 +1905,13 @@ class MainWindow(QMainWindow):
         size = page.size().expandedTo(QSize(1, 1))
         # Fill the ambient layer without distorting the artwork. Cropping the
         # overflow is preferable to leaving bars or stretching the image.
-        scaled = pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                               Qt.TransformationMode.SmoothTransformation)
+        scaled = pixmap.scaled(
+            size,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.FastTransformation
+            if fast
+            else Qt.TransformationMode.SmoothTransformation,
+        )
         crop_x = max(0, (scaled.width() - size.width()) // 2)
         crop_y = max(0, (scaled.height() - size.height()) // 2)
         background = scaled.copy(crop_x, crop_y, size.width(), size.height())
@@ -1826,6 +1957,26 @@ class MainWindow(QMainWindow):
         self.random_video._reflow()
         self.detail_video._reflow()
         self._position_detail_video_navigation()
+
+    def _refresh_ambient_for_page(self, page: QWidget, *, fast: bool = False) -> None:
+        if page is self.random_page:
+            label = self.random_ambient
+        elif page is self.detail_page:
+            label = self.detail_ambient
+        else:
+            return
+        source = getattr(label, "_ambient_source", QPixmap())
+        if not source.isNull():
+            self._set_ambient_image(label, source, page, fast=fast)
+
+    def _hide_ambient_during_resize(self) -> None:
+        if not hasattr(self, "pages"):
+            return
+        page = self.pages.currentWidget()
+        if page is self.random_page:
+            self.random_ambient.hide()
+        elif page is self.detail_page:
+            self.detail_ambient.hide()
 
     def _on_image_zoom_changed(
         self,
@@ -1991,7 +2142,27 @@ class MainWindow(QMainWindow):
     def _task_succeeded(self, key: str, result) -> None:
         task = self.tasks.pop(key, None)
         category, _, identifier = key.partition(":")
-        if category == "search" and int(identifier) == self.request_id:
+        if category == "tag-suggestions":
+            cache_key = self._suggestion_request_keys.pop(key, None)
+            if cache_key is not None:
+                self._suggestion_refreshing.discard(cache_key)
+                self._suggestion_cache.set(cache_key[0], cache_key[1], result)
+            if (
+                (
+                    int(identifier) == self._search_suggestion_generation
+                    or cache_key == (
+                        self.selected_provider.casefold(),
+                        self._search_suggestion_fragment.casefold(),
+                    )
+                )
+                and self.search_input.text().strip() == self._search_suggestion_query
+            ):
+                self._refresh_search_completion_model(
+                    self._search_suggestion_query, result
+                )
+                if self.search_input.hasFocus():
+                    self._show_search_completion_popup()
+        elif category == "search" and int(identifier) == self.request_id:
             self._show_search_results(result)
         elif category in {"random", "random-fallback"} and int(identifier) == self.request_id:
             self.random_post = result
@@ -2127,6 +2298,13 @@ class MainWindow(QMainWindow):
     def _task_failed(self, key: str, error: str) -> None:
         self.tasks.pop(key, None)
         category, _, identifier = key.partition(":")
+        if category == "tag-suggestions":
+            cache_key = self._suggestion_request_keys.pop(key, None)
+            if cache_key is not None:
+                self._suggestion_refreshing.discard(cache_key)
+            return
+        if category == "tag-correction":
+            return
         if category == "search" and int(identifier) == self.request_id:
             self._set_image_credits_visible(False)
             pending_detail = self._open_detail_after_page is not None
@@ -2165,7 +2343,7 @@ class MainWindow(QMainWindow):
             )
             self.fullscreen_button.hide()
             media_filter = str(self.settings.get("search/media_filter", "image"))
-            media_name = {"image": "image", "video": "video", "all": "media"}.get(media_filter, "media")
+            media_name = {"image": "image", "video": "video", "png": "PNG image", "all": "media"}.get(media_filter, "media")
             self.random_image.set_placeholder(f"Could not load {media_name}\n{error}")
             self.statusBar().showMessage(f"Could not load {media_name}: {error}")
         elif category == "random-video" and int(identifier) == self.request_id:
@@ -2404,6 +2582,7 @@ class MainWindow(QMainWindow):
 
     def go_home(self) -> None:
         """Clear the active tag and return to a random image."""
+        self._dismiss_search_suggestions()
         if self._fullscreen_active:
             self._exit_fullscreen()
         self.search_input.clear()
@@ -2482,6 +2661,7 @@ class MainWindow(QMainWindow):
         self.random_image._fit_to_viewport()
 
     def start_search(self) -> None:
+        self._dismiss_search_suggestions()
         if not self._rating_allowed():
             return
         query = self.search_input.text().strip()
@@ -2494,7 +2674,237 @@ class MainWindow(QMainWindow):
         self.full_image_button.hide()
         self.title_bar.home_button.show()
         self.current_page = 1
+        self._record_search(query)
         self.load_page(1)
+
+    def _on_search_query_edited(self, text: str) -> None:
+        self._search_suggestions_suppressed = False
+        self._search_suggestion_generation += 1
+        self._search_suggestion_timer.stop()
+        self.search_suggestion_panel.hide()
+        self._search_suggestion_row.hide()
+        self._suggested_search_query = ""
+        query = text.strip()
+        fragment = self._search_tag_fragment(query)[1]
+        self._search_suggestion_query = query
+        self._search_suggestion_fragment = fragment.replace(" ", "_")
+        cached = (
+            self._suggestion_cache.get(
+                self.selected_provider, self._search_suggestion_fragment
+            )
+            if len(fragment) >= 2 and not any(mark in fragment for mark in "*~():-")
+            else None
+        )
+        self._refresh_search_completion_model(
+            query, cached[0] if cached is not None else []
+        )
+        if self.search_input.hasFocus():
+            self._show_search_completion_popup()
+            QTimer.singleShot(0, self._sync_search_completion_popup)
+        if len(fragment) >= 2 and not any(mark in fragment for mark in "*~():-"):
+            self._search_suggestion_timer.start()
+
+    def _sync_search_completion_popup(self) -> None:
+        if not self.search_input.hasFocus():
+            self.search_suggestion_panel.hide()
+            self._search_suggestion_row.hide()
+            return
+        self._show_search_completion_popup()
+
+    def _show_search_suggestions_when_ready(self) -> None:
+        if (
+            self._search_suggestions_suppressed
+            or not self.search_input.hasFocus()
+        ):
+            return
+        query = self.search_input.text().strip()
+        if query != self._search_suggestion_query or not self._search_suggestion_model.rowCount():
+            fragment = self._search_tag_fragment(query)[1]
+            prefix = fragment.replace(" ", "_")
+            cached = (
+                self._suggestion_cache.get(self.selected_provider, prefix)
+                if len(fragment) >= 2 and not any(mark in fragment for mark in "*~():-")
+                else None
+            )
+            self._search_suggestion_query = query
+            self._search_suggestion_fragment = prefix
+            self._refresh_search_completion_model(
+                query, cached[0] if cached is not None else []
+            )
+        self._show_search_completion_popup()
+        fragment = self._search_tag_fragment(query)[1]
+        if len(fragment) >= 2 and not any(mark in fragment for mark in "*~():-"):
+            self._search_suggestion_timer.start()
+
+    def _show_search_completion_popup(self) -> None:
+        panel = self.search_suggestion_panel
+        if self._search_suggestions_suppressed:
+            panel.hide()
+            return
+        if not self._search_suggestion_model.rowCount():
+            panel.hide()
+            self._search_suggestion_row.hide()
+            return
+        self._search_completer.setCompletionPrefix(
+            self._search_completion_prefix(self.search_input.text().strip())
+        )
+        if self._search_completer.completionCount() <= 0:
+            panel.hide()
+            self._search_suggestion_row.hide()
+            return
+        panel.setFixedHeight(min(8, self._search_suggestion_model.rowCount()) * 34 + 12)
+        self._position_search_suggestion_panel()
+        panel.raise_()
+        panel.show()
+
+    def _suppress_search_suggestions_on_page_change(self, *_args) -> None:
+        self._search_suggestions_suppressed = True
+        self.search_suggestion_panel.hide()
+        if self.search_input.hasFocus():
+            self.pages.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _position_search_suggestion_panel(self) -> None:
+        panel = getattr(self, "search_suggestion_panel", None)
+        search_input = getattr(self, "search_input", None)
+        root = getattr(self, "_root_widget", None)
+        if panel is None or search_input is None or root is None:
+            return
+        field_bottom = search_input.mapTo(root, QPoint(0, search_input.height()))
+        target_position = QPoint(field_bottom.x(), field_bottom.y() + 6)
+        if panel.pos() != target_position:
+            panel.move(target_position)
+        if panel.width() != search_input.width():
+            panel.setFixedWidth(search_input.width())
+
+    def _recent_search_queries(self) -> list[str]:
+        value = self.settings.get("search/recent_queries", [])
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (list, tuple)):
+            values = value
+        else:
+            return []
+        recent = []
+        seen = set()
+        for item in values:
+            if not isinstance(item, str):
+                continue
+            query = item.strip()
+            if query and query.casefold() not in seen:
+                recent.append(query)
+                seen.add(query.casefold())
+            if len(recent) == 10:
+                break
+        return recent
+
+    def _record_search(self, query: str) -> None:
+        recent = [item for item in self._recent_search_queries()
+                  if item.casefold() != query.casefold()]
+        self.settings.set("search/recent_queries", [query, *recent][:10])
+
+    def _remove_recent_search(self, query: str) -> None:
+        recent = [
+            item for item in self._recent_search_queries()
+            if item.casefold() != query.casefold()
+        ]
+        self.settings.set("search/recent_queries", recent)
+        current_query = self.search_input.text().strip()
+        if current_query:
+            self._on_search_query_edited(current_query)
+        else:
+            self._refresh_search_completion_model("", [])
+            if self.search_input.hasFocus():
+                self._show_search_completion_popup()
+
+    def _matching_recent_searches(self, query: str) -> list[str]:
+        needle = self._search_completion_prefix(query).casefold()
+        return [
+            item for item in self._recent_search_queries()
+            if self._search_completion_prefix(item).casefold().startswith(needle)
+        ]
+
+    def _refresh_search_completion_model(
+        self, query: str, tag_suggestions: list[str]
+    ) -> None:
+        self._search_suggestion_model.clear()
+        recent = self._matching_recent_searches(query)
+        recent_targets = {
+            self._search_completion_prefix(item).casefold() for item in recent
+        }
+        prefix = self._search_tag_fragment(query)[0]
+        for recent_query in recent:
+            item = QStandardItem(recent_query.replace("_", " "))
+            item.setIcon(self._icon("history"))
+            item.setData(recent_query, Qt.ItemDataRole.UserRole)
+            item.setData(recent_query, HISTORY_QUERY_ROLE)
+            item.setSizeHint(QSize(max(100, self.search_input.width() - 8), 34))
+            self._search_suggestion_model.appendRow(item)
+        for tag in tag_suggestions:
+            completion = f"{prefix}{tag}"
+            if self._search_completion_prefix(completion).casefold() in recent_targets:
+                continue
+            item = QStandardItem(tag.replace("_", " "))
+            item.setIcon(self._icon("search"))
+            item.setData(completion, Qt.ItemDataRole.UserRole)
+            item.setSizeHint(QSize(max(100, self.search_input.width() - 8), 34))
+            self._search_suggestion_model.appendRow(item)
+        self._search_completer.setCompletionPrefix(
+            self._search_completion_prefix(query)
+        )
+
+    @staticmethod
+    def _search_tag_fragment(query: str) -> tuple[str, str]:
+        before, separator, fragment = query.rpartition(",")
+        leading = fragment[:len(fragment) - len(fragment.lstrip())]
+        return before + separator + leading, fragment.strip().replace(" ", "_")
+
+    @classmethod
+    def _search_completion_prefix(cls, query: str) -> str:
+        prefix, fragment = cls._search_tag_fragment(query)
+        return f"{prefix}{fragment}"
+
+    def _request_search_suggestions(self) -> None:
+        query = self._search_suggestion_query
+        if (
+            not query
+            or query != self.search_input.text().strip()
+            or len(self._search_suggestion_fragment) < 2
+        ):
+            return
+        provider = self.selected_provider
+        prefix = self._search_suggestion_fragment
+        cache_key = (provider.casefold(), prefix.casefold())
+        cached = self._suggestion_cache.get(provider, prefix)
+        if cached is not None:
+            suggestions, is_fresh = cached
+            self._refresh_search_completion_model(query, suggestions)
+            if self.search_input.hasFocus():
+                self._show_search_completion_popup()
+            if is_fresh:
+                return
+        if cache_key in self._suggestion_refreshing:
+            return
+        task_key = f"tag-suggestions:{self._search_suggestion_generation}"
+        self._suggestion_refreshing.add(cache_key)
+        self._suggestion_request_keys[task_key] = cache_key
+        self._submit(
+            task_key, self._catalog().suggest_tags, prefix, provider, 12
+        )
+
+    def _dismiss_search_suggestions(self) -> None:
+        self._search_suggestions_suppressed = True
+        self._search_suggestion_timer.stop()
+        self._search_suggestion_generation += 1
+        self._search_suggestion_query = ""
+        self._search_suggestion_fragment = ""
+        self._search_suggestion_model.clear()
+        self.search_suggestion_panel.hide()
+        self._search_suggestion_row.hide()
+
+    def _apply_search_completion(self, query: str) -> None:
+        self.search_input.setText(query)
+        self.search_input.setCursorPosition(len(self.search_input.text()))
+        self.start_search()
 
     def load_page(self, page: int, detail_index: int | None = None) -> None:
         if not self.current_query or not self._rating_allowed():
@@ -2575,7 +2985,7 @@ class MainWindow(QMainWindow):
                 self._show_gallery_notice(message)
         elif not page.posts:
             media_filter = str(self.settings.get("search/media_filter", "image"))
-            media_name = {"image": "images", "video": "videos", "all": "media"}.get(media_filter, "images")
+            media_name = {"image": "images", "video": "videos", "png": "PNG images", "all": "media"}.get(media_filter, "images")
             self._show_gallery_notice(f'No {media_name} found for "{self.current_query}".')
         else:
             self._hide_gallery_notice()
@@ -2686,9 +3096,12 @@ class MainWindow(QMainWindow):
         available = max(1, self.gallery_scroll.viewport().width())
         card_width = max(190, (available - 8 * (columns - 1)) // columns)
         icon_size = QSize(max(16, card_width - 12), 213)
+        changed = False
         for button in self.card_buttons.values():
-            button.setIconSize(icon_size)
-        if render_thumbnails:
+            if button.iconSize() != icon_size:
+                button.setIconSize(icon_size)
+                changed = True
+        if render_thumbnails and changed:
             for index, post in enumerate(self.posts):
                 pixmap = self.thumbnail_cache.get(post.post_id)
                 if pixmap is not None:
@@ -2893,6 +3306,7 @@ class MainWindow(QMainWindow):
             ai_badge.raise_()
 
     def open_post(self, post: ImagePost) -> None:
+        self._dismiss_search_suggestions()
         self._stop_full_image_loading_animation()
         self._media_controls_idle_timer.stop()
         self.footer_meta.clear()
@@ -3091,23 +3505,25 @@ class MainWindow(QMainWindow):
         page = self.detail_media_stack
         button_height = self.detail_video_previous_overlay.height()
         center_y = max(0, (page.height() - button_height) // 2)
-        self.detail_previous_button.move(12, center_y)
-        self.detail_next_button.move(
-            max(12, page.width() - self.detail_next_button.width() - 12),
-            center_y,
+        positions = (
+            (self.detail_previous_button, QPoint(12, center_y)),
+            (self.detail_next_button, QPoint(
+                max(12, page.width() - self.detail_next_button.width() - 12), center_y
+            )),
+            (self.detail_video_previous_overlay, QPoint(12, center_y)),
+            (self.detail_video_next_overlay, QPoint(
+                max(12, page.width() - self.detail_video_next_overlay.width() - 12), center_y
+            )),
         )
-        self.detail_video_previous_overlay.move(12, center_y)
-        self.detail_video_next_overlay.move(
-            max(12, page.width() - self.detail_video_next_overlay.width() - 12),
-            center_y,
-        )
-        if self.detail_previous_button.isVisible():
-            self.detail_previous_button.raise_()
-        if self.detail_next_button.isVisible():
-            self.detail_next_button.raise_()
-        if self.detail_video_previous_overlay.isVisible():
-            self.detail_video_previous_overlay.raise_()
-            self.detail_video_next_overlay.raise_()
+        changed = []
+        for widget, position in positions:
+            if widget.pos() != position:
+                widget.move(position)
+                changed.append(widget)
+        if changed:
+            for widget in changed:
+                if widget.isVisible():
+                    widget.raise_()
 
     def _update_page_navigation_visibility(self, *_args) -> None:
         self.page_navigation.setVisible(
@@ -3321,30 +3737,33 @@ class MainWindow(QMainWindow):
         parent = self.random_page if source == "random" else self.detail_page
         toolbar = self.random_fullscreen_toolbar if source == "random" else self.fullscreen_toolbar
         if post is not None and post.media_type == "video":
-            toolbar.hide()
+            if not toolbar.isHidden():
+                toolbar.hide()
             player.set_fullscreen_toggle_visible(False)
-            player.set_fullscreen_controls_visible(True)
             self.random_video.set_fullscreen_actions_visible(source == "random")
             self.detail_video.set_fullscreen_actions_visible(source != "random")
-            favorite = any(favorite_key(item) == favorite_key(post) for item in self._favorite_posts())
-            if source == "random":
-                self.random_video_favorite_action.setIcon(self._icon("heart-filled" if favorite else "heart"))
-            else:
-                self.detail_video_favorite_action.setIcon(self._icon("heart-filled" if favorite else "heart"))
-            player.controls_frame.raise_()
+            controls_ready = (
+                player._fullscreen_controls_visible
+                and player._controls_visible
+                and player.controls_frame.isVisible()
+            )
+            if not controls_ready:
+                player.set_fullscreen_controls_visible(True)
+                player.controls_frame.raise_()
             self._fullscreen_idle_timer.start()
             return
         self.random_video.set_fullscreen_actions_visible(False)
         self.detail_video.set_fullscreen_actions_visible(False)
-        width, height = toolbar.sizeHint().width(), 58
-        toolbar.setGeometry(
-            (parent.width() - width) // 2,
-            parent.height() - height - 24,
-            width,
-            height,
-        )
-        toolbar.show()
-        toolbar.raise_()
+        if toolbar.isHidden():
+            width, height = toolbar.sizeHint().width(), 58
+            toolbar.setGeometry(
+                (parent.width() - width) // 2,
+                parent.height() - height - 24,
+                width,
+                height,
+            )
+            toolbar.show()
+            toolbar.raise_()
         self._fullscreen_idle_timer.start()
 
     def _hide_fullscreen_controls(self) -> None:
@@ -3384,6 +3803,8 @@ class MainWindow(QMainWindow):
         self.settings.set("search/provider", provider)
         self.provider_actions[provider].setChecked(True)
         self._update_filter_tooltip()
+        if self.search_input.hasFocus() and self.search_input.text().strip():
+            self._on_search_query_edited(self.search_input.text())
         if self.pages.currentWidget() is self.gallery_page and self.current_query:
             self.current_page = 1
             self.load_page(1)
@@ -3595,6 +4016,27 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):
         if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._ignore_search_popup_release
+        ):
+            self._ignore_search_popup_release = False
+            return True
+        if (
+            watched is self._search_suggestion_viewport
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            point = event.position().toPoint()
+            index = self._search_suggestion_view.indexAt(point)
+            query = index.data(HISTORY_QUERY_ROLE) if index.isValid() else None
+            if query and SearchSuggestionDelegate.remove_rect(
+                self._search_suggestion_view.visualRect(index)
+            ).contains(point):
+                self._ignore_search_popup_release = True
+                self._remove_recent_search(str(query))
+                return True
+        if (
             event.type() == QEvent.Type.WindowActivate
             and isinstance(watched, QWidget)
         ):
@@ -3674,14 +4116,59 @@ class MainWindow(QMainWindow):
                     if player.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                         self._media_controls_idle_timer.start()
         if watched is self.search_input:
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Escape and self.search_suggestion_panel.isVisible():
+                    self.search_suggestion_panel.hide()
+                    self._search_suggestion_row.hide()
+                    return True
+                if (
+                    event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+                    and self.search_suggestion_panel.isVisible()
+                    and self._search_suggestion_model.rowCount()
+                ):
+                    current = self._search_suggestion_view.currentIndex().row()
+                    step = -1 if event.key() == Qt.Key.Key_Up else 1
+                    row = min(
+                        self._search_suggestion_model.rowCount() - 1,
+                        max(0, current + step),
+                    )
+                    index = self._search_suggestion_model.index(row, 0)
+                    self._search_suggestion_view.setCurrentIndex(index)
+                    self._search_suggestion_view.scrollTo(index)
+                    return True
+                if (
+                    event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                    and self.search_suggestion_panel.isVisible()
+                    and self._search_suggestion_view.currentIndex().isValid()
+                ):
+                    query = self._search_suggestion_view.currentIndex().data(
+                        Qt.ItemDataRole.UserRole
+                    )
+                    if query:
+                        self._apply_search_completion(str(query))
+                        return True
             if event.type() == QEvent.Type.FocusIn:
                 glow = QGraphicsDropShadowEffect(self.search_input)
                 glow.setBlurRadius(18)
                 glow.setColor(QColor(187, 154, 247, 115))
                 glow.setOffset(0, 0)
                 self.search_input.setGraphicsEffect(glow)
+                if event.reason() in (
+                    Qt.FocusReason.TabFocusReason,
+                    Qt.FocusReason.BacktabFocusReason,
+                    Qt.FocusReason.ShortcutFocusReason,
+                ):
+                    QTimer.singleShot(0, self._show_search_suggestions_when_ready)
             elif event.type() == QEvent.Type.FocusOut:
                 self.search_input.setGraphicsEffect(None)
+                self.search_suggestion_panel.hide()
+            elif (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and event.position().x() < self.search_input.width() - 34
+            ):
+                self._search_suggestions_suppressed = False
+                QTimer.singleShot(0, self._show_search_suggestions_when_ready)
         return super().eventFilter(watched, event)
 
     def _update_resize_cursor(self, global_point: QPoint) -> None:
@@ -3759,43 +4246,30 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if not self._resize_in_progress:
+            self._resize_in_progress = True
+            self._ambient_restore_timer.stop()
+            self._hide_ambient_during_resize()
         self._resize_settle_timer.start()
-        if not self._resize_preview_timer.isActive():
-            self._resize_preview_timer.start()
         if hasattr(self, "random_ai_badge"):
-            QTimer.singleShot(0, self._reposition_visible_ai_badges)
+            self._reposition_visible_ai_badges()
+        if hasattr(self, "random_ambient") and self.random_ambient.geometry() != self.random_page.rect():
+            self.random_ambient.setGeometry(self.random_page.rect())
+        if hasattr(self, "detail_ambient") and self.detail_ambient.geometry() != self.detail_page.rect():
+            self.detail_ambient.setGeometry(self.detail_page.rect())
+        self._position_detail_video_navigation()
+
+    def _finish_resize_settle(self) -> None:
+        """Apply costly view reflows once the user finishes resizing."""
+        if not self.isVisible():
+            self._resize_in_progress = False
+            return
         if hasattr(self, "gallery_status") and self.gallery_status.isVisible():
             width = min(820, max(280, self.gallery_page.width() - 40))
             self.gallery_status.setFixedWidth(width)
             self.gallery_status.adjustSize()
             height = min(110, max(42, self.gallery_status.sizeHint().height()))
             self.gallery_status.setGeometry((self.gallery_page.width() - width) // 2, 12, width, height)
-        if hasattr(self, "random_ambient"):
-            self.random_ambient.setGeometry(self.random_page.rect())
-            self.random_ambient.lower()
-        if hasattr(self, "detail_ambient"):
-            self.detail_ambient.setGeometry(self.detail_page.rect())
-            self.detail_ambient.lower()
-        self._position_detail_video_navigation()
-
-    def _refresh_resize_preview(self) -> None:
-        if not self.isVisible():
-            return
-        current_page = self.pages.currentWidget()
-        if current_page is self.random_page:
-            self.random_image._fit_to_viewport(fast=True)
-        elif current_page is self.detail_page:
-            self.detail_image._fit_to_viewport(fast=True)
-        elif current_page is self.gallery_page and self.posts:
-            columns = self._gallery_column_count()
-            if columns != getattr(self, "_gallery_columns", None):
-                self._set_gallery_rows_top_aligned()
-            self._update_card_icon_sizes(render_thumbnails=False)
-
-    def _finish_resize_settle(self) -> None:
-        """Apply costly view reflows once the user finishes resizing."""
-        if not self.isVisible():
-            return
         current_page = self.pages.currentWidget()
         current_post = None
         if current_page is self.random_page:
@@ -3803,11 +4277,13 @@ class MainWindow(QMainWindow):
         elif current_page is self.detail_page:
             current_post = self.detail_post
         video_page = current_post is not None and current_post.media_type == "video"
-        if not (self._fullscreen_active and video_page):
-            self._refresh_ambient_layers()
-            self._render_random_image()
-            if hasattr(self, "detail_image"):
-                self.detail_image._fit_to_viewport()
+        image_page = current_page in (self.random_page, self.detail_page)
+        if image_page and not (self._fullscreen_active and video_page):
+            self._refresh_ambient_for_page(current_page, fast=True)
+            if not video_page and current_page is self.random_page:
+                self.random_image._fit_to_viewport_async(fast=False)
+            elif not video_page and current_page is self.detail_page:
+                self.detail_image._fit_to_viewport_async(fast=False)
             if video_page and self._ambient_restore_timer.isActive():
                 self._ambient_restore_timer.stop()
         if self.pages.currentWidget() is self.gallery_page and self.posts:
@@ -3819,3 +4295,4 @@ class MainWindow(QMainWindow):
             self.fullscreen_toolbar.isVisible() or self.random_fullscreen_toolbar.isVisible()
         ):
             self._show_fullscreen_controls()
+        self._resize_in_progress = False

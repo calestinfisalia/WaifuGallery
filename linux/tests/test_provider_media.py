@@ -23,6 +23,40 @@ class ImageResponse:
 
 
 class ProviderMediaTests(unittest.TestCase):
+    def test_suggest_tags_uses_provider_api_and_popularity(self):
+        catalog = BooruCatalog()
+        payload = [
+            {"name": "rei_ayanami", "post_count": 42, "category": 4},
+            {"name": "rei_channel", "count": 70, "type": 3},
+            {"name": "rei_artist", "count": 900, "category": 1},
+        ]
+        with patch.object(catalog, "_request_provider_json", return_value=payload) as request:
+            result = catalog.suggest_tags("Rei", "Danbooru", limit=2)
+        self.assertEqual(result, ["rei_channel", "rei_ayanami"])
+        self.assertEqual(request.call_args.args[1], "https://danbooru.donmai.us/tags.json")
+        self.assertEqual(request.call_args.args[2]["search[name_matches]"], "rei*")
+
+    def test_suggest_tags_all_merges_available_providers(self):
+        catalog = BooruCatalog()
+        def get_tags(provider, _prefix, _limit):
+            return {
+                "yande.re": [("rei_ayanami", 10), ("rei_channel", 4)],
+                "Danbooru": [("rei_ayanami", 20)],
+            }[provider]
+        with (
+            patch.object(catalog, "_suggest_provider_tags", side_effect=get_tags),
+        ):
+            results = catalog.suggest_tags("rei", "All", limit=2)
+        self.assertEqual(results, ["rei_ayanami", "rei_channel"])
+
+    def test_suggest_tags_does_not_report_network_failure_as_empty_success(self):
+        catalog = BooruCatalog()
+        with (
+            patch.object(catalog, "_suggest_provider_tags", side_effect=ProviderError("offline")),
+            self.assertRaises(ProviderError),
+        ):
+            catalog.suggest_tags("rei", "Danbooru")
+
     def test_ai_generated_filter_hides_tagged_posts_when_enabled(self):
         catalog = BooruCatalog(filter_ai_generated=True)
         payload = [
