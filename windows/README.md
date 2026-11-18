@@ -169,6 +169,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **Window behavior:** improve focus, minimize, taskbar previews, remembered sizes, and Windows snap support; close app dialogs and clean up download workers when the main window closes.
 - **Ambient mode and navigation:** smooth the background fade and keep navigation controls lightweight while resizing.
 - Windows source version: 0.1.24.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.24`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.24).
 
 ## Windows 0.1.22
 

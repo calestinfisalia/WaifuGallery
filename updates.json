@@ -2,16 +2,16 @@
   "schema_version": 1,
   "platforms": {
     "windows": {
-      "version": "0.1.23",
-      "release_tag": "windows-v0.1.23"
+      "version": "0.1.24",
+      "release_tag": "windows-v0.1.24"
     },
     "linux": {
       "version": "0.1.18",
       "release_tag": "linux-v0.1.18"
     },
     "android": {
-      "version": "0.1.28",
-      "release_tag": "android-v0.1.28"
+      "version": "0.1.29",
+      "release_tag": "android-v0.1.29"
     }
   }
 }
