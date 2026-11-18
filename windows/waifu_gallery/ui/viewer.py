@@ -16,6 +16,9 @@ class ZoomImage(QLabel):
         self.original = QPixmap()
         self.factor = 1.0
         self.base_scale = 1.0
+        self._rendered_size: QSize | None = None
+        self._rendered_fast: bool | None = None
+        self._pending_zoom_state: tuple[float, float, float] | None = None
         self.viewport = None
         self.scroll_area = None
         self._drag_position = None
@@ -24,10 +27,20 @@ class ZoomImage(QLabel):
         self.loading_bar.setObjectName("centerLoadIndicator")
         self.loading_bar.hide()
 
-    def set_image(self, pixmap: QPixmap) -> None:
+    def set_image(self, pixmap: QPixmap, *, preserve_zoom: bool = False) -> None:
+        zoom_state = self._pending_zoom_state
+        if preserve_zoom and zoom_state is None:
+            zoom_state = self._capture_zoom_state()
+        self._pending_zoom_state = None
         self.original = pixmap
-        self.factor = 1.0
-        self.zoomChanged.emit(False)
+        self._rendered_size = None
+        self._rendered_fast = None
+        self.factor = (
+            zoom_state[0]
+            if preserve_zoom and zoom_state and not pixmap.isNull()
+            else 1.0
+        )
+        self.zoomChanged.emit(self.factor > 1.0)
         if self.scroll_area is not None:
             self.scroll_area.setWidgetResizable(False)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -40,22 +53,61 @@ class ZoomImage(QLabel):
         self.loading_bar.set_active(False)
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.factor > 1.0 else Qt.CursorShape.ArrowCursor)
         self._fit_to_viewport()
+        if preserve_zoom and zoom_state:
+            QTimer.singleShot(
+                0,
+                lambda state=zoom_state: self._restore_scroll_position(
+                    state[1], state[2]
+                ),
+            )
 
     def set_placeholder(self, message: str) -> None:
         """Show an error message across the scroll area's full viewport."""
+        self._pending_zoom_state = None
         self._prepare_placeholder()
         self.setWordWrap(True)
         self.setText(message)
         self.loading_bar.set_active(False)
 
-    def set_loading(self) -> None:
+    def set_loading(self, *, preserve_zoom: bool = False) -> None:
         """Show an indeterminate indicator across the full viewport."""
+        self._pending_zoom_state = (
+            self._capture_zoom_state()
+            if preserve_zoom and not self.original.isNull()
+            else None
+        )
         self._prepare_placeholder()
         self.setText("")
         self.loading_bar.set_active(True)
 
+    def _capture_zoom_state(self) -> tuple[float, float, float]:
+        horizontal_fraction = 0.0
+        vertical_fraction = 0.0
+        if self.scroll_area is not None:
+            horizontal = self.scroll_area.horizontalScrollBar()
+            vertical = self.scroll_area.verticalScrollBar()
+            if horizontal.maximum():
+                horizontal_fraction = horizontal.value() / horizontal.maximum()
+            if vertical.maximum():
+                vertical_fraction = vertical.value() / vertical.maximum()
+        return self.factor, horizontal_fraction, vertical_fraction
+
+    def _restore_scroll_position(
+        self,
+        horizontal_fraction: float,
+        vertical_fraction: float,
+    ) -> None:
+        if self.scroll_area is None:
+            return
+        horizontal = self.scroll_area.horizontalScrollBar()
+        vertical = self.scroll_area.verticalScrollBar()
+        horizontal.setValue(round(horizontal_fraction * horizontal.maximum()))
+        vertical.setValue(round(vertical_fraction * vertical.maximum()))
+
     def _prepare_placeholder(self) -> None:
         self.original = QPixmap()
+        self._rendered_size = None
+        self._rendered_fast = None
         self.factor = 1.0
         self.setPixmap(QPixmap())
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -76,7 +128,7 @@ class ZoomImage(QLabel):
             max(0, (self.height() - self.loading_bar.height()) // 2),
         )
 
-    def _fit_to_viewport(self) -> None:
+    def _fit_to_viewport(self, *, fast: bool = False) -> None:
         if self.original.isNull():
             return
         available = self.viewport.size() if self.viewport else self.size()
@@ -89,17 +141,23 @@ class ZoomImage(QLabel):
         # original-resolution action remains available for pixel-level detail.
         self.base_scale = min(available.width() / self.original.width(),
                               available.height() / self.original.height())
-        self._render()
+        self._render(fast=fast)
 
-    def _render(self) -> None:
+    def _render(self, *, fast: bool = False) -> None:
         if self.original.isNull():
             return
         scale = self.base_scale * self.factor
         target = QSize(max(1, round(self.original.width() * scale)),
                        max(1, round(self.original.height() * scale)))
+        if self._rendered_size == target and self._rendered_fast == fast:
+            return
         self.setPixmap(self.original.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.SmoothTransformation))
+                                            Qt.TransformationMode.FastTransformation
+                                            if fast
+                                            else Qt.TransformationMode.SmoothTransformation))
         self.adjustSize()
+        self._rendered_size = target
+        self._rendered_fast = fast
 
     def wheelEvent(self, event) -> None:
         if self.original.isNull():

@@ -1,12 +1,18 @@
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QSize, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QCursor, QIcon
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class FramelessResizableDialog(QDialog):
     _BORDER_WIDTH = 8
+    _REMEMBERED_SIZES = {
+        "favoritesDialog",
+        "downloadsDialog",
+        "settingsDialog",
+        "mediaInfoDialog",
+    }
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -16,21 +22,65 @@ class FramelessResizableDialog(QDialog):
             | Qt.WindowType.FramelessWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._size_restored = False
+        self._resize_filter_widgets: set[int] = set()
+        self.finished.connect(self._save_remembered_size)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        if not self._size_restored:
+            self._restore_remembered_size()
+            self._size_restored = True
         self._install_resize_filters()
+
+    def _remembered_size_key(self) -> str | None:
+        if self.objectName() not in self._REMEMBERED_SIZES:
+            return None
+        return f"windows/{self.objectName()}/size"
+
+    def _restore_remembered_size(self) -> None:
+        key = self._remembered_size_key()
+        settings = getattr(self.parentWidget(), "settings", None)
+        if key is None or settings is None:
+            return
+        size = settings.get(key)
+        if isinstance(size, QSize) and size.isValid():
+            self.resize(size.expandedTo(self.minimumSize()))
+
+    def _save_remembered_size(self, *_args) -> None:
+        key = self._remembered_size_key()
+        settings = getattr(self.parentWidget(), "settings", None)
+        if key is None or settings is None:
+            return
+        size = self.normalGeometry().size() if self.isMaximized() else self.size()
+        if size.isValid():
+            settings.set(key, size)
 
     def childEvent(self, event) -> None:
         super().childEvent(event)
-        if event.added():
-            QTimer.singleShot(0, self._install_resize_filters)
+        if (
+            event.added()
+            and isinstance(event.child(), QWidget)
+            and hasattr(self, "_resize_filter_widgets")
+        ):
+            self._install_resize_filter(event.child())
 
     def _install_resize_filters(self) -> None:
-        self.installEventFilter(self)
+        self._install_resize_filter(self)
         for widget in self.findChildren(QWidget):
-            widget.setMouseTracking(True)
-            widget.installEventFilter(self)
+            self._install_resize_filter(widget)
+
+    def _install_resize_filter(self, widget: QWidget) -> None:
+        widget_id = id(widget)
+        if widget_id in self._resize_filter_widgets:
+            return
+        self._resize_filter_widgets.add(widget_id)
+        widget.destroyed.connect(
+            lambda _object=None, current_id=widget_id:
+            self._resize_filter_widgets.discard(current_id)
+        )
+        widget.setMouseTracking(True)
+        widget.installEventFilter(self)
 
     def eventFilter(self, watched, event):
         if not isinstance(watched, QWidget) or (
@@ -98,6 +148,8 @@ class DialogTitleBar(QWidget):
         dialog: QDialog,
         title_text: str,
         trailing_widget: QWidget | None = None,
+        *,
+        show_minimize: bool = False,
     ) -> None:
         super().__init__(dialog)
         self._drag_offset: QPoint | None = None
@@ -112,6 +164,8 @@ class DialogTitleBar(QWidget):
         layout.addStretch(1)
         if trailing_widget is not None:
             layout.addWidget(trailing_widget)
+        if show_minimize:
+            layout.addWidget(create_minimize_button(dialog, title_text))
         close = QPushButton()
         icon_factory = getattr(dialog.parent(), "_icon", None)
         icon = icon_factory("close") if callable(icon_factory) else QIcon(
@@ -146,3 +200,20 @@ class DialogTitleBar(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+
+def create_minimize_button(dialog: QDialog, title_text: str) -> QPushButton:
+    button = QPushButton()
+    icon_factory = getattr(dialog.parent(), "_icon", None)
+    icon = icon_factory("minimize") if callable(icon_factory) else QIcon(
+        str(Path(__file__).resolve().parent.parent / "assets" / "minimize.svg")
+    )
+    button.setIcon(icon)
+    button.setIconSize(QSize(16, 16))
+    button.setObjectName("dialogMinimizeButton")
+    button.setFixedSize(30, 30)
+    button.setToolTip(f"Minimize {title_text.lower()}")
+    button.setAccessibleName(f"Minimize {title_text.lower()}")
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.clicked.connect(dialog.showMinimized)
+    return button

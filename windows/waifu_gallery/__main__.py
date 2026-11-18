@@ -1,3 +1,4 @@
+import ctypes
 import os
 import sys
 
@@ -11,7 +12,22 @@ from PySide6.QtWidgets import QApplication
 from .ui.main_window import MainWindow
 
 
+def _set_taskbar_app_id() -> None:
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    set_app_id = shell32.SetCurrentProcessExplicitAppUserModelID
+    set_app_id.argtypes = (ctypes.c_wchar_p,)
+    set_app_id.restype = ctypes.c_long
+    result = set_app_id("Fisalia.WaifuGallery")
+    if result < 0:
+        raise OSError(
+            "Could not set the Waifu Gallery taskbar AppUserModelID "
+            f"(HRESULT 0x{result & 0xFFFFFFFF:08X})."
+        )
+
+
 def main() -> int:
+    if sys.platform == "win32":
+        _set_taskbar_app_id()
     app = QApplication(sys.argv)
     app.setApplicationName("Waifu Gallery")
     app.setOrganizationName("Fisalia Cantarella")
@@ -34,6 +50,7 @@ def main() -> int:
     if window_monitor is not None:
         app.aboutToQuit.connect(window_monitor.stop)
     window = MainWindow()
+    app.setWindowIcon(window.windowIcon())
     window.show()
     return app.exec()
 

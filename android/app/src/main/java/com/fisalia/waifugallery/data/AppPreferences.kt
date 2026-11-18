@@ -88,6 +88,23 @@ class AppPreferences(context: Context) {
         get() = store.getBoolean("ambient_mode", true)
         set(value) = store.edit().putBoolean("ambient_mode", value).apply()
 
+    var autoLoadFullImage: Boolean
+        get() = store.getBoolean("view/auto_load_full_image", false)
+        set(value) = store.edit().putBoolean("view/auto_load_full_image", value).apply()
+
+    var favoritesSortOrder: String
+        get() = store.getString("favorites/sort_order", "newest")?.takeIf {
+            it in setOf("newest", "oldest")
+        } ?: "newest"
+        set(value) {
+            require(value in setOf("newest", "oldest"))
+            store.edit().putString("favorites/sort_order", value).apply()
+        }
+
+    var favoritesImageCacheEnabled: Boolean
+        get() = store.getBoolean("favorites/image_cache_enabled", true)
+        set(value) = store.edit().putBoolean("favorites/image_cache_enabled", value).apply()
+
     var favoritesLockEnabled: Boolean
         get() = store.getBoolean("favorites_lock/enabled", false)
         set(value) = store.edit().putBoolean("favorites_lock/enabled", value).apply()

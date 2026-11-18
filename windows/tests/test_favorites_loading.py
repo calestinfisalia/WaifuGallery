@@ -20,6 +20,117 @@ class FavoritesLoadingTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def _wait_until(self, predicate, timeout_ms=2000):
+        for _ in range(timeout_ms // 20):
+            if predicate():
+                return True
+            QTest.qWait(20)
+        return predicate()
+
+    def test_large_favorites_list_builds_after_dialog_is_shown(self):
+        posts = [
+            ImagePost(
+                str(index),
+                "provider",
+                f"https://example.invalid/{index}.jpg",
+                (),
+                "safe",
+                frozenset(),
+            )
+            for index in range(70)
+        ]
+        dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
+        self.addCleanup(dialog.close)
+
+        self.assertEqual(dialog.tiles, [])
+        dialog.show()
+        self.assertTrue(dialog.loading_indicator.isVisible())
+
+        self.assertTrue(self._wait_until(lambda: len(dialog.tiles) == len(posts)))
+        self.assertFalse(dialog.loading_indicator.isVisible())
+
+    def test_large_favorites_tiles_are_laid_out_after_build_finishes(self):
+        posts = [
+            ImagePost(
+                str(index),
+                "provider",
+                f"https://example.invalid/{index}.jpg",
+                (),
+                "safe",
+                frozenset(),
+            )
+            for index in range(70)
+        ]
+        dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        dialog._tile_build_timer.stop()
+        dialog._layout_timer.stop()
+
+        with patch.object(dialog, "_layout_tiles", wraps=dialog._layout_tiles) as layout:
+            dialog._build_next_tile_batch()
+            self.assertTrue(dialog._pending_tile_posts)
+            layout.assert_not_called()
+
+            while dialog._pending_tile_posts:
+                dialog._build_next_tile_batch()
+
+        layout.assert_called_once_with()
+        self.assertEqual(len(dialog.tiles), len(posts))
+
+    def test_favorite_tiles_adapt_to_resized_dialog_width(self):
+        posts = [
+            ImagePost(
+                str(index),
+                "provider",
+                f"https://example.invalid/{index}.jpg",
+                (),
+                "safe",
+                frozenset(),
+            )
+            for index in range(8)
+        ]
+        dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        self.assertTrue(self._wait_until(lambda: bool(dialog.tiles)))
+        first_tile = dialog.tiles[0][1]
+        initial_width = first_tile.width()
+
+        dialog.resize(dialog.width() + 100, dialog.height())
+
+        self.assertTrue(
+            self._wait_until(lambda: first_tile.width() > initial_width)
+        )
+        self.assertEqual(dialog.grid.count(), len(posts))
+        self.assertIs(dialog.grid.itemAtPosition(0, 0).widget(), first_tile)
+
+    def test_favorite_media_count_is_in_the_footer(self):
+        posts = [
+            ImagePost(
+                "image",
+                "provider",
+                "https://example.invalid/image.jpg",
+                (),
+                "safe",
+                frozenset(),
+            ),
+            ImagePost(
+                "video",
+                "provider",
+                "https://example.invalid/video.mp4",
+                (),
+                "safe",
+                frozenset(),
+                media_type="video",
+            ),
+        ]
+        dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
+        self.addCleanup(dialog.close)
+
+        self.assertEqual(dialog.count_label.text(), "2 media · 1 images · 1 videos")
+        self.assertIs(dialog.count_label.parentWidget(), dialog.footer)
+
     def test_only_visible_favorites_request_thumbnails(self):
         posts = [
             ImagePost(
@@ -38,7 +149,7 @@ class FavoritesLoadingTests(unittest.TestCase):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         dialog.show()
-        QTest.qWait(120)
+        self.assertTrue(self._wait_until(lambda: len(requested) > 0))
         initial_count = len(requested)
 
         self.assertGreater(initial_count, 0)
@@ -51,9 +162,7 @@ class FavoritesLoadingTests(unittest.TestCase):
         dialog.scroll.verticalScrollBar().setValue(
             dialog.scroll.verticalScrollBar().maximum()
         )
-        QTest.qWait(120)
-
-        self.assertGreater(len(requested), initial_count)
+        self.assertTrue(self._wait_until(lambda: len(requested) > initial_count))
         dialog.close()
         QTest.qWait(0)
 
@@ -249,11 +358,15 @@ class FavoritesLoadingTests(unittest.TestCase):
                 return self.folder
 
         class FakeDownloads:
+            def __init__(self):
+                self.show_calls = 0
+                self.raise_calls = 0
+
             def show(self):
-                pass
+                self.show_calls += 1
 
             def raise_(self):
-                pass
+                self.raise_calls += 1
 
         class FakeStatusBar:
             def showMessage(self, message, _duration):
@@ -282,6 +395,10 @@ class FavoritesLoadingTests(unittest.TestCase):
             def statusBar(self):
                 return self.status_bar
 
+            def show_downloads(self):
+                self.downloads.show()
+                self.downloads.raise_()
+
         with TemporaryDirectory() as folder:
             existing = ImagePost(
                 "provider-1",
@@ -309,6 +426,8 @@ class FavoritesLoadingTests(unittest.TestCase):
         self.assertEqual(len(window.queued), 1)
         self.assertEqual(window.queued[0][0], new_post)
         self.assertEqual(window.queued[0][1].name, "waifu_provider-2.png")
+        self.assertEqual(window.downloads.show_calls, 0)
+        self.assertEqual(window.downloads.raise_calls, 0)
         self.assertIn("skipped 1 existing or queued files", window.status_bar.message)
 
 

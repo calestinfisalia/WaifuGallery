@@ -71,6 +71,8 @@ data class UiState(
     val isTestingProviderConnections: Boolean = false,
     val providerConnectionError: String? = null,
     val favorites: List<ImagePost> = emptyList(),
+    val favoritesSortOrder: String = "newest",
+    val favoritesImageCacheEnabled: Boolean = true,
     val favoritesLockEnabled: Boolean = false,
     val favoritesPinSet: Boolean = false,
     val requestFavoritesUnlock: Boolean = false,
@@ -112,6 +114,7 @@ data class UiState(
     val mediaFilter: String = "image",
     val videoMaxHeight: Int = 0,
     val ambientMode: Boolean = true,
+    val autoLoadFullImage: Boolean = false,
     val provider: String = "Auto",
     val customTerms: List<String> = emptyList(),
     val saveFolderLabel: String? = null,
@@ -158,8 +161,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mediaFilter = preferences.mediaFilter,
             videoMaxHeight = preferences.videoMaxHeight,
             ambientMode = preferences.ambientMode,
+            autoLoadFullImage = preferences.autoLoadFullImage,
             provider = preferences.selectedProvider,
             favorites = preferences.backupFavoritePosts(),
+            favoritesSortOrder = preferences.favoritesSortOrder,
+            favoritesImageCacheEnabled = preferences.favoritesImageCacheEnabled,
             favoritesLockEnabled = preferences.favoritesLockEnabled,
             favoritesPinSet = preferences.hasSafetyPin("favorites_lock"),
             parentalControlEnabled = preferences.parentalControlEnabled,
@@ -273,6 +279,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun openSettings() = _state.update { it.copy(showSettings = true) }
     fun closeSettings() = _state.update { it.copy(showSettings = false) }
+    fun setAutoLoadFullImage(enabled: Boolean) {
+        preferences.autoLoadFullImage = enabled
+        _state.update { it.copy(autoLoadFullImage = enabled) }
+    }
+    fun setFavoritesSortOrder(order: String) {
+        preferences.favoritesSortOrder = order
+        _state.update { it.copy(favoritesSortOrder = order) }
+    }
+    fun setFavoritesImageCacheEnabled(enabled: Boolean) {
+        preferences.favoritesImageCacheEnabled = enabled
+        _state.update { it.copy(favoritesImageCacheEnabled = enabled) }
+    }
     fun openGelbooruCredentials() = _state.update { it.copy(requestGelbooruCredentials = true) }
     fun openRule34Credentials() = _state.update { it.copy(requestRule34Credentials = true) }
     fun cancelGelbooruCredentials() {

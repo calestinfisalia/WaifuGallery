@@ -38,6 +38,9 @@ fun ImagePost.mediumPreviewCandidates(): List<String> {
         .distinct()
 }
 
+fun orderedFavorites(posts: List<ImagePost>, newestFirst: Boolean): List<ImagePost> =
+    if (newestFirst) posts.asReversed() else posts
+
 fun originalImageUrl(imageUrl: String, thumbnailCandidates: List<String>): String =
     if (imageUrl in thumbnailCandidates) {
         thumbnailCandidates.lastOrNull { it != imageUrl } ?: imageUrl

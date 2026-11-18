@@ -73,6 +73,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Backup
@@ -161,6 +162,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -170,12 +172,16 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.FileProvider
+import coil.annotation.ExperimentalCoilApi
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.disk.DiskCache
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
 import com.fisalia.waifugallery.data.BooruApi
@@ -183,6 +189,7 @@ import com.fisalia.waifugallery.data.AppPreferences
 import com.fisalia.waifugallery.data.ImagePost
 import com.fisalia.waifugallery.data.hasAiGeneratedTag
 import com.fisalia.waifugallery.data.mediumPreviewCandidates
+import com.fisalia.waifugallery.data.orderedFavorites
 import com.fisalia.waifugallery.data.RatingFilter
 import com.fisalia.waifugallery.data.UserDataBackup
 import com.fisalia.waifugallery.data.UserDataBackupCodec
@@ -191,8 +198,6 @@ import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private val AppBackground = Color(0xFF17171C)
 private val Panel = Color(0xFF24242B)
@@ -447,6 +452,25 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             .crossfade(true)
             .build()
     }
+    val favoritesImageLoader = remember(state.useDoh, state.dohProvider, state.customDohEndpoint) {
+        val api = BooruApi(
+            useDoh = { state.useDoh },
+            gelbooruCredentials = { model.preferences.gelbooruUserId to model.preferences.gelbooruApiKey },
+            rule34Credentials = { model.preferences.rule34UserId to model.preferences.rule34ApiKey },
+            dohProvider = { state.dohProvider },
+            customDohEndpoint = { state.customDohEndpoint },
+        )
+        ImageLoader.Builder(context)
+            .okHttpClient(api.imageClient())
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve("waifu-favorites-image-cache"))
+                    .maxSizeBytes(128L * 1024 * 1024)
+                    .build()
+            }
+            .crossfade(true)
+            .build()
+    }
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Accent,
@@ -461,7 +485,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
             if (state.screen == AppScreen.FAVORITES) {
                 FavoritesScreen(
                     state = state,
-                    imageLoader = imageLoader,
+                    imageLoader = favoritesImageLoader,
                     model = model,
                     modifier = Modifier.fillMaxSize(),
                     onRequestRemoval = { confirmFavoriteRemoval = it },
@@ -557,6 +581,7 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         if (visible) SettingsScreen(
             state = state,
             model = model,
+            favoritesImageLoader = favoritesImageLoader,
             onChooseFolder = { folderPicker.launch(null) },
             onClose = model::closeSettings,
         )
@@ -869,6 +894,7 @@ private fun RandomScreen(
                     zoomEnabled = true,
                     showLoadingIndicator = !state.isLoading,
                     ambientMode = state.ambientMode,
+                    autoLoadFullImage = state.autoLoadFullImage,
                     videoMaxHeight = state.videoMaxHeight,
                     mediaFullscreen = mediaFullscreen,
                     onFullscreenChanged = onFullscreenChanged,
@@ -1110,7 +1136,10 @@ private fun FavoritesScreen(
     onRequestRemoval: (ImagePost) -> Unit,
     onClose: () -> Unit,
 ) {
-    val visibleFavorites = state.favorites.filter(model::parentalAllows)
+    val visibleFavorites = orderedFavorites(
+        state.favorites.filter(model::parentalAllows),
+        newestFirst = state.favoritesSortOrder == "newest",
+    )
     val imageCount = visibleFavorites.count { it.mediaType != "video" }
     val videoCount = visibleFavorites.size - imageCount
     val visibleIds = visibleFavorites.mapTo(mutableSetOf()) { it.id }
@@ -1165,6 +1194,23 @@ private fun FavoritesScreen(
                     IconButton(onClick = { confirmSelectedDownload = true }) {
                         Icon(Icons.Default.Download, contentDescription = "Download selected images")
                     }
+                } else {
+                    IconButton(
+                        onClick = {
+                            model.setFavoritesSortOrder(
+                                if (state.favoritesSortOrder == "newest") "oldest" else "newest",
+                            )
+                        },
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = if (state.favoritesSortOrder == "newest") {
+                                "Sort oldest first"
+                            } else {
+                                "Sort newest first"
+                            },
+                        )
+                    }
                 }
             }
             if (visibleFavorites.isEmpty()) {
@@ -1205,6 +1251,7 @@ private fun FavoritesScreen(
                                 ),
                                 allowThumbnailFallback = true,
                                 showMetadata = false,
+                                imageCacheEnabled = state.favoritesImageCacheEnabled,
                             )
                             if (post.mediaType == "video") {
                                 VideoPlayBadge(
@@ -1426,6 +1473,7 @@ private fun DetailScreen(
                     showLoadingIndicator = true,
                     showMetadata = false,
                     ambientMode = state.ambientMode,
+                    autoLoadFullImage = state.autoLoadFullImage,
                     playbackAllowed = page == pagerState.currentPage,
                     videoMaxHeight = state.videoMaxHeight,
                     mediaFullscreen = mediaFullscreen,
@@ -1442,6 +1490,7 @@ private fun DetailScreen(
                     Modifier.fillMaxSize(),
                     zoomEnabled = true,
                     ambientMode = state.ambientMode,
+                    autoLoadFullImage = state.autoLoadFullImage,
                     videoMaxHeight = state.videoMaxHeight,
                     mediaFullscreen = mediaFullscreen,
                     onFullscreenChanged = onFullscreenChanged,
@@ -1494,7 +1543,9 @@ private fun ImageFrame(
     imageLoader: ImageLoader,
     modifier: Modifier = Modifier,
     allowThumbnailFallback: Boolean = false,
+    imageCacheEnabled: Boolean = true,
     zoomEnabled: Boolean = false,
+    autoLoadFullImage: Boolean = false,
     showLoadingIndicator: Boolean = false,
     showMetadata: Boolean = true,
     ambientMode: Boolean = false,
@@ -1512,6 +1563,10 @@ private fun ImageFrame(
     ) 78.dp else 0.dp
     var candidateIndex by remember(post.id, url) { mutableStateOf(0) }
     var showOriginal by remember(post.id) { mutableStateOf(false) }
+    var previewLoaded by remember(post.id) { mutableStateOf(false) }
+    var loadedPreviewUrl by remember(post.id, url) { mutableStateOf<String?>(null) }
+    var imageLoadError by remember(post.id, url) { mutableStateOf(false) }
+    var loadingDots by remember(post.id) { mutableIntStateOf(0) }
     val candidates = when {
         allowThumbnailFallback ->
             (listOf(post.thumbnailUrl) + post.thumbnailCandidates)
@@ -1537,6 +1592,22 @@ private fun ImageFrame(
         !showOriginal &&
         post.thumbnailCandidates.any { it != post.imageUrl }
     var imageLoading by remember(post.id, url) { mutableStateOf(true) }
+    LaunchedEffect(autoLoadFullImage, previewLoaded, canLoadOriginal, showOriginal) {
+        if (autoLoadFullImage && previewLoaded && canLoadOriginal && !showOriginal) {
+            showOriginal = true
+            imageLoading = true
+        }
+    }
+    LaunchedEffect(showOriginal, imageLoading) {
+        if (showOriginal && imageLoading) {
+            while (true) {
+                loadingDots = loadingDots % 3 + 1
+                delay(450)
+            }
+        } else {
+            loadingDots = 0
+        }
+    }
     var fullscreenControlsVisible by remember(post.id) { mutableStateOf(true) }
     var fullscreenControlsInteraction by remember(post.id) { mutableIntStateOf(0) }
     val showFullscreenImageControls =
@@ -1730,15 +1801,34 @@ private fun ImageFrame(
         if (ambientMode && !(mediaFullscreen && post.mediaType == "image")) AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(if (post.mediaType == "video") post.thumbnailUrl else thumbnailPlaceholderUrl ?: displayedUrl)
+                .diskCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                .memoryCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
                 .build(),
             imageLoader = imageLoader,
             contentDescription = null,
             modifier = Modifier.fillMaxSize().blur(28.dp).graphicsLayer { scaleX = 1.12f; scaleY = 1.12f },
             contentScale = ContentScale.Crop,
         )
+        if (showOriginal && (imageLoading || imageLoadError) && loadedPreviewUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(loadedPreviewUrl)
+                    .diskCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                    .memoryCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                    .build(),
+                imageLoader = imageLoader,
+                contentDescription = "${post.provider} image preview",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
         if (thumbnailPlaceholderUrl != null) {
             AsyncImage(
-                model = ImageRequest.Builder(context).data(thumbnailPlaceholderUrl).build(),
+                model = ImageRequest.Builder(context)
+                    .data(thumbnailPlaceholderUrl)
+                    .diskCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                    .memoryCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                    .build(),
                 imageLoader = imageLoader,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
@@ -1882,7 +1972,12 @@ private fun ImageFrame(
             }
         } else {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl).crossfade(true).build(),
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(if (post.mediaType == "video") post.thumbnailUrl else displayedUrl)
+                .diskCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                .memoryCachePolicy(if (imageCacheEnabled) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                .crossfade(true)
+                .build(),
             imageLoader = imageLoader,
             contentDescription = "${post.provider} image, rating ${post.rating}",
             modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -1893,13 +1988,28 @@ private fun ImageFrame(
             },
             contentScale = ContentScale.Fit,
             onLoading = { imageLoading = true },
-            onSuccess = { imageLoading = false },
+            onSuccess = {
+                imageLoadError = false
+                if (showOriginal) {
+                    imageLoading = false
+                } else {
+                    previewLoaded = true
+                    loadedPreviewUrl = displayedUrl
+                    if (autoLoadFullImage && canLoadOriginal) {
+                        showOriginal = true
+                        imageLoading = true
+                    } else {
+                        imageLoading = false
+                    }
+                }
+            },
             onError = {
                 if (candidateIndex < candidates.lastIndex) {
                     candidateIndex++
                     imageLoading = true
                 } else {
                     imageLoading = false
+                    imageLoadError = true
                 }
             },
         )
@@ -2114,22 +2224,55 @@ private fun ImageFrame(
         if (
             showLoadingIndicator &&
             imageLoading &&
-            !(thumbnailPlaceholderUrl != null && thumbnailPlaceholderLoaded) &&
+            (showOriginal || !(thumbnailPlaceholderUrl != null && thumbnailPlaceholderLoaded)) &&
             showFullscreenImageControls
         ) {
-            LoadingSpinner(Modifier.align(Alignment.Center))
+            if (showOriginal) {
+                Column(
+                    Modifier.align(Alignment.Center)
+                        .background(Color(0xCC15151A), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LoadingSpinner()
+                    Text(
+                        "Load Full Image${".".repeat(loadingDots)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White,
+                    )
+                }
+            } else {
+                LoadingSpinner(Modifier.align(Alignment.Center))
+            }
         }
-        if (canLoadOriginal && showFullscreenImageControls) {
+        if (imageLoadError && showFullscreenImageControls) {
+            Surface(
+                Modifier.align(Alignment.Center).fillMaxWidth().padding(24.dp),
+                color = Color(0xE615151A),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text(
+                    "Image couldn't be loaded. Check your connection and try again.",
+                    Modifier.padding(16.dp),
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    softWrap = true,
+                )
+            }
+        }
+        if (canLoadOriginal && !autoLoadFullImage && showFullscreenImageControls) {
             Surface(
                 modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).clickable {
                     showOriginal = true
                     imageLoading = true
+                    imageLoadError = false
                 },
                 color = Color(0xCC15151A),
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text(
-                    "View original",
+                    "Load full image",
                     Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -2162,10 +2305,11 @@ private fun formatPlaybackTime(milliseconds: Int): String {
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalCoilApi::class)
 private fun SettingsScreen(
     state: UiState,
     model: MainViewModel,
+    favoritesImageLoader: ImageLoader,
     onChooseFolder: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -2181,6 +2325,15 @@ private fun SettingsScreen(
     var videoResolutionMenu by remember { mutableStateOf(false) }
     var pendingProtectedPage by rememberSaveable { mutableStateOf("") }
     var showProtectedSettingsPrompt by rememberSaveable { mutableStateOf(false) }
+    var favoritesCacheSize by remember(favoritesImageLoader) {
+        mutableStateOf(favoritesImageLoader.diskCache?.size ?: 0L)
+    }
+    val cacheScope = rememberCoroutineScope()
+    LaunchedEffect(favoritesImageLoader) {
+        favoritesCacheSize = withContext(Dispatchers.IO) {
+            favoritesImageLoader.diskCache?.size ?: 0L
+        }
+    }
     fun navigateToPage(page: String) {
         if (
             state.parentalControlEnabled &&
@@ -2231,6 +2384,7 @@ private fun SettingsScreen(
         "filters" -> "Filters"
         "display" -> "Display"
         "downloads" -> "Downloads"
+        "favorites" -> "Favorites"
         "backup" -> "Backup & restore"
         "safety" -> "Safety & privacy"
         "favoritesLock" -> "Favorites lock"
@@ -2278,8 +2432,9 @@ private fun SettingsScreen(
                     SettingsCategoryRow("Providers", "Choose a source, manage accounts, and test connections", Icons.Default.Cloud, Color(0xFF90CAF9)) { navigateToPage("providers") }
                     SettingsCategoryRow("Network", "DNS-over-HTTPS settings", Icons.Default.Wifi, Color(0xFF80DEEA)) { navigateToPage("network") }
                     SettingsCategoryRow("Filters", "Rating and blocked content", Icons.Default.FilterList, Color(0xFFFFCC80)) { navigateToPage("filters") }
-                    SettingsCategoryRow("Display", "Ambient background and video resolution", Icons.Default.Fullscreen, Color(0xFFFFAB91)) { navigateToPage("display") }
+                    SettingsCategoryRow("Display", "Full-size loading, ambient background, and video resolution", Icons.Default.Fullscreen, Color(0xFFFFAB91)) { navigateToPage("display") }
                     SettingsCategoryRow("Downloads", "Choose where downloaded media is saved", Icons.Default.Download, Color(0xFFB39DDB)) { navigateToPage("downloads") }
+                    SettingsCategoryRow("Favorites", "Sort favorites and manage their image cache", Icons.Default.Favorite, Color(0xFFF48FB1)) { navigateToPage("favorites") }
                     SettingsCategoryRow("Safety & privacy", "Favorites lock and parental content controls", Icons.Default.Security, Color(0xFFF48FB1)) { navigateToPage("safety") }
                     SettingsCategoryRow("Backup & restore", "Export or import encrypted user data", Icons.Default.Backup, Color(0xFF80CBC4)) { navigateToPage("backup") }
                     SettingsCategoryRow("Updates", "Check for the latest app version", Icons.Default.SystemUpdateAlt, Color(0xFFA5D6A7)) { navigateToPage("updates") }
@@ -2673,6 +2828,13 @@ private fun SettingsScreen(
                                     grouped = true,
                                 ) { model.setAmbientMode(it) }
                                 SettingsPreferenceDivider()
+                                SettingSwitch(
+                                    "Auto load full image",
+                                    state.autoLoadFullImage,
+                                    "Load the full-resolution image automatically after its preview",
+                                    grouped = true,
+                                ) { model.setAutoLoadFullImage(it) }
+                                SettingsPreferenceDivider()
                                 Box {
                                     SettingsValueRow(
                                         "Video resolution",
@@ -2696,6 +2858,51 @@ private fun SettingsScreen(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                        "favorites" -> {
+                            SettingsPreferenceGroup {
+                                SettingSwitch(
+                                    "Enable image cache",
+                                    state.favoritesImageCacheEnabled,
+                                    "Cache favorite thumbnails on this device for faster loading",
+                                    grouped = true,
+                                ) { model.setFavoritesImageCacheEnabled(it) }
+                                SettingsPreferenceDivider()
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        "Image cache",
+                                        Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        android.text.format.Formatter.formatShortFileSize(
+                                            LocalContext.current,
+                                            favoritesCacheSize,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        cacheScope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                favoritesImageLoader.diskCache?.clear()
+                                            }
+                                            favoritesCacheSize = withContext(Dispatchers.IO) {
+                                                favoritesImageLoader.diskCache?.size ?: 0L
+                                            }
+                                        }
+                                    },
+                                    enabled = favoritesCacheSize > 0,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                ) {
+                                    Text("Clear image cache")
                                 }
                             }
                         }

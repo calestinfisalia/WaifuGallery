@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget
 
 from waifu_gallery.models import ImagePost
@@ -131,3 +132,54 @@ class FavoriteCacheSettingsTests(unittest.TestCase):
             )
         self.assertIs(result, image)
         save_cache.assert_not_called()
+
+    def test_favorite_cache_is_loaded_in_the_thumbnail_worker(self):
+        settings = MemorySettings()
+        with (
+            patch("waifu_gallery.ui.main_window.AppSettings", return_value=settings),
+            patch.object(MainWindow, "show_random"),
+            patch.object(MainWindow, "_check_for_startup_update"),
+        ):
+            window = MainWindow()
+        self.addCleanup(window.close)
+
+        post = ImagePost(
+            "1",
+            "provider",
+            "https://example.invalid/1.jpg",
+            ("https://example.invalid/1-preview.jpg",),
+            "safe",
+            frozenset(),
+        )
+        dialog = Mock()
+        dialog.posts = [post]
+        dialog.thumbnail_cache = {}
+        dialog.thumbnail_errors = {}
+        window.favorites_dialog = dialog
+        window.favorites_dialog_token = "test-token"
+        window.thumbnail_cache = {}
+        window.tasks = {}
+        window._favorites_catalog = Mock()
+        window._submit = Mock()
+
+        with patch("waifu_gallery.ui.main_window.load_favorite_thumbnail") as load_cache:
+            window._request_favorite_thumbnail("test-token", "provider:1")
+        load_cache.assert_not_called()
+
+        cached_image = QImage(2, 2, QImage.Format.Format_ARGB32)
+        with (
+            patch(
+                "waifu_gallery.ui.main_window.load_favorite_thumbnail",
+                return_value=cached_image,
+            ) as load_cache,
+            patch.object(window, "_fetch_preview") as fetch_preview,
+        ):
+            result = window._fetch_decoded_favorite_thumbnail(
+                post, window._favorites_catalog, cache_enabled=True
+            )
+
+        self.assertIs(result, cached_image)
+        load_cache.assert_called_once_with(
+            "provider:1", "https://example.invalid/1-preview.jpg"
+        )
+        fetch_preview.assert_not_called()

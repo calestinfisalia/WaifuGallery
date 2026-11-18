@@ -55,7 +55,11 @@ class DownloadsDialog(FramelessResizableDialog):
         )
         self.menu.aboutToShow.connect(self._update_menu_actions)
         self.menu_button.clicked.connect(self._show_menu)
-        layout.addWidget(DialogTitleBar(self, "Downloads", self.menu_button))
+        layout.addWidget(
+            DialogTitleBar(
+                self, "Downloads", self.menu_button, show_minimize=True
+            )
+        )
         self.items = QListWidget()
         self.items.setObjectName("downloadsList")
         self.items.setSpacing(0)

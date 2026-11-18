@@ -47,7 +47,7 @@ from ..providers import BooruCatalog, PROVIDERS
 from ..settings import AppSettings
 from .backup_file_dialog import BackupFileDialog
 from .backup_prompts import BackupMessageDialog, BackupPassphraseDialog, BackupSectionsDialog
-from .dialog_chrome import FramelessResizableDialog
+from .dialog_chrome import FramelessResizableDialog, create_minimize_button
 from .pin_prompts import PinPromptDialog
 from .themes import THEME_DESCRIPTIONS, THEME_NAMES, THEME_PALETTES, THEME_SAMPLE_COLORS
 from .updates import UpdateCheckTask, version_parts
@@ -294,6 +294,7 @@ class SettingsTitleBar(QWidget):
         title.setObjectName("settingsWindowTitle")
         layout.addWidget(title)
         layout.addStretch(1)
+        layout.addWidget(create_minimize_button(parent, "Settings"))
         close = QPushButton()
         close.setIcon(_themed_icon(parent, "close"))
         close.setIconSize(QSize(16, 16))

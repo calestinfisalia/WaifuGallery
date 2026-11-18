@@ -58,7 +58,7 @@ from .backup_prompts import (
     BackupPassphraseDialog,
     BackupSectionsDialog,
 )
-from .dialog_chrome import FramelessResizableDialog
+from .dialog_chrome import FramelessResizableDialog, create_minimize_button
 from .pin_prompts import PinPromptDialog
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 from .updates import UpdateCheckTask, version_parts
@@ -293,6 +293,7 @@ class SettingsTitleBar(QWidget):
         title.setObjectName("settingsWindowTitle")
         layout.addWidget(title)
         layout.addStretch(1)
+        layout.addWidget(create_minimize_button(parent, "Settings"))
         close = QPushButton()
         close.setIcon(_themed_icon(parent, "close"))
         close.setIconSize(QSize(16, 16))

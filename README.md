@@ -6,9 +6,9 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 ## Projects
 
-- [Windows](windows/README.md) — Python and PySide6 desktop application (source version 0.1.22; latest published version 0.1.21).
+- [Windows](windows/README.md) — Python and PySide6 desktop application (source and latest published version 0.1.23).
 - [Linux](linux/README.md) — Python and PySide6 desktop port (source version 0.1.19; latest published version 0.1.18).
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source and latest published version 0.1.27, `versionCode` 25).
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (source and latest published version 0.1.28, `versionCode` 26).
 
 ## Project documentation
 
@@ -21,7 +21,7 @@ The desktop and Android applications provide random browsing, tag search, provid
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. The latest published versions are Windows `0.1.21`, Linux `0.1.18`, and Android `0.1.27`, as recorded in [`updates.json`](updates.json). Windows source `0.1.22` and Linux source `0.1.19` are prepared but not yet published; the feed stays on the published versions until each release and its assets are verified. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
+Windows, Linux, and Android versions can advance independently. The latest published versions are Windows `0.1.23`, Linux `0.1.18`, and Android `0.1.28` (`versionCode` 26), as recorded in [`updates.json`](updates.json). Linux source `0.1.19` is not yet published; the feed stays on the published version until its release and assets are verified. The repository may also contain source changes not yet packaged in a release. Source commits alone do not publish an app update or change the feed; new releases require separate versioning, builds, assets, and feed updates. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
 
 Independent platform releases use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`; compatibility releases for legacy clients may use a shared `vX.Y.Z` tag. Android also increments `versionCode` for every APK. Old clients cannot read the platform update manifest.
 
@@ -29,8 +29,8 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 
 ## Platform versions
 
-- **Windows:** version 0.1.21 is the latest published build; version 0.1.22 source adds dark-neon wizard styling and installer artwork and is awaiting publication.
-- **Android:** version 0.1.27 (`versionCode` 25) is published in GitHub release [`android-v0.1.27`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.27); it merges All-provider Search results and extends zoomed fullscreen photos through display cutouts.
+- **Windows:** version 0.1.23 is published in GitHub release [`windows-v0.1.23`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.23).
+- **Android:** version 0.1.28 (`versionCode` 26) is published in GitHub release [`android-v0.1.28`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.28); it adds Downloads retry/history controls, a shorter search field, and anchored pinch zoom.
 - **Linux:** version 0.1.18 is the latest published build; version 0.1.19 source brings the latest shared UI updates and lighter typography and is awaiting publication.
 - Android release signing continues to use the local debug key for now.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.
@@ -66,7 +66,7 @@ Windows and Linux use app-styled dialogs and an in-app file browser for backup p
 
 ## Desktop UI behavior and bug reports
 
-The Windows and Linux desktop apps share the same UI behavior: search cards show media without titles and scale small provider previews to fill their tiles; changing search pages clears old results while loading; the toolbar download action stays hidden on Search until a media item is opened; zoom hides scrollbars but retains drag-to-pan; Search, Favorites, and Media Info use thin capsule scrollbars; and video buffering uses a bare spinner with gray controls/progress. Provider notices use gray capsules without a purple outline. The footer shows image/video counts on Search results and provider, media rating, and resolution for a loaded image in Random or a Search/Favorites detail; it clears while loading or outside those views. Media Info includes provider and rating. Favorites stays open while browsing its images, and the Back button is hidden in favorite-media details. Download history uses compact unboxed rows with newest downloads at the top, progress/status, a cancel action for active transfers, and a folder action for saved files; the application icon is retained. Random-image metadata and search-loading overlays, plus desktop Settings opening, have been fixed.
+The Windows and Linux desktop apps share the same UI behavior: search cards show media without titles and scale small provider previews to fill their tiles; changing search pages clears old results while loading; the toolbar download action stays hidden on Search until a media item is opened; zoom hides scrollbars but retains drag-to-pan; Search, Favorites, and Media Info use thin capsule scrollbars; and video buffering uses a bare spinner with gray controls/progress. Provider notices use gray capsules without a purple outline. The footer shows image/video counts on Search results and provider, media rating, and resolution for a loaded image in Random or a Search/Favorites detail; the Favorites image count is in its window footer. It clears while loading or outside those views. Media Info includes provider and rating. Favorites stays open while browsing its images, and the Back button is hidden in favorite-media details. Downloading from Favorites queues the file without automatically opening the Downloads window. Desktop windows remember their sizes, include minimize controls, and keep the focused window above inactive siblings; the main window closes its open dialogs. Favorites and image previews adapt during resize without rebuilding tiles or repeatedly scanning thumbnails, then apply final image scaling after resizing settles. Download history uses compact unboxed rows with newest downloads at the top, progress/status, a cancel action for active transfers, and a folder action for saved files; the application icon is retained. Random-image metadata and search-loading overlays, plus desktop Settings opening, have been fixed.
 
 With provider set to **All**, desktop Search queries eligible providers concurrently and merges each provider's page into a deduplicated, round-robin page. Random chooses the provider with the first successful metadata response, then fetches its preview asynchronously; if that preview fails, Auto tries another provider. Selecting a specific provider keeps the request on that provider. **Settings → Providers → Status connection** checks each provider API and reports its HTTP response or a concise network/request error. In Favorites, failed thumbnails show a short cause with full details in a tooltip. Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites; selecting media reveals icon actions for select all, bulk delete, and bulk download. Bulk downloads skip existing destination files and paths already in the download queue.
 

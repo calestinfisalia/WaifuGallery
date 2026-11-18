@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ImagePost
-from .dialog_chrome import FramelessResizableDialog
+from .dialog_chrome import FramelessResizableDialog, create_minimize_button
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
 
@@ -38,6 +38,7 @@ class MediaInfoTitleBar(QWidget):
         title.setObjectName("mediaInfoWindowTitle")
         layout.addWidget(title)
         layout.addStretch(1)
+        layout.addWidget(create_minimize_button(dialog, "Media Info"))
         close = QPushButton()
         icon_factory = getattr(dialog.parent(), "_icon", None)
         icon = icon_factory("close") if callable(icon_factory) else QIcon(

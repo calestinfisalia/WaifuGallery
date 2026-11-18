@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..models import ImagePost
 from .backup_prompts import BackupMessageDialog
-from .dialog_chrome import FramelessResizableDialog
+from .dialog_chrome import FramelessResizableDialog, create_minimize_button
 from .indicators import CircularProgressIndicator
 from .scrollbars import CAPSULE_SCROLLBAR_STYLE
 
@@ -103,6 +103,7 @@ class FavoritesTitleBar(QWidget):
         sort_button.clicked.connect(dialog._show_sort_menu)
         layout.addWidget(sort_button)
         self.sort_button = sort_button
+        layout.addWidget(create_minimize_button(dialog, "Favorites"))
         close = QPushButton()
         icon_factory = getattr(dialog.parent(), "_icon", None)
         icon = icon_factory("close") if callable(icon_factory) else QIcon(
@@ -139,6 +140,8 @@ class FavoritesTitleBar(QWidget):
 
 
 class FavoritesDialog(FramelessResizableDialog):
+    _TILE_BUILD_BATCH_SIZE = 16
+
     thumbnailRequested = Signal(str)
     downloadRequested = Signal(str)
     deleteSelectedRequested = Signal(object)
@@ -178,14 +181,23 @@ class FavoritesDialog(FramelessResizableDialog):
         self.thumbnail_error_views: dict[str, QWidget] = {}
         self.thumbnail_error_labels: dict[str, QLabel] = {}
         self._thumbnail_requested: set[str] = set()
+        self._layout_columns = 0
+        self._layout_tile_size: QSize | None = None
+        self._layout_tile_count = 0
         self._layout_timer = QTimer(self)
         self._layout_timer.setSingleShot(True)
-        self._layout_timer.setInterval(55)
-        self._layout_timer.timeout.connect(self._layout_tiles)
+        self._layout_timer.setInterval(16)
+        self._layout_timer.timeout.connect(self._layout_tiles_after_resize)
         self._thumbnail_timer = QTimer(self)
         self._thumbnail_timer.setSingleShot(True)
         self._thumbnail_timer.setInterval(50)
         self._thumbnail_timer.timeout.connect(self._request_visible_thumbnails)
+        self._tile_build_timer = QTimer(self)
+        self._tile_build_timer.setSingleShot(True)
+        self._tile_build_timer.setInterval(1)
+        self._tile_build_timer.timeout.connect(self._build_next_tile_batch)
+        self._pending_tile_posts: list[ImagePost] = []
+        self._next_tile_index = 0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -201,13 +213,11 @@ class FavoritesDialog(FramelessResizableDialog):
         self.download_selected_button = title_bar.download_selected_button
         self.sort_button = title_bar.sort_button
         layout.addWidget(title_bar)
-        header = QHBoxLayout()
         self.count_label = QLabel()
-        self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.addStretch(1)
-        header.addWidget(self.count_label)
-        header.addStretch(1)
-        layout.addLayout(header)
+        self.count_label.setObjectName("favoritesCountLabel")
+        self.count_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.empty_label = QLabel("No favorite images yet.")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -228,11 +238,23 @@ class FavoritesDialog(FramelessResizableDialog):
         self.grid.setSpacing(12)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.scroll.setWidget(self.content)
+        self.loading_indicator = CircularProgressIndicator(
+            self.scroll.viewport(), size=36
+        )
+        self.loading_indicator.setObjectName("favoritesLoadingIndicator")
+        self.loading_indicator.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self.loading_indicator.hide()
         layout.addWidget(self.scroll, 1)
-        footer = QHBoxLayout()
+        self.footer = QWidget(surface)
+        self.footer.setObjectName("favoritesFooter")
+        footer = QHBoxLayout(self.footer)
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.addWidget(self.count_label)
         footer.addStretch(1)
         footer.addWidget(QSizeGrip(surface))
-        layout.addLayout(footer)
+        layout.addWidget(self.footer)
         outer.addWidget(surface)
         self._rebuild()
 
@@ -272,16 +294,22 @@ class FavoritesDialog(FramelessResizableDialog):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._layout_timer.start()
+        if not self._layout_timer.isActive():
+            self._layout_timer.start()
+        self._position_loading_indicator()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._thumbnail_timer.start(0)
+        if self.content.isVisible() and not self._pending_tile_posts:
+            self._thumbnail_timer.start(0)
+        if self._pending_tile_posts:
+            self._tile_build_timer.start(0)
 
     def _schedule_thumbnail_scan(self, *_args) -> None:
         self._thumbnail_timer.start()
 
     def _rebuild(self) -> None:
+        self._tile_build_timer.stop()
         self._selected_favorites.intersection_update(
             favorite_key(post) for post in self.posts
         )
@@ -303,6 +331,9 @@ class FavoritesDialog(FramelessResizableDialog):
         self.selection_checks.clear()
         self.play_badges.clear()
         self.tiles.clear()
+        self._layout_columns = 0
+        self._layout_tile_size = None
+        self._layout_tile_count = 0
         videos = sum(post.media_type == "video" for post in self.posts)
         images = len(self.posts) - videos
         self.count_label.setText(
@@ -311,123 +342,212 @@ class FavoritesDialog(FramelessResizableDialog):
         self.empty_label.setVisible(not self.posts)
         self.scroll.setVisible(bool(self.posts))
 
-        for post in self.posts:
-            preview_area = QWidget()
-            preview_area.setMinimumSize(160, 180)
-            preview_area.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            preview = QPushButton(preview_area)
-            preview.setObjectName("previewImage")
-            key = favorite_key(post)
-            preview.clicked.connect(
-                lambda _checked=False, item=post, favorite_id=key:
-                self._activate_favorite(item, favorite_id)
-            )
-            preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            preview.customContextMenuRequested.connect(
-                lambda position, favorite_id=key, button=preview:
-                self._show_favorite_context_menu(
-                    favorite_id, button.mapToGlobal(position)
-                )
-            )
-            self.thumbnail_buttons[key] = preview
-            if key not in self.thumbnail_cache and key not in self.thumbnail_errors:
-                indicator = CircularProgressIndicator(preview_area, size=28)
-                indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                indicator.set_active(key in self._thumbnail_requested)
-                self.thumbnail_indicators[key] = indicator
-            if post.media_type == "video":
-                play_badge = QLabel(preview_area)
-                icon_factory = getattr(self.parent(), "_icon", None)
-                play_icon = (
-                    icon_factory("play")
-                    if callable(icon_factory)
-                    else QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "play.svg"))
-                )
-                play_badge.setPixmap(play_icon.pixmap(QSize(22, 22)))
-                play_badge.setFixedSize(46, 46)
-                play_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                play_badge.setStyleSheet(
-                    "background: rgba(16, 17, 24, 190); border-radius: 23px; padding: 12px;"
-                )
-                play_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                play_badge.setVisible(key in self.thumbnail_cache)
-                self.play_badges[key] = play_badge
-            selection_check = QCheckBox(preview_area)
-            selection_check.setObjectName("favoritesChecklistCheckBox")
-            selection_check.setFixedSize(28, 28)
-            selection_check.setToolTip("Select image")
-            selection_check.setAccessibleName(f"Select {post.provider} favorite {post.post_id}")
-            selection_check.setChecked(key in self._selected_favorites)
-            selection_check.setVisible(self._selection_mode)
-            selection_check.toggled.connect(
-                lambda checked, favorite_id=key:
-                self._set_favorite_selected(favorite_id, checked)
-            )
-            self.selection_checks[key] = selection_check
-            remove = QPushButton(preview_area)
-            remove.setObjectName("favoriteRemoveButton")
-            remove.setIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "heart-filled.svg")))
-            remove.setIconSize(QSize(18, 18))
-            remove.resize(32, 32)
-            remove.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            remove.setToolTip("Remove from favorites")
-            remove.clicked.connect(lambda _checked=False, post_key=key: self._confirm_remove(post_key))
-            remove.raise_()
-            self.remove_buttons[key] = remove
-            self.tiles.append((key, preview_area))
-            if key in self.thumbnail_cache:
-                preview.setText("")
-                preview.setIcon(QIcon(self.thumbnail_cache[key]))
-            elif key in self.thumbnail_errors:
-                preview.setToolTip(
-                    self.thumbnail_error_details.get(key, "Preview could not be loaded.")
-                )
-                self._create_thumbnail_error_view(preview_area, key)
+        self._pending_tile_posts = list(self.posts)
+        self._next_tile_index = 0
+        self.content.hide()
+        self.loading_indicator.setVisible(bool(self._pending_tile_posts))
+        self.loading_indicator.set_active(bool(self._pending_tile_posts))
+        self._position_loading_indicator()
+        if 0 < len(self._pending_tile_posts) <= self._TILE_BUILD_BATCH_SIZE:
+            for post in self._pending_tile_posts:
+                self._create_favorite_tile(post)
+            self._pending_tile_posts.clear()
+            self.content.show()
+            self.loading_indicator.set_active(False)
+            self.loading_indicator.hide()
+            self._layout_tiles()
+            self.grid.invalidate()
+            self.grid.activate()
+        elif self._pending_tile_posts and self.isVisible():
+            self._tile_build_timer.start(0)
+        elif not self._pending_tile_posts:
+            self._update_selection_toolbar()
+
+    def _build_next_tile_batch(self) -> None:
+        if not self.isVisible() or not self._pending_tile_posts:
+            return
+        end = min(
+            self._next_tile_index + self._TILE_BUILD_BATCH_SIZE,
+            len(self._pending_tile_posts),
+        )
+        for post in self._pending_tile_posts[self._next_tile_index:end]:
+            self._create_favorite_tile(post)
+        self._next_tile_index = end
+        if end < len(self._pending_tile_posts):
+            self._tile_build_timer.start()
+            return
+        self._pending_tile_posts.clear()
+        self._next_tile_index = 0
         self._layout_tiles()
+        self.content.show()
+        self.grid.invalidate()
+        self.grid.activate()
+        self.loading_indicator.set_active(False)
+        self.loading_indicator.hide()
+        self._thumbnail_timer.start()
+
+    def _create_favorite_tile(self, post: ImagePost) -> None:
+        preview_area = QWidget()
+        preview_area.setMinimumSize(160, 180)
+        preview_area.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        preview = QPushButton(preview_area)
+        preview.setObjectName("previewImage")
+        key = favorite_key(post)
+        preview.setProperty(
+            "favoritesThumbnailPending",
+            key not in self.thumbnail_cache and key not in self.thumbnail_errors,
+        )
+        preview.clicked.connect(
+            lambda _checked=False, item=post, favorite_id=key:
+            self._activate_favorite(item, favorite_id)
+        )
+        preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        preview.customContextMenuRequested.connect(
+            lambda position, favorite_id=key, button=preview:
+            self._show_favorite_context_menu(
+                favorite_id, button.mapToGlobal(position)
+            )
+        )
+        self.thumbnail_buttons[key] = preview
+        if key not in self.thumbnail_cache and key not in self.thumbnail_errors:
+            indicator = CircularProgressIndicator(preview_area, size=28)
+            indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            indicator.set_active(key in self._thumbnail_requested)
+            self.thumbnail_indicators[key] = indicator
+        if post.media_type == "video":
+            play_badge = QLabel(preview_area)
+            icon_factory = getattr(self.parent(), "_icon", None)
+            play_icon = (
+                icon_factory("play")
+                if callable(icon_factory)
+                else QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "play.svg"))
+            )
+            play_badge.setPixmap(play_icon.pixmap(QSize(22, 22)))
+            play_badge.setFixedSize(46, 46)
+            play_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            play_badge.setStyleSheet(
+                "background: rgba(16, 17, 24, 190); border-radius: 23px; padding: 12px;"
+            )
+            play_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            play_badge.setVisible(key in self.thumbnail_cache)
+            self.play_badges[key] = play_badge
+        selection_check = QCheckBox(preview_area)
+        selection_check.setObjectName("favoritesChecklistCheckBox")
+        selection_check.setFixedSize(28, 28)
+        selection_check.setToolTip("Select image")
+        selection_check.setAccessibleName(f"Select {post.provider} favorite {post.post_id}")
+        selection_check.setChecked(key in self._selected_favorites)
+        selection_check.setVisible(self._selection_mode)
+        selection_check.toggled.connect(
+            lambda checked, favorite_id=key:
+            self._set_favorite_selected(favorite_id, checked)
+        )
+        self.selection_checks[key] = selection_check
+        remove = QPushButton(preview_area)
+        remove.setObjectName("favoriteRemoveButton")
+        remove.setIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "heart-filled.svg")))
+        remove.setIconSize(QSize(18, 18))
+        remove.resize(32, 32)
+        remove.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        remove.setToolTip("Remove from favorites")
+        remove.clicked.connect(lambda _checked=False, post_key=key: self._confirm_remove(post_key))
+        remove.raise_()
+        self.remove_buttons[key] = remove
+        self.tiles.append((key, preview_area))
+        if key in self.thumbnail_cache:
+            preview.setText("")
+            preview.setIcon(QIcon(self.thumbnail_cache[key]))
+        elif key in self.thumbnail_errors:
+            preview.setToolTip(
+                self.thumbnail_error_details.get(key, "Preview could not be loaded.")
+            )
+            self._create_thumbnail_error_view(preview_area, key)
+
+    def _position_loading_indicator(self) -> None:
+        if not hasattr(self, "loading_indicator"):
+            return
+        viewport = self.scroll.viewport()
+        self.loading_indicator.move(
+            max(0, (viewport.width() - self.loading_indicator.width()) // 2),
+            max(0, (viewport.height() - self.loading_indicator.height()) // 2),
+        )
 
     def _layout_tiles(self) -> None:
+        self._layout_tiles_impl(update_toolbar=True)
+
+    def _layout_tiles_after_resize(self) -> None:
+        self._layout_tiles_impl(update_toolbar=False)
+
+    def _layout_tiles_impl(self, *, update_toolbar: bool) -> None:
+        if self._pending_tile_posts:
+            return
         if not self.tiles:
-            self._update_selection_toolbar()
+            if update_toolbar:
+                self._update_selection_toolbar()
             return
         spacing = self.grid.spacing()
         available = max(160, self.scroll.viewport().width() - 8)
         columns = max(1, (available + spacing) // (180 + spacing))
         tile_width = max(160, (available - spacing * (columns - 1)) // columns)
         tile_height = max(180, round(tile_width * 205 / 180))
+        tile_size = QSize(tile_width, tile_height)
+        columns_changed = columns != self._layout_columns
+        size_changed = tile_size != self._layout_tile_size
+        count_changed = len(self.tiles) != self._layout_tile_count
+        if not (columns_changed or size_changed or count_changed):
+            return
 
-        while self.grid.count():
-            self.grid.takeAt(0)
+        if columns_changed or count_changed:
+            while self.grid.count():
+                self.grid.takeAt(0)
         for index, (key, tile) in enumerate(self.tiles):
-            tile.setFixedSize(tile_width, tile_height)
+            if tile.minimumSize() != tile_size or tile.maximumSize() != tile_size:
+                tile.setFixedSize(tile_size)
             preview = self.thumbnail_buttons[key]
-            preview.setGeometry(0, 0, tile_width, tile_height)
-            preview.setIconSize(QSize(tile_width - 10, tile_height - 10))
+            preview_geometry = QRect(0, 0, tile_width, tile_height)
+            if preview.geometry() != preview_geometry:
+                preview.setGeometry(preview_geometry)
+            icon_size = QSize(tile_width - 10, tile_height - 10)
+            if preview.iconSize() != icon_size:
+                preview.setIconSize(icon_size)
             indicator = self.thumbnail_indicators.get(key)
             if indicator:
-                indicator.move(
+                indicator_position = QPoint(
                     (tile_width - indicator.width()) // 2,
                     (tile_height - indicator.height()) // 2,
                 )
-                indicator.raise_()
+                if indicator.pos() != indicator_position:
+                    indicator.move(indicator_position)
+                    indicator.raise_()
             play_badge = self.play_badges.get(key)
             if play_badge:
-                play_badge.move((tile_width - play_badge.width()) // 2, (tile_height - play_badge.height()) // 2)
-                if key in self.thumbnail_cache:
-                    play_badge.raise_()
+                badge_position = QPoint(
+                    (tile_width - play_badge.width()) // 2,
+                    (tile_height - play_badge.height()) // 2,
+                )
+                if play_badge.pos() != badge_position:
+                    play_badge.move(badge_position)
+                    if key in self.thumbnail_cache:
+                        play_badge.raise_()
             error_view = self.thumbnail_error_views.get(key)
             if error_view:
-                error_view.setGeometry(0, 0, tile_width, tile_height)
-                error_view.raise_()
-            selection_check = self.selection_checks[key]
-            selection_check.move(8, 8)
-            selection_check.setVisible(self._selection_mode)
-            if self._selection_mode:
-                selection_check.raise_()
-            self.remove_buttons[key].setGeometry(tile_width - 40, 8, 32, 32)
-            self.remove_buttons[key].raise_()
-            self.grid.addWidget(tile, index // columns, index % columns)
-        self._update_selection_toolbar()
-        self._thumbnail_timer.start(0)
+                if error_view.geometry() != preview_geometry:
+                    error_view.setGeometry(preview_geometry)
+                    error_view.raise_()
+            if columns_changed or count_changed:
+                self.grid.addWidget(tile, index // columns, index % columns)
+            remove_geometry = QRect(tile_width - 40, 8, 32, 32)
+            remove_button = self.remove_buttons[key]
+            if remove_button.geometry() != remove_geometry:
+                remove_button.setGeometry(remove_geometry)
+                remove_button.raise_()
+        self._layout_columns = columns
+        self._layout_tile_size = tile_size
+        self._layout_tile_count = len(self.tiles)
+        if update_toolbar:
+            self._update_selection_toolbar()
+        if self.content.isVisible() and not self._pending_tile_posts:
+            self._thumbnail_timer.start()
 
     def _activate_favorite(self, post: ImagePost, key: str) -> None:
         if self._selection_mode:
@@ -585,7 +705,7 @@ class FavoritesDialog(FramelessResizableDialog):
         return view
 
     def _request_visible_thumbnails(self) -> None:
-        if not self.isVisible():
+        if not self.isVisible() or not self.content.isVisible():
             return
         viewport = self.scroll.viewport()
         if viewport.width() <= 0 or viewport.height() <= 0:
@@ -633,9 +753,13 @@ class FavoritesDialog(FramelessResizableDialog):
         if indicator:
             indicator.set_active(False)
         if button:
+            button.setProperty("favoritesThumbnailPending", False)
+            button.style().unpolish(button)
+            button.style().polish(button)
             button.setToolTip("")
             button.setText("")
             button.setIcon(QIcon(pixmap))
+            button.update()
         play_badge = self.play_badges.get(post_id)
         if play_badge:
             play_badge.show()
@@ -661,6 +785,9 @@ class FavoritesDialog(FramelessResizableDialog):
             message.setToolTip(details)
         button = self.thumbnail_buttons.get(post_id)
         if button:
+            button.setProperty("favoritesThumbnailPending", False)
+            button.style().unpolish(button)
+            button.style().polish(button)
             button.setToolTip(details)
         if error_view:
             error_view.setToolTip(details)

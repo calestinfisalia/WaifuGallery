@@ -33,6 +33,7 @@ class RandomDownloadVisibilityTests(unittest.TestCase):
             random_page=Mock(),
             fullscreen_button=Mock(),
             _sync_favorite_buttons=Mock(),
+            _stop_full_image_loading_animation=Mock(),
             random_post=None,
             settings=Mock(),
             _sync_full_image_button_visibility=Mock(),

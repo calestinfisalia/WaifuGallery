@@ -84,6 +84,117 @@ class AutoFullImageTests(unittest.TestCase):
         dialog.auto_load_full_image.setChecked(True)
         self.assertTrue(settings.get_bool("view/auto_load_full_image"))
 
+    def test_image_size_footer_uses_load_full_size_label_and_dimensions_only(self):
+        post = ImagePost(
+            "1",
+            "provider",
+            "https://example.invalid/original.jpg",
+            ("https://example.invalid/preview.jpg",),
+            "s",
+            frozenset(),
+            width=1754,
+            height=1240,
+        )
+        preview = QPixmap(640, 480)
+        full = QPixmap(1754, 1240)
+
+        self.assertEqual(
+            MainWindow._image_size_text(post, preview),
+            "Preview 640 x 480",
+        )
+        self.assertEqual(
+            MainWindow._image_size_text(post, preview, auto_load=True),
+            "Preview 640 x 480 | Load full size...",
+        )
+        self.assertEqual(
+            MainWindow._image_size_text(post, full, full=True),
+            "1754 x 1240",
+        )
+
+    def test_manual_footer_shows_only_preview_resolution(self):
+        settings = MemorySettings()
+        window = self._create_window(settings)
+        post = ImagePost(
+            "1",
+            "provider",
+            "https://example.invalid/original.jpg",
+            ("https://example.invalid/preview.jpg",),
+            "s",
+            frozenset(),
+            width=1754,
+            height=1240,
+        )
+        window.random_post = post
+        window.pages.setCurrentWidget(window.random_page)
+        preview = QPixmap(640, 480)
+
+        window._set_random_image_footer(post, preview)
+        self.assertEqual(
+            window.footer_meta.text(),
+            "provider | Safe | Preview 640 x 480",
+        )
+        self.assertFalse(window._full_image_loading_timer.isActive())
+
+        settings.set("view/auto_load_full_image", True)
+        window._set_random_image_footer(post, preview)
+        self.assertNotIn("1754 x 1240", window.footer_meta.text())
+
+    def test_manual_load_shows_loading_text_then_original_resolution(self):
+        window = self._create_window(MemorySettings())
+        window.random_post = ImagePost(
+            "1",
+            "provider",
+            "https://example.invalid/original.jpg",
+            ("https://example.invalid/preview.jpg",),
+            "s",
+            frozenset(),
+            width=1754,
+            height=1240,
+        )
+        window.pages.setCurrentWidget(window.random_page)
+        preview = QPixmap(640, 480)
+        preview.fill()
+
+        with patch.object(window, "_submit"):
+            window._show_random_image(preview)
+            self.assertEqual(
+                window.footer_meta.text(),
+                "provider | Safe | Preview 640 x 480",
+            )
+            window.load_full_image()
+
+        self.assertEqual(
+            window.footer_meta.text(),
+            "provider | Safe | Load Full Image.",
+        )
+        window._update_full_image_loading_text()
+        self.assertEqual(window.footer_meta.text(), "provider | Safe | Load Full Image..")
+        window._update_full_image_loading_text()
+        self.assertEqual(window.footer_meta.text(), "provider | Safe | Load Full Image...")
+        loaded = QPixmap(1754, 1240)
+        window._full_image_loaded = True
+        window._set_random_image_footer(window.random_post, loaded)
+        self.assertEqual(window.footer_meta.text(), "provider | Safe | 1754 x 1240")
+        self.assertFalse(window._full_image_loading_timer.isActive())
+
+    def test_failed_manual_load_restores_preview_resolution(self):
+        window = self._create_window(MemorySettings())
+        window.random_post = self._post()
+        window.pages.setCurrentWidget(window.random_page)
+        preview = QPixmap(640, 480)
+        preview.fill()
+
+        with patch.object(window, "_submit"):
+            window._show_random_image(preview)
+            window.load_full_image()
+
+        window._task_failed(f"full-image:random/{window.request_id}", "network error")
+
+        self.assertEqual(
+            window.footer_meta.text(),
+            "provider | Safe | Preview 640 x 480",
+        )
+
     def test_random_preview_stays_visible_while_full_image_loads(self):
         settings = MemorySettings(auto_load=True)
         window = self._create_window(settings)
@@ -96,8 +207,13 @@ class AutoFullImageTests(unittest.TestCase):
             window._show_random_image(pixmap)
 
         self.assertEqual(window.random_image.original.size(), pixmap.size())
+        self.assertEqual(
+            window.footer_meta.text(),
+            "provider | Safe | Load Full Image.",
+        )
         self.assertTrue(window.full_image_button.isHidden())
         self.assertFalse(window.full_image_button.isEnabled())
+        self.assertTrue(window._full_image_loading_timer.isActive())
         self.assertEqual(submit.call_args.args[0], f"full-image:random/{window.request_id}")
         self.assertNotIn("progress_callback", submit.call_args.kwargs)
 

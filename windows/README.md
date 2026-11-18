@@ -21,6 +21,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Favorites can be ordered newest-to-oldest or oldest-to-newest from the top-right filter button. Favorite thumbnails are cached locally by default; toggle caching, view disk usage, or clear the cache under Settings → General → Image cache. Turning caching off stops disk reads and writes but keeps existing files until cleared.
 - Settings content adapts to the window size, and long image-viewer error messages wrap instead of being clipped.
 - Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
+- The Favorites image count is shown in the window footer. Downloading from Favorites queues the file without automatically opening Downloads.
 - User-defined search terms used by Random.
 - Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms, download folder, and favorite image cache are under General; the default rating is under Filters.
 - Display settings include Dark, Light, System, and OLED Dark themes with color previews, plus optional automatic full-resolution image loading.
@@ -54,18 +55,18 @@ Export and import use the native Windows file picker to open or save backup file
 - Small provider thumbnails are scaled to the search card's preview area rather than left at their original tiny pixel size.
 - Zoomed images remain pannable by dragging; scrollbars stay hidden. Search, Favorites, and Media Info use thin capsule scrollbars.
 - Video buffering shows a centered spinner without a surrounding card. Compact player controls use the active theme's purple accent; buffered media uses a brighter solid segment.
-- The bottom media footer shows `16 images, 4 videos`-style counts on Search results; for a loaded image in Random or a Search/Favorites detail, it shows provider, rating, and preview/original resolution. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
+- The bottom media footer shows `16 images, 4 videos`-style counts on Search results. For an image in Random or a Search/Favorites detail, both manual and automatic loading show `Load Full Image` with animated dots, followed by the full dimensions when complete. Before loading, manual mode shows only the preview dimensions; automatic mode shows `Load full size...` without full dimensions. Refreshing, replacing media, or leaving those views clears it. Media Info includes provider and rating. Favorites stays open while browsing its images; the Back button is hidden while viewing a favorite.
+- Main, Favorites, Settings, Downloads, and other app windows follow the focused window in the stacking order.
+- App windows remember their sizes and provide minimize controls. Resizing Favorites avoids rebuilding its tiles or repeatedly scanning thumbnails; the main image uses a fast preview during resizing and restores final scaling when resizing settles. Closing the main window also closes its open dialogs.
 - Download history uses compact, unboxed rows with newest downloads at the top, progress/status, a cancel action for active transfers, and a folder action for saved files. The application icon is retained, and the full path remains available in the filename tooltip.
 - Provider notices use a gray capsule background without the purple outline.
 - The update dialog uses the full `assets/Iro-chan-update-pose.png` artwork in a clear right-side column; the release notes and download status stay readable beside/below it. Download percentage is a separate label beside a thin progress bar.
 
 For a reproducible bug report, include Windows version, image or video, steps, and a screenshot or exact error. UI implementation lives in `waifu_gallery/ui/`; keep behavior aligned with `../linux/waifu_gallery/ui/`. Check changes with `python -m compileall waifu_gallery/ui` and `git diff --check`.
 
-### Update dialog UI work in progress
+### Update dialog preview and window diagnostics
 
-The update-dialog layout and Iro-chan pose are being refined in `waifu_gallery/ui/updates.py`; the supplied artwork is `waifu_gallery/assets/Iro-chan-update-pose.png`. Current local changes place the update heading inside the card, reserve top clearance so Iro-chan's head and magical gift box pop out above the card, keep release notes and download progress on the left half, position action buttons centered at the bottom, and place the installed version label on the bottom right. The dialog's minimum size is 800×540 and its default size is 1024×730.
-
-These UI refinements are included in the 0.1.11 app source. Preserve the existing download, SHA-256 verification, and install behavior when continuing this work.
+The update dialog uses `waifu_gallery/assets/Iro-chan-update-pose.png` and places release notes and download progress beside the artwork. Its minimum size is 800×540 and its default size is 1024×730. The preview below is a mock only; it cannot download or install an update.
 
 To preview the dialog without downloading or installing anything, run this from PowerShell in `windows/` while the virtual environment is available:
 
