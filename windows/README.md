@@ -162,6 +162,14 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Windows source version: 0.1.23.
 - Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.23`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.23).
 
+## Windows 0.1.24
+
+- **Favorites:** add newest/oldest sorting and a configurable thumbnail cache; batch large gallery loads and keep resizing responsive. Show the Favorites count in its footer, and do not open Downloads automatically when queuing a favorite.
+- **Image viewing:** add optional automatic full-resolution loading, preserve zoom and pan while loading, improve resize rendering, and keep the footer stable while status messages change.
+- **Window behavior:** improve focus, minimize, taskbar previews, remembered sizes, and Windows snap support; close app dialogs and clean up download workers when the main window closes.
+- **Ambient mode and navigation:** smooth the background fade and keep navigation controls lightweight while resizing.
+- Windows source version: 0.1.24.
+
 ## Windows 0.1.22
 
 - **Installer:** replace the top-right CD image with the Peace Sign artwork and use the Neon Waves artwork in a dark blue wizard theme.

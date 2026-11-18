@@ -1,6 +1,6 @@
-# Desktop Update Information
+# Windows 0.1.24 and Android 0.1.29 Release Notes
 
-These unreleased updates apply to the Windows, Linux, and Android applications.
+These notes describe the Windows and Android packages in this release. Linux source includes the desktop updates but is not built or released here.
 
 ## Favorites
 
