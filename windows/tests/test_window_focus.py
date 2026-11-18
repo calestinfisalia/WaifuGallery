@@ -78,6 +78,25 @@ class WindowFocusTests(unittest.TestCase):
 
         self.assertEqual(settings.get("windows/main/size"), QSize(1080, 760))
 
+    def test_random_fullscreen_toolbar_renders_as_an_opaque_capsule(self):
+        window = self._create_window()
+        window._set_ambient_visibility(
+            window.random_ambient, window.random_page, True
+        )
+        toolbar = window.random_fullscreen_toolbar
+        toolbar.setGeometry(20, 20, 240, 58)
+        toolbar.show()
+        toolbar.raise_()
+        self.app.processEvents()
+
+        rendered = toolbar.grab().toImage()
+        center = rendered.pixelColor(rendered.width() // 2, rendered.height() // 2)
+        corner = rendered.pixelColor(0, 0)
+
+        self.assertEqual(center.name(), "#1c1e28")
+        self.assertEqual(center.alpha(), 255)
+        self.assertLess(corner.alpha(), center.alpha())
+
     def test_closing_main_window_cancels_downloads_and_clears_queued_work(self):
         window = self._create_window()
         task = FileDownloadTask("download-1", object(), object(), object())

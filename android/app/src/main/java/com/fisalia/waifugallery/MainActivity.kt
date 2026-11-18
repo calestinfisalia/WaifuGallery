@@ -2225,7 +2225,8 @@ private fun ImageFrame(
             showLoadingIndicator &&
             imageLoading &&
             (showOriginal || !(thumbnailPlaceholderUrl != null && thumbnailPlaceholderLoaded)) &&
-            showFullscreenImageControls
+            showFullscreenImageControls &&
+            !(autoLoadFullImage && showOriginal)
         ) {
             if (showOriginal) {
                 Column(
@@ -2245,6 +2246,20 @@ private fun ImageFrame(
             } else {
                 LoadingSpinner(Modifier.align(Alignment.Center))
             }
+        }
+        if (
+            autoLoadFullImage &&
+            showOriginal &&
+            imageLoading &&
+            !mediaFullscreen &&
+            playbackAllowed &&
+            !allowThumbnailFallback
+        ) {
+            LinearProgressIndicator(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(3.dp),
+                color = Accent,
+                trackColor = Color.Transparent,
+            )
         }
         if (imageLoadError && showFullscreenImageControls) {
             Surface(

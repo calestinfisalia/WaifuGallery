@@ -330,6 +330,20 @@ class AmbientLayer(QLabel):
         self.update()
 
 
+class FullscreenToolbar(QFrame):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("fullscreenToolbar")
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#1c1e28"))
+        radius = self.height() / 2
+        painter.drawRoundedRect(self.rect(), radius, radius)
+
+
 class MainWindow(QMainWindow):
     _GWLP_HWNDPARENT = -8
     _GWL_STYLE = -16
@@ -774,9 +788,7 @@ class MainWindow(QMainWindow):
         self.random_video.add_control_action(self.random_video_fullscreen_button, index=5)
         self.random_video_fullscreen_button.clicked.connect(self._toggle_fullscreen)
 
-        self.random_fullscreen_toolbar = QFrame(self.random_page)
-        self.random_fullscreen_toolbar.setObjectName("fullscreenToolbar")
-        self.random_fullscreen_toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.random_fullscreen_toolbar = FullscreenToolbar(self.random_page)
         random_fullscreen_layout = QHBoxLayout(self.random_fullscreen_toolbar)
         random_fullscreen_layout.setContentsMargins(12, 6, 12, 6)
         random_fullscreen_layout.setSpacing(14)
@@ -1008,9 +1020,7 @@ class MainWindow(QMainWindow):
         self.detail_previous_button.hide()
         self.detail_next_button.hide()
 
-        self.fullscreen_toolbar = QFrame(self.detail_page)
-        self.fullscreen_toolbar.setObjectName("fullscreenToolbar")
-        self.fullscreen_toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.fullscreen_toolbar = FullscreenToolbar(self.detail_page)
         fullscreen_layout = QHBoxLayout(self.fullscreen_toolbar)
         fullscreen_layout.setContentsMargins(12, 6, 12, 6)
         fullscreen_layout.setSpacing(14)
@@ -1879,8 +1889,10 @@ class MainWindow(QMainWindow):
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal,
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { width: 0; height: 0; }
             QStackedWidget, QWidget#randomPage, QWidget#detailPage { background: transparent; border: 0; }
+            QWidget#randomPage[ambientBackgroundVisible="true"],
+            QWidget#detailPage[ambientBackgroundVisible="true"] { background: #000000; border: 0; }
             QLabel#randomImage, QLabel#detailImage { background: transparent; border: 0; }
-            QFrame#fullscreenToolbar { background: #1c1e28; border: 0; border-radius: 9px; }
+            QFrame#fullscreenToolbar { background: transparent; border: 0; }
             QPushButton#detailNavigation, QPushButton#detailNavigation:hover,
             QPushButton#detailNavigation:pressed, QPushButton#detailNavigation:focus,
             QPushButton#detailNavigation:disabled { background: transparent; border: 0; border-radius: 0; padding: 0; }
@@ -1972,7 +1984,7 @@ class MainWindow(QMainWindow):
         changed = previous_source.cacheKey() != pixmap.cacheKey()
         if pixmap.isNull():
             label._ambient_source = QPixmap()
-            page.setStyleSheet("background: transparent; border: 0;")
+            self._set_ambient_page_background(page, False)
             label.set_ambient_image(
                 QPixmap(),
                 visible=False,
@@ -1996,21 +2008,23 @@ class MainWindow(QMainWindow):
         painter.end()
         label.setGeometry(page.rect())
         enabled = self._ambient_mode_enabled()
-        page.setStyleSheet(
-            "background: #000000; border: 0;"
-            if enabled
-            else "background: transparent; border: 0;"
-        )
+        self._set_ambient_page_background(page, enabled)
         label.set_ambient_image(tinted, visible=enabled, changed=changed)
         label.lower()
 
     @staticmethod
+    def _set_ambient_page_background(page: QWidget, visible: bool) -> None:
+        if page.property("ambientBackgroundVisible") == visible:
+            return
+        page.setProperty("ambientBackgroundVisible", visible)
+        style = page.style()
+        style.unpolish(page)
+        style.polish(page)
+        page.update()
+
+    @staticmethod
     def _set_ambient_visibility(label: AmbientLayer, page: QWidget, visible: bool) -> None:
-        page.setStyleSheet(
-            "background: #000000; border: 0;"
-            if visible
-            else "background: transparent; border: 0;"
-        )
+        MainWindow._set_ambient_page_background(page, visible)
         label.set_ambient_visible(visible)
 
     def _ambient_mode_enabled(self) -> bool:
