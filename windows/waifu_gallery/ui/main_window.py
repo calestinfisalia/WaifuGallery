@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..favorite_cache import load_favorite_thumbnail, remove_favorite_thumbnail, save_favorite_thumbnail
 from ..models import ImagePost, SearchPage
 from ..providers import AI_GENERATED_BLOCK_TAGS, BooruCatalog, ProviderError
 from ..pin_security import has_pin, verify_pin
@@ -382,7 +383,9 @@ class MainWindow(QMainWindow):
         self.full_image_button.setIconSize(QSize(17, 17))
         self.full_image_button.setToolTip("Load original-resolution image")
         self.full_image_button.hide()
-        self.full_image_button.clicked.connect(self.load_full_image)
+        self.full_image_button.clicked.connect(
+            lambda _checked=False: self.load_full_image()
+        )
         self._build_filter_menu()
         self.refresh_button = self._icon_button("refresh-cw", "Refresh current view")
         self.download_button = self._icon_button("download", "Download current image")
@@ -1024,6 +1027,11 @@ class MainWindow(QMainWindow):
         existing = next((saved for saved in posts if favorite_key(saved) == key), None)
         if existing:
             posts = [saved for saved in posts if favorite_key(saved) != key]
+            source_url = next(
+                (url for url in existing.preview_urls if url != existing.image_url),
+                existing.image_url,
+            )
+            remove_favorite_thumbnail(key, source_url)
             if self.favorites_dialog:
                 self.favorites_dialog.remove_favorite(key)
         else:
@@ -1058,13 +1066,22 @@ class MainWindow(QMainWindow):
                 return
         posts = [post for post in self._favorite_posts() if self._parent_allows_post(post)]
         token = str(uuid4())
-        dialog = FavoritesDialog(posts, self._open_favorite, self._remove_favorite, self)
+        dialog = FavoritesDialog(
+            posts,
+            self._open_favorite,
+            self._remove_favorite,
+            self,
+            sort_order=str(self.settings.get("favorites/sort_order", "newest")),
+        )
         self.favorites_dialog = dialog
         self.favorites_dialog_token = token
         self._favorites_catalog = self._catalog()
         dialog.downloadRequested.connect(self._download_favorite)
         dialog.deleteSelectedRequested.connect(self._remove_favorites)
         dialog.downloadSelectedRequested.connect(self._download_selected_favorites)
+        dialog.sortOrderChanged.connect(
+            lambda value: self.settings.set("favorites/sort_order", value)
+        )
         dialog.thumbnailRequested.connect(
             lambda favorite_id, current=token: self._request_favorite_thumbnail(
                 current, favorite_id
@@ -1092,7 +1109,8 @@ class MainWindow(QMainWindow):
         self._favorite_navigation_posts = list(posts)
         dialog = self.favorites_dialog
         if dialog:
-            dialog.posts = list(posts)
+            dialog.set_posts(posts)
+            self._favorite_navigation_posts = list(dialog.posts)
             keys = {favorite_key(post) for post in posts}
             dialog.thumbnail_cache = {
                 key: pixmap for key, pixmap in dialog.thumbnail_cache.items() if key in keys
@@ -1129,11 +1147,30 @@ class MainWindow(QMainWindow):
         if cached:
             dialog.set_thumbnail(favorite_id, cached)
             return
+        source_url = next(
+            (url for url in post.preview_urls if url != post.image_url),
+            post.image_url,
+        )
+        cache_enabled = self.settings.get_bool("favorites/image_cache_enabled", True)
+        if cache_enabled:
+            disk_cache = load_favorite_thumbnail(favorite_id, source_url)
+            if disk_cache is not None:
+                pixmap = QPixmap.fromImage(disk_cache)
+                if not pixmap.isNull():
+                    self.thumbnail_cache[post.post_id] = pixmap
+                    dialog.set_thumbnail(favorite_id, pixmap)
+                    return
         task_key = f"favorite-thumbnail:{token}/{favorite_id}"
         if task_key in self.tasks:
             return
         catalog = self._favorites_catalog or self._catalog()
-        self._submit(task_key, self._fetch_decoded_favorite_thumbnail, post, catalog)
+        self._submit(
+            task_key,
+            self._fetch_decoded_favorite_thumbnail,
+            post,
+            catalog,
+            cache_enabled,
+        )
 
     def _remove_favorite(self, key: str) -> None:
         self._remove_favorites([key])
@@ -1143,6 +1180,13 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         current_posts = self._favorite_posts()
+        for post in current_posts:
+            if favorite_key(post) in selected:
+                source_url = next(
+                    (url for url in post.preview_urls if url != post.image_url),
+                    post.image_url,
+                )
+                remove_favorite_thumbnail(favorite_key(post), source_url)
         posts = [
             post for post in current_posts
             if favorite_key(post) not in selected
@@ -1763,6 +1807,7 @@ class MainWindow(QMainWindow):
             self._show_random_image(QPixmap.fromImage(result))
         elif category == "post-detail" and identifier == self.active_detail_id:
             pixmap = QPixmap.fromImage(result)
+            auto_load_full_image = False
             if not pixmap.isNull():
                 self._full_image_loaded = False
                 self.detail_media_stack.setCurrentWidget(self.detail_scroll)
@@ -1777,12 +1822,17 @@ class MainWindow(QMainWindow):
                 self._set_detail_image_footer(self.detail_post, pixmap)
                 self.full_image_button.setToolTip("Load original-resolution image")
                 self.full_image_button.setEnabled(True)
-                self.full_image_button.show()
+                auto_load_full_image = self.settings.get_bool(
+                    "view/auto_load_full_image", False
+                )
+                self._sync_full_image_button_visibility()
             else:
                 self.fullscreen_button.hide()
                 self.detail_image.set_placeholder("The provider returned an unsupported image format.")
             self._finish_loading()
             self.statusBar().showMessage("Image loaded", 3000)
+            if auto_load_full_image:
+                self.load_full_image(keep_preview=True)
         elif category == "random-video" and int(identifier) == self.request_id:
             self.random_video.set_source(str(result), autoplay=True)
             self._set_image_credits_visible(True)
@@ -2129,7 +2179,10 @@ class MainWindow(QMainWindow):
         self.download_button.show()
         self.full_image_button.setToolTip("Load original-resolution image")
         self.full_image_button.setEnabled(True)
-        self.full_image_button.show()
+        auto_load_full_image = self.settings.get_bool(
+            "view/auto_load_full_image", False
+        )
+        self._sync_full_image_button_visibility()
         self._set_image_credits_visible(True)
         self._set_ambient_image(self.random_ambient, pixmap, self.random_page)
         self.fullscreen_button.setVisible(not self._fullscreen_active)
@@ -2138,6 +2191,8 @@ class MainWindow(QMainWindow):
         self._set_random_image_footer(post, pixmap)
         self._finish_loading()
         self.statusBar().showMessage("Image loaded", 3000)
+        if auto_load_full_image:
+            self.load_full_image(keep_preview=True)
 
     def _show_random_video(self, post: ImagePost) -> None:
         self.random_ai_badge.hide()
@@ -2503,15 +2558,18 @@ class MainWindow(QMainWindow):
         return decode_image_bytes(self._fetch_preview(candidates), max_dimension=560)
 
     def _fetch_decoded_favorite_thumbnail(
-        self, post: ImagePost, catalog: BooruCatalog
+        self, post: ImagePost, catalog: BooruCatalog, cache_enabled: bool = True
     ):
         candidates = tuple(
             url for url in post.preview_urls if url != post.image_url
         )[:2] or (post.image_url,)
-        return decode_image_bytes(
+        image = decode_image_bytes(
             self._fetch_preview(candidates, catalog),
             max_dimension=560,
         )
+        if cache_enabled:
+            save_favorite_thumbnail(favorite_key(post), candidates[0], image)
+        return image
 
     def _fetch_decoded_video_preview(self, post: ImagePost):
         return decode_image_bytes(
@@ -2523,11 +2581,15 @@ class MainWindow(QMainWindow):
         content = self._catalog().fetch_image(post.image_url, report_progress)
         return decode_image_bytes(content, max_dimension=None)
 
-    def load_full_image(self) -> None:
+    def load_full_image(self, *, keep_preview: bool = False) -> None:
         post = self._active_post()
-        if post is None or post.media_type != "image" or self._full_image_loaded:
+        if (
+            post is None
+            or post.media_type != "image"
+            or self._full_image_loaded
+            or not self.full_image_button.isEnabled()
+        ):
             return
-        self.footer_meta.clear()
         if self.pages.currentWidget() is self.random_page:
             identifier = f"random/{self.request_id}"
             target_image = self.random_image
@@ -2540,15 +2602,46 @@ class MainWindow(QMainWindow):
             page = self.detail_page
         else:
             return
+        if target_image.original.isNull():
+            return
         self._full_image_previous = target_image.original
         self._full_image_view = (target_image, ambient, page)
-        self._set_ambient_image(ambient, QPixmap(), page)
-        target_image.set_loading()
+        if not keep_preview:
+            self.footer_meta.clear()
+            self._set_ambient_image(ambient, QPixmap(), page)
+            target_image.set_loading()
+        else:
+            self.statusBar().showMessage("Loading original-resolution image...")
         self.full_image_button.setEnabled(False)
         self.full_image_button.setToolTip("Load original-resolution image")
-        self._submit(
-            f"full-image:{identifier}", self._fetch_decoded_original, post,
-            progress_callback=self._update_load_progress,
+        task_key = f"full-image:{identifier}"
+        if keep_preview:
+            self._submit(task_key, self._fetch_decoded_original, post)
+        else:
+            self._submit(
+                task_key,
+                self._fetch_decoded_original,
+                post,
+                progress_callback=self._update_load_progress,
+            )
+
+    def _sync_full_image_button_visibility(self) -> None:
+        post = self._active_post()
+        if post is None or post.media_type != "image" or self._full_image_loaded:
+            self.full_image_button.hide()
+            return
+        if self.pages.currentWidget() is self.random_page:
+            image = self.random_image
+        elif self.pages.currentWidget() is self.detail_page:
+            image = self.detail_image
+        else:
+            self.full_image_button.hide()
+            return
+        if image.original.isNull():
+            self.full_image_button.hide()
+            return
+        self.full_image_button.setVisible(
+            not self.settings.get_bool("view/auto_load_full_image", False)
         )
 
     def _set_card_image(self, index: int, post: ImagePost, pixmap: QPixmap) -> None:
@@ -3176,6 +3269,7 @@ class MainWindow(QMainWindow):
                 tuple(self.settings.get("parent/allowed_tags", []) or []),
             ),
             "favorites_lock": self.settings.get_bool("favorites_lock/enabled"),
+            "auto_load_full_image": self.settings.get_bool("view/auto_load_full_image", False),
         }
 
         def preferences_changed() -> None:
@@ -3188,6 +3282,14 @@ class MainWindow(QMainWindow):
                 str(self.settings.get("parent/max_rating", "s")),
                 tuple(self.settings.get("parent/allowed_tags", []) or []),
             )
+            auto_load_full_image = self.settings.get_bool(
+                "view/auto_load_full_image", False
+            )
+            auto_load_just_enabled = (
+                auto_load_full_image and not preference_state["auto_load_full_image"]
+            )
+            auto_load_changed = auto_load_full_image != preference_state["auto_load_full_image"]
+            preference_state["auto_load_full_image"] = auto_load_full_image
             favorites_lock_enabled = self.settings.get_bool("favorites_lock/enabled")
             if favorites_lock_enabled and not preference_state["favorites_lock"] and self.favorites_dialog:
                 self.favorites_dialog.close()
@@ -3204,6 +3306,10 @@ class MainWindow(QMainWindow):
             preference_state["filters"] = self._content_filter_settings()
             preference_state["parent_policy"] = parent_policy
             preference_state["favorites_lock"] = favorites_lock_enabled
+            if auto_load_changed:
+                self._sync_full_image_button_visibility()
+            if auto_load_just_enabled:
+                self.load_full_image(keep_preview=True)
 
         dialog.settings_changed.connect(preferences_changed)
         dialog.finished.connect(

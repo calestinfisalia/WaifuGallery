@@ -90,6 +90,19 @@ class FavoritesTitleBar(QWidget):
         download_selected.clicked.connect(dialog._download_selected_favorites)
         layout.addWidget(download_selected)
         self.download_selected_button = download_selected
+        sort_button = QPushButton()
+        icon = icon_factory("filter") if callable(icon_factory) else QIcon(
+            str(Path(__file__).resolve().parent.parent / "assets" / "filter.svg")
+        )
+        sort_button.setIcon(icon)
+        sort_button.setIconSize(QSize(16, 16))
+        sort_button.setObjectName("favoritesSortButton")
+        sort_button.setFixedSize(30, 30)
+        sort_button.setToolTip("Sort favorites")
+        sort_button.setAccessibleName("Sort favorites")
+        sort_button.clicked.connect(dialog._show_sort_menu)
+        layout.addWidget(sort_button)
+        self.sort_button = sort_button
         close = QPushButton()
         icon_factory = getattr(dialog.parent(), "_icon", None)
         icon = icon_factory("close") if callable(icon_factory) else QIcon(
@@ -130,8 +143,16 @@ class FavoritesDialog(FramelessResizableDialog):
     downloadRequested = Signal(str)
     deleteSelectedRequested = Signal(object)
     downloadSelectedRequested = Signal(object)
+    sortOrderChanged = Signal(str)
 
-    def __init__(self, posts: list[ImagePost], open_post, remove_post, parent=None) -> None:
+    def __init__(
+        self,
+        posts: list[ImagePost],
+        open_post,
+        remove_post,
+        parent=None,
+        sort_order: str = "newest",
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("favoritesDialog")
         self.setWindowTitle("Favorites")
@@ -139,7 +160,8 @@ class FavoritesDialog(FramelessResizableDialog):
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(820, 620)
-        self.posts = list(posts)
+        self.sort_order = sort_order if sort_order in {"newest", "oldest"} else "newest"
+        self.posts = self._ordered_posts(posts)
         self._open_post = open_post
         self._remove_post = remove_post
         self._selection_mode = False
@@ -177,6 +199,7 @@ class FavoritesDialog(FramelessResizableDialog):
         self.select_all_button = title_bar.select_all_button
         self.delete_selected_button = title_bar.delete_selected_button
         self.download_selected_button = title_bar.download_selected_button
+        self.sort_button = title_bar.sort_button
         layout.addWidget(title_bar)
         header = QHBoxLayout()
         self.count_label = QLabel()
@@ -212,6 +235,40 @@ class FavoritesDialog(FramelessResizableDialog):
         layout.addLayout(footer)
         outer.addWidget(surface)
         self._rebuild()
+
+    def _ordered_posts(self, posts: list[ImagePost]) -> list[ImagePost]:
+        ordered = list(posts)
+        if self.sort_order == "newest":
+            ordered.reverse()
+        return ordered
+
+    def set_posts(self, posts: list[ImagePost]) -> None:
+        self.posts = self._ordered_posts(posts)
+        self._rebuild()
+
+    def _set_sort_order(self, sort_order: str) -> None:
+        if sort_order not in {"newest", "oldest"} or sort_order == self.sort_order:
+            return
+        self.sort_order = sort_order
+        self.posts.reverse()
+        self._rebuild()
+        self.sortOrderChanged.emit(sort_order)
+
+    def _show_sort_menu(self) -> None:
+        menu = QMenu(self)
+        newest = menu.addAction("Newest first")
+        newest.setCheckable(True)
+        newest.setChecked(self.sort_order == "newest")
+        oldest = menu.addAction("Oldest first")
+        oldest.setCheckable(True)
+        oldest.setChecked(self.sort_order == "oldest")
+        selected = menu.exec(self.sort_button.mapToGlobal(
+            QPoint(0, self.sort_button.height())
+        ))
+        if selected == newest:
+            self._set_sort_order("newest")
+        elif selected == oldest:
+            self._set_sort_order("oldest")
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

@@ -44,6 +44,7 @@ class ZoomImage(QLabel):
     def set_placeholder(self, message: str) -> None:
         """Show an error message across the scroll area's full viewport."""
         self._prepare_placeholder()
+        self.setWordWrap(True)
         self.setText(message)
         self.loading_bar.set_active(False)
 

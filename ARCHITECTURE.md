@@ -54,7 +54,9 @@ In automatic/all-provider modes, implementations may race providers, merge/dedup
 
 ### Local state
 
-- Preferences and favorites are local to the platform installation.
+- Preferences and favorites are local to the platform installation. Desktop can optionally load original-resolution images automatically after displaying their previews; the manual load button is hidden while this option is enabled, and manual loading remains the default.
+- Desktop favorite thumbnail images are cached in each platform's application cache directory by default; a local preference can disable disk reads and writes without deleting existing files. Settings can report and clear the cache, and favorite sorting order is stored with local preferences.
+- Desktop Settings layouts adapt to the window size, and long image-viewer error messages wrap to fit the available space.
 - Provider credentials are required only for credential-gated providers and remain in platform settings storage.
 - Download history may store file paths/URIs; downloads themselves are saved to a user-selected/default destination.
 - Safety PINs and parental policies are device-local and excluded from backup.

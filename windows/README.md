@@ -13,14 +13,17 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Search gallery with 50 results per page and provider filters. Changing content filters reloads the search from page 1.
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
+- Display settings can automatically load the original-resolution image after showing its preview; the manual full-image button is hidden while this option is on and remains available when it is off.
 - Optional ambient background blur, which can be turned off in Settings.
 - The toolbar download button saves the currently displayed media; the Downloads history, including each saved file's path, remains available across app restarts. Failed downloads can be retried per file or together from the Downloads window's top-right menu, which also clears history.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
 - Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
+- Favorites can be ordered newest-to-oldest or oldest-to-newest from the top-right filter button. Favorite thumbnails are cached locally by default; toggle caching, view disk usage, or clear the cache under Settings → General → Image cache. Turning caching off stops disk reads and writes but keeps existing files until cleared.
+- Settings content adapts to the window size, and long image-viewer error messages wrap instead of being clipped.
 - Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
 - User-defined search terms used by Random.
-- Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms and the download folder are under General; the default rating is under Filters.
-- Display settings include Dark, Light, System, and OLED Dark themes with color previews.
+- Settings are saved automatically as you change them; close Settings whenever you're done. Saved search terms, download folder, and favorite image cache are under General; the default rating is under Filters.
+- Display settings include Dark, Light, System, and OLED Dark themes with color previews, plus optional automatic full-resolution image loading.
 - Checks GitHub Releases in the background on launch and shows an in-app release-notes prompt when an update is available. You can also check manually in Settings → Updates.
 - Icon-only toolbar actions with bundled Lucide SVG assets and tooltips; the app/window icon uses `waifugallery.ico`.
 - PIN entry, notices, and confirmations use the app's own dialogs; file pickers continue to use the Windows file manager.

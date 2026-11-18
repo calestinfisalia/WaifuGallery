@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..data_backup import create_payload, decrypt_payload, encrypt_payload
 from ..doh import DOH_ENDPOINTS, set_doh_enabled, validate_doh_endpoint
+from ..favorite_cache import clear_favorite_thumbnail_cache, favorite_thumbnail_cache_size
 from ..pin_security import has_pin, set_pin, verify_pin
 from ..providers import BooruCatalog, PROVIDERS
 from ..settings import AppSettings
@@ -407,6 +408,7 @@ class PreferencesDialog(FramelessResizableDialog):
         category: str,
         description: str,
         sections: tuple[tuple[str, str, str, QWidget], ...],
+        open_callbacks: dict[str, Callable[[], None]] | None = None,
     ) -> QWidget:
         page = QWidget()
         page.setObjectName("settingsPage")
@@ -435,7 +437,16 @@ class PreferencesDialog(FramelessResizableDialog):
             button.setMinimumHeight(64)
             button.setAccessibleName(f"{title}. {details}")
             button.setStyleSheet("text-align: left; padding: 10px 14px;")
-            button.clicked.connect(lambda _checked=False, target=index: stack.setCurrentIndex(target))
+            callback = (open_callbacks or {}).get(title)
+
+            def open_section(
+                _checked=False, target=index, on_open=callback
+            ) -> None:
+                stack.setCurrentIndex(target)
+                if on_open:
+                    on_open()
+
+            button.clicked.connect(open_section)
             menu_layout.addWidget(button)
 
             detail_page = QWidget()
@@ -456,8 +467,10 @@ class PreferencesDialog(FramelessResizableDialog):
             heading = _take_section_heading(section_layout)
             detail_layout.addWidget(self._settings_detail_header(heading, back))
             section.setParent(detail_page)
-            detail_layout.addWidget(section)
-            detail_layout.addStretch(1)
+            expands_with_window = section.findChild(QListWidget) is not None
+            detail_layout.addWidget(section, 1 if expands_with_window else 0)
+            if not expands_with_window:
+                detail_layout.addStretch(1)
             stack.addWidget(detail_page)
 
         menu_layout.addStretch(1)
@@ -505,15 +518,64 @@ class PreferencesDialog(FramelessResizableDialog):
         folder_row.addWidget(self.save_folder, 1)
         folder_row.addWidget(browse)
         download_layout.addLayout(folder_row)
+        cache_section, cache_layout = _settings_section("Image cache")
+        cache_layout.addWidget(QLabel(
+            "Reuse favorite thumbnails across app launches."
+        ))
+        self.image_cache_enabled = QCheckBox("Enable image cache")
+        self.image_cache_enabled.setToolTip(
+            "When off, thumbnails aren't read from or written to disk. "
+            "Existing cache files remain until cleared."
+        )
+        self.image_cache_enabled.setChecked(
+            self.settings.get_bool("favorites/image_cache_enabled", True)
+        )
+        cache_layout.addWidget(self.image_cache_enabled)
+        self.cache_size_label = QLabel()
+        self.cache_size_label.setObjectName("favoriteThumbnailCacheSize")
+        cache_layout.addWidget(self.cache_size_label)
+        clear_cache = QPushButton("Clear image cache")
+        clear_cache.setObjectName("clearFavoriteThumbnailCacheButton")
+        clear_cache.clicked.connect(self._clear_image_cache)
+        cache_layout.addWidget(clear_cache)
+        self.cache_clear_button = clear_cache
+        self._refresh_image_cache_info()
         page = self._section_menu_page(
             "General",
-            "Manage saved search terms and download location.",
+            "Manage saved search terms, download location, and image cache.",
             (
                 ("Search terms", "Choose which saved terms Random can use.", "search", search_section),
                 ("Downloads", "Choose where downloaded files are saved.", "download", download_section),
+                ("Image cache", "View or clear cached favorite thumbnails.", "archive", cache_section),
             ),
+            open_callbacks={"Image cache": self._refresh_image_cache_info},
         )
         self._add_page(page, "General", "search")
+
+    @staticmethod
+    def _format_cache_size(size: int) -> str:
+        if size < 1024 * 1024:
+            return f"Current image cache: {size / 1024:.1f} KB"
+        return f"Current image cache: {size / (1024 * 1024):.1f} MB"
+
+    def _refresh_image_cache_info(self) -> None:
+        try:
+            size = favorite_thumbnail_cache_size()
+        except OSError as error:
+            self.cache_size_label.setText(f"Could not read image cache size: {error}")
+            self.cache_clear_button.setEnabled(False)
+            return
+        self.cache_size_label.setText(self._format_cache_size(size))
+        self.cache_clear_button.setEnabled(size > 0)
+
+    def _clear_image_cache(self) -> None:
+        try:
+            clear_favorite_thumbnail_cache()
+        except OSError as error:
+            BackupMessageDialog.notify(self, "Could not clear image cache", str(error))
+            self._refresh_image_cache_info()
+            return
+        self._refresh_image_cache_info()
 
     def _build_provider_tab(self) -> None:
         page = QWidget()
@@ -756,6 +818,8 @@ class PreferencesDialog(FramelessResizableDialog):
             self.filter_gore,
             self.filter_ai_generated,
             self.ambient_mode,
+            self.image_cache_enabled,
+            self.auto_load_full_image,
         ):
             control.toggled.connect(self._persist_settings)
         self.use_doh.toggled.connect(self._on_doh_toggled)
@@ -894,6 +958,15 @@ class PreferencesDialog(FramelessResizableDialog):
         self.ambient_mode = QCheckBox("Ambient mode (blur the current image behind the viewer)")
         self.ambient_mode.setChecked(self.settings.get_bool("view/ambient_mode", True))
         section_layout.addWidget(self.ambient_mode)
+        self.auto_load_full_image = QCheckBox("Auto load full image")
+        self.auto_load_full_image.setChecked(
+            self.settings.get_bool("view/auto_load_full_image", False)
+        )
+        self.auto_load_full_image.setToolTip(
+            "Show the preview first, then automatically load the original image. "
+            "This may use more data."
+        )
+        section_layout.addWidget(self.auto_load_full_image)
         section_layout.addWidget(QLabel("Video stream resolution"))
         self.video_resolution = QComboBox()
         self.video_resolution.addItem("Auto (provider source)", 0)
@@ -1813,6 +1886,8 @@ class PreferencesDialog(FramelessResizableDialog):
             "network/doh_provider": doh_provider,
             "network/doh_custom_endpoint": self.doh_custom_endpoint.text().strip(),
             "view/ambient_mode": self.ambient_mode.isChecked(),
+            "view/auto_load_full_image": self.auto_load_full_image.isChecked(),
+            "favorites/image_cache_enabled": self.image_cache_enabled.isChecked(),
             "video/max_height": self.video_resolution.currentData(),
         })
         self.settings_changed.emit()

@@ -33,10 +33,13 @@ class RandomDownloadVisibilityTests(unittest.TestCase):
             _sync_favorite_buttons=Mock(),
             _update_media_ai_badge=Mock(),
             random_post=None,
+            settings=Mock(),
+            _sync_full_image_button_visibility=Mock(),
             _set_random_image_footer=Mock(),
             _finish_loading=Mock(),
             download_button=Mock(),
         )
+        window.settings.get_bool.return_value = False
         window.download_button.hide()
         return window
 

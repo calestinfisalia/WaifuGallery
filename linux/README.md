@@ -16,9 +16,12 @@ On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery
 - Danbooru, yande.re, Gelbooru, and Rule34.xxx providers; Gelbooru and Rule34.xxx require provider credentials.
 - SFW/NSFW rating, male-only and gore filters, optional AI-generated post filtering, custom blocked tags, image/video selection, and configurable video stream resolution. AI filtering uses provider tags (`ai-generated`, `ai-assisted`, and underscore variants); untagged posts may remain visible.
 - Video play/pause, seeking, volume/mute, buffering and playback-error feedback, and fullscreen controls.
+- Display settings can automatically load the original-resolution image after showing its preview; the manual full-image button is hidden while this option is on and remains available when it is off.
 - Resizable application-styled Settings, Favorites, and Downloads windows, plus an in-app release-notes prompt when an update is available.
 - Settings → Providers → Status connection checks each provider API and displays its HTTP response or a concise timeout, connection, TLS, or request error.
 - Favorites thumbnails that fail to load show a short reason, such as Timeout or Network error; the full failure detail is available in the tooltip.
+- Favorites can be ordered newest-to-oldest or oldest-to-newest from the top-right filter button. Favorite thumbnails are cached locally by default; toggle caching, view disk usage, or clear the cache under Settings → General → Image cache. Turning caching off stops disk reads and writes but keeps existing files until cleared.
+- Settings content adapts to the window size, and long image-viewer error messages wrap instead of being clipped.
 - Right-click a favorite for Download, Select image/Deselect image, or Remove from favorites. Selecting an image reveals icon actions for selecting all, deleting selected favorites, and downloading them. Clicking Select all again clears the selection and hides the actions. Downloading selected favorites asks for Yes/No confirmation before queuing. Bulk downloads use the configured folder and skip existing destination files or paths already queued.
 - Downloads history, including saved file paths, is retained locally across app restarts. Failed downloads can be retried per file or together from the Downloads window's top-right menu, which also clears history.
 - Optional process-local DoH using Cloudflare, Cloudflare Security/Family, Google Public DNS, AdGuard DNS, or a custom RFC 8484 endpoint.

@@ -57,6 +57,32 @@ class FavoritesLoadingTests(unittest.TestCase):
         dialog.close()
         QTest.qWait(0)
 
+    def test_favorites_can_switch_between_newest_and_oldest_order(self):
+        posts = [
+            ImagePost(
+                str(index),
+                "provider",
+                f"https://example.invalid/{index}.jpg",
+                (),
+                "safe",
+                frozenset(),
+            )
+            for index in range(3)
+        ]
+        dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
+        changed = []
+        dialog.sortOrderChanged.connect(changed.append)
+
+        self.assertEqual([post.post_id for post in dialog.posts], ["2", "1", "0"])
+        self.assertFalse(dialog.sort_button.isHidden())
+        dialog._set_sort_order("oldest")
+        self.assertEqual([post.post_id for post in dialog.posts], ["0", "1", "2"])
+        self.assertEqual(changed, ["oldest"])
+        dialog.set_posts(posts[:2])
+        self.assertEqual([post.post_id for post in dialog.posts], ["0", "1"])
+        dialog.close()
+        QTest.qWait(0)
+
     def test_thumbnail_failure_shows_reason_under_warning_icon(self):
         post = ImagePost(
             "1",
@@ -138,7 +164,7 @@ class FavoritesLoadingTests(unittest.TestCase):
         self.assertEqual(deleted, [["provider:0"]])
         self.assertEqual(downloaded, [["provider:0"]])
         QTest.mouseClick(dialog.select_all_button, Qt.MouseButton.LeftButton)
-        self.assertEqual(dialog._selected_favorite_keys(), ["provider:0", "provider:1"])
+        self.assertEqual(dialog._selected_favorite_keys(), ["provider:1", "provider:0"])
         self.assertEqual(dialog.selection_count_label.text(), "2 selected")
         self.assertFalse(dialog.delete_selected_button.isHidden())
         self.assertFalse(dialog.download_selected_button.isHidden())
