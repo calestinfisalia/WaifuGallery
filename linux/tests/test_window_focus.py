@@ -112,6 +112,7 @@ class WindowFocusTests(unittest.TestCase):
         settings.set("search/recent_queries", ["rei_ayanami"])
         window = self._create_window(settings)
         with patch.object(window.search_input, "hasFocus", return_value=True):
+            window._search_suggestions_suppressed = False
             window.search_input.setText("rei")
             window._refresh_search_completion_model("rei", [])
             window._show_search_completion_popup()
@@ -211,7 +212,7 @@ class WindowFocusTests(unittest.TestCase):
         window.pages.setCurrentWidget(window.random_page)
         window._resize_settle_timer.stop()
 
-        with patch.object(window, "_render_random_image") as render_image:
+        with patch.object(window.random_image, "_fit_to_viewport_async") as render_image:
             current_size = window.size()
             next_size = QSize(current_size.width() + 40, current_size.height() + 40)
             window.resizeEvent(QResizeEvent(next_size, current_size))
@@ -219,7 +220,7 @@ class WindowFocusTests(unittest.TestCase):
             render_image.assert_not_called()
             window._finish_resize_settle()
 
-        render_image.assert_called_once_with()
+        render_image.assert_called_once_with(fast=False)
 
     def test_closing_main_window_closes_visible_dialog_children(self):
         window = self._create_window()

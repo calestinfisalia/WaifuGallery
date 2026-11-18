@@ -1,14 +1,14 @@
-# Update notes — unreleased source changes
+# Windows 0.1.26 and Android 0.1.31 Release Notes
 
-These notes compare the current release candidates with the latest published releases in [calestinfisalia/WaifuGallery](https://github.com/calestinfisalia/WaifuGallery/releases). The source versions below have been prepared, but their releases are not published and `updates.json` still points to the latest published builds.
+Windows 0.1.26 and Android 0.1.31 are published. Linux 0.1.19 contains the shared desktop changes but has not been packaged or published yet. Platform versions in `updates.json` point to the latest published releases.
 
 ## Version comparison
 
 | Platform | Previous published version | Current source version | Status |
 | --- | --- | --- | --- |
-| Windows | [0.1.25](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.25) | 0.1.26 | Release candidate built locally; not published yet. |
+| Windows | [0.1.25](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.25) | [0.1.26](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.26) | Published. |
 | Linux | [0.1.18](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.18) | 0.1.19 | Source 0.1.19 and the current working-tree changes are not published. |
-| Android | [0.1.30](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.30) | 0.1.31 (`versionCode` 29) | Release candidate built locally; not published yet. |
+| Android | [0.1.30](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.30) | [0.1.31](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.31) (`versionCode` 29) | Published. |
 
 Windows 0.1.25 restored the opaque fullscreen photo controls while ambient backgrounds update. Linux 0.1.18 added the AI-generated content filter and Settings polish. The current desktop source adds the following changes on top of those published builds; Linux also carries the shared desktop source updates made for 0.1.19.
 
@@ -33,10 +33,10 @@ Windows 0.1.25 restored the opaque fullscreen photo controls while ambient backg
 
 ## Android
 
-Android 0.1.30 remains the latest published build. Source 0.1.31 adds provider-backed search autocomplete, persistent search data, and Favorites media filters:
+Android 0.1.31 adds provider-backed search autocomplete, persistent search data, and Favorites media filters:
 
 - Fetch character and series tag suggestions directly from the selected provider after a 180 ms debounce. Cache results by provider and keyword prefix for 24 hours, show cached matches immediately, and reuse cached suggestions offline.
 - Show recent search history when the empty search field receives focus. Selecting a history item or provider suggestion starts the search in one tap; history entries can be removed from the dropdown.
 - Add **Settings > Browsing > Search data** to inspect cached keyword prefixes and recent searches, then clear either collection or both. Suggestion/history storage remains separate from the image cache.
 - Add a **PNG Only** media filter on desktop and Android. Provider search uses provider-supported PNG filtering and verifies file extensions; transparent-only results use the `transparent_png` tag. Favorites now have separate media-type and time filters on all three platforms.
-- Release candidate: 0.1.31 (`versionCode` 29), built locally and not yet published. The update feed still points to Android 0.1.30 (`versionCode` 28).
+- Published version: 0.1.31 (`versionCode` 29); the update feed now points to `android-v0.1.31`.

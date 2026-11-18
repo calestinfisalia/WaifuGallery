@@ -59,17 +59,17 @@ class VideoControlsTests(unittest.TestCase):
         )
 
         self.assertEqual(slider.styleSheet(), style_before)
-        self.assertEqual(buffered.name(), "#e2d3ff")
+        self.assertEqual(buffered.name(), "#777982")
         self.assertEqual(unbuffered.name(), "#292b32")
 
-    def test_fullscreen_control_bar_stays_compact(self):
+    def test_fullscreen_control_bar_uses_nearly_full_viewport_width(self):
         self.player.resize(1920, 1080)
         self.player.video_canvas.resize(1920, 1080)
         self.player.set_fullscreen_mode(True)
         self.player._update_stage_geometry()
         self.player._position_controls_overlay()
 
-        self.assertEqual(self.player.controls_frame.width(), 820)
+        self.assertEqual(self.player.controls_frame.width(), 1896)
 
     def test_poster_is_not_rescaled_when_video_surface_is_active(self):
         self.player._poster = QPixmap(100, 100)

@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The latest published Android version is `0.1.30` (`versionCode` `28`), under the Android-specific `android-v0.1.30` release tag. The current source includes unreleased search autocomplete changes; Android's version can advance independently from Windows and Linux.
+The latest published Android version is `0.1.31` (`versionCode` `29`), under the Android-specific `android-v0.1.31` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -35,14 +35,13 @@ Open **Settings → Backup & Restore** to export or import a `.wgbak` file throu
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
 
-## Android 0.1.31 (release candidate)
-
-These source changes are built locally but are not published yet.
+## Android 0.1.31
 
 - **Search:** retain provider-backed autocomplete, instant persistent cache, offline suggestions, and one-tap suggestion search; apply provider-aware PNG Only filtering for transparent PNG searches.
 - **Favorites:** add persistent media-type filters for all media, images, videos, and transparent PNGs, alongside newest/oldest ordering.
 - **Android source version:** `0.1.31`; `versionCode`: `29`.
-- **Release candidate:** `app-release.apk`; not published. The update feed still points to `android-v0.1.30`.
+- **Release artifact:** [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.31/app-release.apk).
+- **Update feed:** `android-v0.1.31`.
 
 ## Android 0.1.30
 

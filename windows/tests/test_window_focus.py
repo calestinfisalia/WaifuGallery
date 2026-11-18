@@ -263,6 +263,7 @@ class WindowFocusTests(unittest.TestCase):
         settings.set("search/recent_queries", ["rei_ayanami"])
         window = self._create_window(settings)
         with patch.object(window.search_input, "hasFocus", return_value=True):
+            window._search_suggestions_suppressed = False
             window.search_input.setText("rei")
             window._refresh_search_completion_model("rei", [])
             window._show_search_completion_popup()
@@ -313,6 +314,7 @@ class WindowFocusTests(unittest.TestCase):
     def test_opening_a_search_result_dismisses_suggestion_popup(self):
         window = self._create_window()
         window.search_input.setFocus()
+        window._search_suggestions_suppressed = False
         self.app.processEvents()
         window._refresh_search_completion_model("rei", ["rei_ayanami"])
         window._show_search_completion_popup()
@@ -391,7 +393,7 @@ class WindowFocusTests(unittest.TestCase):
         window.pages.setCurrentWidget(window.random_page)
         window._resize_settle_timer.stop()
 
-        with patch.object(window, "_render_random_image") as render_image:
+        with patch.object(window.random_image, "_fit_to_viewport_async") as render_image:
             current_size = window.size()
             next_size = QSize(current_size.width() + 40, current_size.height() + 40)
             window.resizeEvent(QResizeEvent(next_size, current_size))
@@ -399,7 +401,7 @@ class WindowFocusTests(unittest.TestCase):
             render_image.assert_not_called()
             window._finish_resize_settle()
 
-        render_image.assert_called_once_with()
+        render_image.assert_called_once_with(fast=False)
 
     def test_resize_settle_only_renders_visible_image_page(self):
         window = self._create_window()
@@ -407,21 +409,21 @@ class WindowFocusTests(unittest.TestCase):
         window.pages.setCurrentWidget(window.detail_page)
 
         with (
-            patch.object(window, "_refresh_ambient_layers") as refresh_ambient,
-            patch.object(window.random_image, "_fit_to_viewport") as fit_random,
-            patch.object(window.detail_image, "_fit_to_viewport") as fit_detail,
+            patch.object(window, "_refresh_ambient_for_page") as refresh_ambient,
+            patch.object(window.random_image, "_fit_to_viewport_async") as fit_random,
+            patch.object(window.detail_image, "_fit_to_viewport_async") as fit_detail,
         ):
             window._finish_resize_settle()
 
-        refresh_ambient.assert_called_once_with()
+        refresh_ambient.assert_called_once_with(window.detail_page, fast=True)
         fit_random.assert_not_called()
-        fit_detail.assert_called_once_with()
+        fit_detail.assert_called_once_with(fast=False)
 
         window.pages.setCurrentWidget(window.gallery_page)
         with (
-            patch.object(window, "_refresh_ambient_layers") as refresh_ambient,
-            patch.object(window.random_image, "_fit_to_viewport") as fit_random,
-            patch.object(window.detail_image, "_fit_to_viewport") as fit_detail,
+            patch.object(window, "_refresh_ambient_for_page") as refresh_ambient,
+            patch.object(window.random_image, "_fit_to_viewport_async") as fit_random,
+            patch.object(window.detail_image, "_fit_to_viewport_async") as fit_detail,
         ):
             window._finish_resize_settle()
 
