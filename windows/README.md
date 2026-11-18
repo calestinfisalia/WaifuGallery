@@ -171,6 +171,12 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - Windows source version: 0.1.24.
 - Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.24`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.24).
 
+## Windows 0.1.25
+
+- **Fullscreen photos:** restore the opaque capsule background on toolbar controls, including while ambient backgrounds update.
+- Windows source version: 0.1.25.
+- Windows Setup and portable release builds are published in GitHub release [`windows-v0.1.25`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.25).
+
 ## Windows 0.1.22
 
 - **Installer:** replace the top-right CD image with the Peace Sign artwork and use the Neon Waves artwork in a dark blue wizard theme.
