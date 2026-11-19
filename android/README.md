@@ -31,9 +31,16 @@ The preferred video resolution selects the largest listed provider rendition at 
 
 ## Encrypted user data backup
 
-Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Android exports favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
+Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Before export, choose whether to include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
-The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. Merge adds missing included favorites and keeps provider credentials already present on the device; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option. Local credentials remain in app-private SharedPreferences and are not separately encrypted by Waifu Gallery; only the exported backup is encrypted.
+The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. If favorites are included, choose **Add new** to keep existing favorites and add unique images, or **Replace all** to replace the favorites list. Existing provider credentials are kept; backup credentials fill accounts that are not configured yet. Included portable preferences are imported, and local credentials remain in app-private SharedPreferences; only the exported backup is encrypted.
+
+## Android 0.1.32
+
+- **Backup and restore:** choose Favorites, Provider logins, and Settings before exporting; use a separate confirmation to Add new unique favorites or Replace all favorites during import.
+- **Backup file:** retain the `.wgbak` extension in Android's document picker instead of labeling the encrypted file as JSON.
+- Android source version: `0.1.32`; `versionCode`: `30`.
+- Release artifact: `app-release.apk`.
 
 ## Android 0.1.31
 

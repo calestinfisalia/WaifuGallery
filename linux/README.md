@@ -39,7 +39,7 @@ Parental controls and the Favorites lock are in-app restrictions, not tamper-pro
 
 Open Settings → Backup & Restore and choose the separate Export or Import page. Linux exports include favorites, Gelbooru and Rule34.xxx credentials, the current theme, and portable preferences (provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution). During import, choose which included sections to restore; unselected data remains unchanged. Download folders, safety PINs/policies, and window state are excluded.
 
-The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. PINs and parental policy are device-local and excluded from backups. Merge adds missing included favorites and keeps existing included provider credentials; Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
+The version 2 format is shared with Windows and Android, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters and keep it safe; it cannot be recovered. PINs and parental policy are device-local and excluded from backups. If favorites are included, choose **Add new** to keep existing favorites and add unique images, or **Replace all** to replace the favorites list. Existing provider credentials are kept; backup credentials fill accounts that are not configured yet. Included portable preferences are imported, while unselected sections and the current download folder are retained. Only the exported file is encrypted; credentials remain in the platform's existing QSettings storage.
 Export and import use app-styled passphrase/confirmation dialogs and the application's own file browser instead of operating-system dialogs.
 
 ## UI behavior and troubleshooting
@@ -87,6 +87,13 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **About:** size the app logo within its label so it is not clipped.
 - **Random browsing:** restore the Download action when opening random images and videos.
 - Linux update tag: `linux-v0.1.17`. The platform manifest advances only after the release assets are verified.
+
+## Linux 0.1.20
+
+- **Favorites:** group the sort choices under a dedicated Time submenu beside Media type.
+- **Backup and restore:** show a clear import confirmation followed by a separate Add new/Replace all favorites choice; skip duplicate images using post IDs, checksums, and image URLs.
+- **Settings:** keep Keyword cache and Search history cards compact instead of stretching their contents across the whole window.
+- Linux source version: 0.1.20.
 
 ## Linux 0.1.18
 

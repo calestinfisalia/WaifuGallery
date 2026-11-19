@@ -152,25 +152,57 @@ class _AboutMascotOverlay(QWidget):
         painter.drawPixmap(self.width() - 230, 26, self._pixmap)
 
 
-def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) -> dict[str, object]:
+def _favorite_identity_keys(item: dict) -> set[tuple[str, ...]]:
+    keys: set[tuple[str, ...]] = set()
+    provider = str(item.get("provider", "")).strip().casefold()
+    post_id = str(item.get("post_id", "")).strip().casefold()
+    if provider and post_id:
+        keys.add(("post", provider, post_id))
+
+    for field in ("checksum", "dedupe_key"):
+        value = str(item.get(field, "")).strip()
+        if value:
+            if value.casefold().startswith(("http://", "https://")):
+                value = value.split("#", 1)[0].split("?", 1)[0].casefold()
+                keys.add(("url", value))
+            else:
+                keys.add(("digest", value.casefold()))
+
+    image_url = str(item.get("image_url", "")).strip()
+    if image_url:
+        image_url = image_url.split("#", 1)[0].split("?", 1)[0].casefold()
+        keys.add(("url", image_url))
+    return keys
+
+
+def _unique_favorites(items: list[dict]) -> list[dict]:
+    unique = []
+    seen: set[tuple[str, ...]] = set()
+    for item in items:
+        keys = _favorite_identity_keys(item)
+        if keys and keys.intersection(seen):
+            continue
+        unique.append(item)
+        seen.update(keys)
+    return unique
+
+
+def _settings_from_backup(
+    payload: dict, settings: AppSettings, *, merge_favorites: bool
+) -> dict[str, object]:
     sections = set(payload["sections"])
     values: dict[str, object] = {}
     if "favorites" in sections:
         favorites = list(payload["favorites"])
-        if merge:
+        if merge_favorites:
             existing = settings.get("favorites/posts", [])
-            merged = list(existing) if isinstance(existing, (list, tuple)) else []
-            identities = {
-                (str(item.get("provider", "")), str(item.get("post_id", "")))
-                for item in merged
-                if isinstance(item, dict)
-            }
-            for item in favorites:
-                identity = (item["provider"], item["post_id"])
-                if identity not in identities:
-                    merged.append(item)
-                    identities.add(identity)
-            favorites = merged
+            existing_items = (
+                [item for item in existing if isinstance(item, dict)]
+                if isinstance(existing, (list, tuple)) else []
+            )
+            favorites = _unique_favorites(existing_items + favorites)
+        else:
+            favorites = _unique_favorites(favorites)
         values["favorites/posts"] = favorites
 
     if "providers" in sections:
@@ -178,13 +210,12 @@ def _settings_from_backup(payload: dict, settings: AppSettings, *, merge: bool) 
             "gelbooru": dict(payload["providers"]["gelbooru"]),
             "rule34": dict(payload["providers"]["rule34"]),
         }
-        if merge:
-            for prefix, current in (
-                ("gelbooru", settings.gelbooru_credentials),
-                ("rule34", settings.rule34_credentials),
-            ):
-                if all(current):
-                    providers[prefix].update(user_id=current[0], api_key=current[1])
+        for prefix, current in (
+            ("gelbooru", settings.gelbooru_credentials),
+            ("rule34", settings.rule34_credentials),
+        ):
+            if all(current):
+                providers[prefix].update(user_id=current[0], api_key=current[1])
         for prefix, credentials in providers.items():
             values[f"{prefix}/user_id"] = credentials["user_id"]
             values[f"{prefix}/api_key"] = credentials["api_key"]
@@ -489,7 +520,11 @@ class PreferencesDialog(FramelessResizableDialog):
             heading = self._take_section_heading(section_layout)
             detail_layout.addWidget(self._settings_detail_header(heading, back))
             section.setParent(detail_page)
-            expands_with_window = section.findChild(QListWidget) is not None
+            section_list = section.findChild(QListWidget)
+            expands_with_window = (
+                section_list is not None
+                and section_list.property("expandSettingsSection") is not False
+            )
             detail_layout.addWidget(section, 1 if expands_with_window else 0)
             if not expands_with_window:
                 detail_layout.addStretch(1)
@@ -576,6 +611,7 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         self.suggestion_cache_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.suggestion_cache_list.setMaximumHeight(140)
+        self.suggestion_cache_list.setProperty("expandSettingsSection", False)
         keyword_cache_layout.addWidget(self.suggestion_cache_list, 1)
         self.clear_suggestion_cache_button = QPushButton("Clear keyword cache")
         self.clear_suggestion_cache_button.clicked.connect(
@@ -593,6 +629,7 @@ class PreferencesDialog(FramelessResizableDialog):
         )
         self.recent_history_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.recent_history_list.setMaximumHeight(140)
+        self.recent_history_list.setProperty("expandSettingsSection", False)
         history_layout.addWidget(self.recent_history_list, 1)
         self.clear_search_history_button = QPushButton("Clear search history")
         self.clear_search_history_button.clicked.connect(self._clear_search_history)
@@ -1138,8 +1175,7 @@ class PreferencesDialog(FramelessResizableDialog):
 
         import_section, import_layout = self._settings_section("Import backup")
         import_layout.addWidget(QLabel(
-            "Restore or merge a saved backup. Merge keeps existing favorites and provider "
-            "credentials where present; Replace uses the backup's favorites and credentials."
+            "Import a saved backup, then choose whether to add or replace favorites."
         ))
         import_button = QPushButton("Import backup")
         import_button.clicked.connect(self.import_user_data)
@@ -1151,7 +1187,7 @@ class PreferencesDialog(FramelessResizableDialog):
             "Choose whether to export your data or import an existing backup.",
             (
                 ("Export", "Create a passphrase-protected backup file.", "archive", export_section),
-                ("Import", "Restore or merge data from a backup.", "restore", import_section),
+                ("Import", "Import data and choose how favorites are handled.", "restore", import_section),
             ),
         )
         self._add_page(page, "Backup & Restore", "archive")
@@ -1759,18 +1795,33 @@ class PreferencesDialog(FramelessResizableDialog):
         choice = BackupMessageDialog.ask(
             self,
             "Import user data",
-            f"Import {summary}\n\n"
-            "Merge adds favorites and keeps existing provider logins. Replace replaces the "
-            "included favorites and provider logins. Only the sections listed above are changed; "
-            "other data stays as it is.",
-            ("Merge", "Replace", "Cancel"),
-            default_button="Merge",
+            f"Import {summary}?\n\n"
+            "You can choose how to handle favorites next. Existing provider logins are kept; "
+            "backup credentials fill accounts that are not configured yet.",
+            ("Import", "Cancel"),
+            default_button="Import",
         )
-        if choice not in ("Merge", "Replace"):
+        if choice != "Import":
             return
 
+        merge_favorites = True
+        if "favorites" in sections:
+            favorite_choice = BackupMessageDialog.ask(
+                self,
+                "Import favorites",
+                "How should favorites from this backup be handled? Add new keeps this device's "
+                "favorites and adds only unique images. Replace all replaces the current list.",
+                ("Add new", "Replace all", "Cancel"),
+                default_button="Add new",
+            )
+            if favorite_choice not in ("Add new", "Replace all"):
+                return
+            merge_favorites = favorite_choice == "Add new"
+
         try:
-            values = _settings_from_backup(payload, self.settings, merge=choice == "Merge")
+            values = _settings_from_backup(
+                payload, self.settings, merge_favorites=merge_favorites
+            )
             if "settings" in sections:
                 imported_settings = payload["settings"]
                 endpoint = (

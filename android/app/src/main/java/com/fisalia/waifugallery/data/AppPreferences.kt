@@ -491,20 +491,46 @@ class AppPreferences(context: Context) {
         store.edit().putString("favorite_posts", favoritePostsJson(posts)).apply()
     }
 
-    fun applyUserData(data: UserDataBackup, merge: Boolean): List<ImagePost> {
+    private fun favoriteIdentityKeys(post: ImagePost): Set<String> = buildSet {
+        val provider = post.provider.trim().lowercase(Locale.ROOT)
+        val id = post.id.trim().lowercase(Locale.ROOT)
+        if (provider.isNotEmpty() && id.isNotEmpty()) add("post:$provider:$id")
+
+        fun addFingerprint(value: String) {
+            val normalized = value.trim()
+            if (normalized.isEmpty()) return
+            if (normalized.startsWith("http://", true) || normalized.startsWith("https://", true)) {
+                add("url:${normalized.substringBefore('#').substringBefore('?').lowercase(Locale.ROOT)}")
+            } else {
+                add("digest:${normalized.lowercase(Locale.ROOT)}")
+            }
+        }
+
+        addFingerprint(post.dedupeKey)
+        addFingerprint(post.imageUrl)
+    }
+
+    private fun uniqueFavorites(posts: List<ImagePost>): List<ImagePost> {
+        val unique = mutableListOf<ImagePost>()
+        val seen = mutableSetOf<String>()
+        posts.forEach { post ->
+            val keys = favoriteIdentityKeys(post)
+            if (keys.isNotEmpty() && keys.any(seen::contains)) return@forEach
+            unique += post
+            seen += keys
+        }
+        return unique
+    }
+
+    fun applyUserData(data: UserDataBackup, mergeFavorites: Boolean): List<ImagePost> {
         val sections = data.includedSections
         val currentFavorites = favoritePosts()
         val favorites = if ("favorites" !in sections) {
             currentFavorites
-        } else if (merge) {
-            val combined = currentFavorites.toMutableList()
-            val existingKeys = combined.mapTo(mutableSetOf()) { "${it.provider}:${it.id}" }
-            data.favorites.forEach { post ->
-                if (existingKeys.add("${post.provider}:${post.id}")) combined.add(post)
-            }
-            combined
+        } else if (mergeFavorites) {
+            uniqueFavorites(currentFavorites + data.favorites)
         } else {
-            data.favorites
+            uniqueFavorites(data.favorites)
         }
 
         val editor = store.edit()
@@ -512,10 +538,10 @@ class AppPreferences(context: Context) {
             editor.putString("favorite_posts", favoritePostsJson(favorites))
         }
         if ("providers" in sections) {
-            val gelbooruCredentials = if (merge && hasCredentials(gelbooruUserId, gelbooruApiKey)) {
+            val gelbooruCredentials = if (hasCredentials(gelbooruUserId, gelbooruApiKey)) {
                 gelbooruUserId to gelbooruApiKey
             } else data.gelbooruUserId to data.gelbooruApiKey
-            val rule34Credentials = if (merge && hasCredentials(rule34UserId, rule34ApiKey)) {
+            val rule34Credentials = if (hasCredentials(rule34UserId, rule34ApiKey)) {
                 rule34UserId to rule34ApiKey
             } else data.rule34UserId to data.rule34ApiKey
             editor

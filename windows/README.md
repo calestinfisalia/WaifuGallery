@@ -46,7 +46,7 @@ PINs and parental policy are device-local and are intentionally excluded from en
 
 Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
 
-The version 2 format is shared with Linux and Android, records the included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Version 1 backups remain importable. Set a passphrase of at least 8 characters; it cannot be recovered. Unselected sections remain unchanged when importing. Unsupported desktop themes are identified in the import summary and left unchanged. Merge adds missing included favorites and keeps existing included provider credentials, while Replace replaces included favorites and provider credentials. Included portable preferences are imported with either option, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
+The version 2 format is shared with Linux and Android, records the included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Version 1 backups remain importable. Set a passphrase of at least 8 characters; it cannot be recovered. Unselected sections remain unchanged when importing. Unsupported desktop themes are identified in the import summary and left unchanged. If favorites are included, choose **Add new** to keep existing favorites and add unique images, or **Replace all** to replace the favorites list. Existing provider credentials are kept; backup credentials fill accounts that are not configured yet. Included portable preferences are imported, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
 Export and import use the native Windows file picker to open or save backup files, with app-styled passphrase and confirmation dialogs.
 
 ## UI behavior and troubleshooting
@@ -126,6 +126,13 @@ raise SystemExit(app.exec())
 The preview displays a mock 57% progress value; its disabled button cannot start a real download or installer.
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
+
+## Windows 0.1.27
+
+- **Favorites:** group the sort choices under a dedicated Time submenu beside Media type.
+- **Backup and restore:** show a clear import confirmation followed by a separate Add new/Replace all favorites choice; skip duplicate images using post IDs, checksums, and image URLs.
+- **Settings:** keep Keyword cache and Search history cards compact instead of stretching their contents across the whole window.
+- Windows source version: 0.1.27.
 
 ## Windows 0.1.16
 

@@ -172,30 +172,45 @@ object UserDataBackupCodec {
     }
 
     private fun payloadJson(data: UserDataBackup): String = JSONObject().apply {
+        val includesFavorites = "favorites" in data.includedSections
+        val includesProviders = "providers" in data.includedSections
+        val includesSettings = "settings" in data.includedSections
         put("schema", SCHEMA)
         put("version", VERSION)
         put("sections", JSONArray(data.includedSections))
         if ("theme" in data.includedSections) put("theme", data.theme)
-        put("favorites", JSONArray().apply { data.favorites.forEach { put(favoriteJson(it)) } })
+        put("favorites", JSONArray().apply {
+            if (includesFavorites) data.favorites.forEach { put(favoriteJson(it)) }
+        })
         put("providers", JSONObject().apply {
-            put("gelbooru", credentialJson(data.gelbooruUserId, data.gelbooruApiKey))
-            put("rule34", credentialJson(data.rule34UserId, data.rule34ApiKey))
+            put("gelbooru", credentialJson(
+                if (includesProviders) data.gelbooruUserId else "",
+                if (includesProviders) data.gelbooruApiKey else "",
+            ))
+            put("rule34", credentialJson(
+                if (includesProviders) data.rule34UserId else "",
+                if (includesProviders) data.rule34ApiKey else "",
+            ))
         })
         put("settings", JSONObject().apply {
-            put("provider", if (data.provider == "Auto") "All" else data.provider)
-            put("rating", data.rating)
-            put("allow_nsfw", data.allowNsfw)
-            put("custom_terms", JSONArray(data.customTerms))
-            put("exclude_male", data.excludeMale)
-            put("filter_gore", data.filterGore)
-            put("filter_ai_generated", data.filterAiGenerated)
-            put("custom_block_tags", JSONArray(data.customBlockTags.replace(",", " ").split(Regex("\\s+")).filter(String::isNotBlank)))
-            put("media_filter", data.mediaFilter)
-            put("use_doh", data.useDoh)
-            put("doh_provider", data.dohProvider)
-            put("doh_custom_endpoint", data.customDohEndpoint)
-            put("ambient_mode", data.ambientMode)
-            put("video_max_height", data.videoMaxHeight)
+            put("provider", if (includesSettings && data.provider != "Auto") data.provider else "All")
+            put("rating", if (includesSettings) data.rating else "sfw")
+            put("allow_nsfw", includesSettings && data.allowNsfw)
+            put("custom_terms", JSONArray(if (includesSettings) data.customTerms else emptyList()))
+            put("exclude_male", includesSettings && data.excludeMale)
+            put("filter_gore", includesSettings && data.filterGore)
+            put("filter_ai_generated", includesSettings && data.filterAiGenerated)
+            put("custom_block_tags", JSONArray(
+                if (includesSettings) {
+                    data.customBlockTags.replace(",", " ").split(Regex("\\s+")).filter(String::isNotBlank)
+                } else emptyList(),
+            ))
+            put("media_filter", if (includesSettings) data.mediaFilter else "image")
+            put("use_doh", includesSettings && data.useDoh)
+            put("doh_provider", if (includesSettings) data.dohProvider else "Cloudflare")
+            put("doh_custom_endpoint", if (includesSettings) data.customDohEndpoint else "")
+            put("ambient_mode", !includesSettings || data.ambientMode)
+            put("video_max_height", if (includesSettings) data.videoMaxHeight else 0)
         })
     }.toString()
 
@@ -284,7 +299,9 @@ object UserDataBackupCodec {
             ImagePost(
                 id = item.requiredString("post_id"),
                 dedupeKey = item.optionalString("dedupe_key", "").ifBlank {
-                    "${item.requiredString("provider")}:${item.requiredString("post_id")}"
+                    item.optionalString("checksum", "").ifBlank {
+                        "${item.requiredString("provider")}:${item.requiredString("post_id")}"
+                    }
                 },
                 provider = item.requiredString("provider"),
                 imageUrl = imageUrl,

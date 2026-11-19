@@ -290,12 +290,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val provider = suggestionProviderName()
         searchSuggestionJob?.cancel()
 
-        val cached = if (fragment.length >= 2) {
-            preferences.findSearchSuggestionCache(provider, fragment)
-        } else null
-        val cachedTags = cached?.suggestions.orEmpty().filter {
-            it.startsWith(fragment, ignoreCase = true)
-        }
+        val cachedTags = cachedSuggestionTags(provider, fragment)
         val history = preferences.recentSearchHistory()
         _state.update {
             it.copy(
@@ -372,6 +367,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         val history = preferences.recentSearchHistory()
         val (prefix, fragment) = searchQueryParts(current.queryInput)
+        val cachedTags = cachedSuggestionTags(suggestionProviderName(), fragment)
         _state.update {
             it.copy(
                 recentSearchHistory = history,
@@ -379,7 +375,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     current.queryInput,
                     prefix,
                     fragment,
-                    emptyList(),
+                    cachedTags,
                 ),
             )
         }
@@ -425,6 +421,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val history = preferences.recentSearchHistory()
         val current = _state.value
         val (prefix, fragment) = searchQueryParts(current.queryInput)
+        val cachedTags = cachedSuggestionTags(suggestionProviderName(), fragment)
         _state.update {
             it.copy(
                 recentSearchHistory = history,
@@ -433,7 +430,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     current.queryInput,
                     prefix,
                     fragment,
-                    emptyList(),
+                    cachedTags,
                 ),
             )
         }
@@ -441,6 +438,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun suggestionProviderName(): String =
         if (preferences.selectedProvider == "Auto") "All" else preferences.selectedProvider
+
+    private fun cachedSuggestionTags(provider: String, fragment: String): List<String> =
+        if (fragment.length < 2) emptyList()
+        else preferences.findSearchSuggestionCache(provider, fragment)
+            ?.suggestions
+            .orEmpty()
+            .filter { it.startsWith(fragment, ignoreCase = true) }
 
     private fun buildSearchSuggestions(
         query: String,
@@ -940,7 +944,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun createUserDataBackup(): UserDataBackup {
+    fun createUserDataBackup(
+        includedSections: Set<String> = setOf("favorites", "providers", "settings"),
+    ): UserDataBackup {
         val current = _state.value
         return UserDataBackupCodec.create(
             favorites = preferences.favoritePosts(),
@@ -962,11 +968,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             customDohEndpoint = current.customDohEndpoint,
             ambientMode = current.ambientMode,
             videoMaxHeight = current.videoMaxHeight,
-        )
+        ).copy(includedSections = includedSections)
     }
 
-    fun applyUserDataBackup(data: UserDataBackup, merge: Boolean) {
-        val favorites = preferences.applyUserData(data, merge)
+    fun applyUserDataBackup(data: UserDataBackup, mergeFavorites: Boolean) {
+        val favorites = preferences.applyUserData(data, mergeFavorites)
         val importsSettings = "settings" in data.includedSections
         val importedRating = if (importsSettings) {
             when (data.rating) {

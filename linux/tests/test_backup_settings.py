@@ -73,7 +73,7 @@ class BackupSettingsTests(unittest.TestCase):
         self.assertEqual(stack.currentIndex(), 2)
         self.assertTrue(
             any(
-                "Restore or merge a saved backup" in label.text()
+                "choose whether to add or replace favorites" in label.text().lower()
                 for label in stack.widget(2).findChildren(QLabel)
             )
         )

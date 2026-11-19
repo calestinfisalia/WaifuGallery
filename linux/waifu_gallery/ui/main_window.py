@@ -1085,7 +1085,7 @@ class MainWindow(QMainWindow):
                     tags=frozenset(map(str, value.get("tags", []))),
                     artists=tuple(map(str, value.get("artists", []))),
                     source=str(value.get("source", "")),
-                    checksum=str(value.get("checksum", "")),
+                    checksum=str(value.get("checksum") or value.get("dedupe_key", "")),
                     title=str(value.get("title", "")),
                     media_type=str(value.get("media_type", "image")),
                     width=int(value.get("width", 0) or 0),

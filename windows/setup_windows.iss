@@ -1,6 +1,6 @@
 #define AppName "Waifu Gallery"
 #ifndef AppVersion
-  #define AppVersion "0.1.26"
+  #define AppVersion "0.1.27"
 #endif
 #ifndef WindowsDistDir
   #define WindowsDistDir "dist\Waifu Gallery"

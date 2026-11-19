@@ -74,7 +74,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
-import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Backup
@@ -148,14 +147,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
@@ -167,9 +174,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
@@ -277,6 +288,8 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
     val state by model.state.collectAsState()
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var searchFieldBounds by remember { mutableStateOf<Rect?>(null) }
     var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
     val unknownSourcesSettings = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -488,7 +501,26 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
         onBackground = Color(0xFFF2F0F7),
         onSurface = Color(0xFFF2F0F7),
     )) {
-        Surface(Modifier.fillMaxSize(), color = AppBackground) {
+        Surface(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(state.searchVisible, searchFieldBounds) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val down = event.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: continue
+                            if (!state.searchVisible) continue
+                            val position = down.position
+                            val tappedSearch = searchFieldBounds?.contains(position) == true
+                            if (!tappedSearch) {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }
+                        }
+                    }
+                },
+            color = AppBackground,
+        ) {
             if (state.screen == AppScreen.FAVORITES) {
                 FavoritesScreen(
                     state = state,
@@ -517,10 +549,16 @@ private fun WaifuGalleryApp(model: MainViewModel = viewModel()) {
                             showSearchSuggestions = state.showSearchSuggestions,
                             onQueryChanged = model::updateQuery,
                             onSearchFocusChanged = model::setSearchFieldFocused,
-                            onSuggestionSelected = model::selectSearchSuggestion,
+                            onSearchFieldBoundsChanged = { searchFieldBounds = it },
+                            onSuggestionSelected = { query ->
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                model.selectSearchSuggestion(query)
+                            },
                             onRemoveRecentSearch = model::removeRecentSearch,
                             onSearchSubmit = {
                                 keyboardController?.hide()
+                                focusManager.clearFocus()
                                 model.search()
                             },
                             onBack = model::backToGallery,
@@ -763,6 +801,7 @@ private fun HeaderBar(
     showSearchSuggestions: Boolean,
     onQueryChanged: (String) -> Unit,
     onSearchFocusChanged: (Boolean) -> Unit,
+    onSearchFieldBoundsChanged: (Rect) -> Unit,
     onSuggestionSelected: (String) -> Unit,
     onRemoveRecentSearch: (String) -> Unit,
     onSearchSubmit: () -> Unit,
@@ -800,6 +839,7 @@ private fun HeaderBar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
+                            .onGloballyPositioned { onSearchFieldBoundsChanged(it.boundsInRoot()) }
                             .onFocusChanged { onSearchFocusChanged(it.isFocused) }
                             .clip(RoundedCornerShape(50.dp))
                             .background(Color(0xFF303038))
@@ -831,41 +871,83 @@ private fun HeaderBar(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
                     )
-                    DropdownMenu(
-                        expanded = showSearchSuggestions && searchSuggestions.isNotEmpty(),
-                        onDismissRequest = { onSearchFocusChanged(false) },
-                        modifier = Modifier.width(maxWidth).heightIn(max = 360.dp),
-                        offset = DpOffset(0.dp, 8.dp),
-                        properties = PopupProperties(focusable = false),
-                    ) {
-                        searchSuggestions.forEach { suggestion ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        suggestion.query.replace('_', ' '),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                    if (showSearchSuggestions && searchSuggestions.isNotEmpty()) {
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        val gapPx = with(density) { 8.dp.roundToPx() }
+                        val popupPositionProvider = remember(gapPx) {
+                            object : PopupPositionProvider {
+                                override fun calculatePosition(
+                                    anchorBounds: IntRect,
+                                    windowSize: IntSize,
+                                    layoutDirection: LayoutDirection,
+                                    popupContentSize: IntSize,
+                                ): IntOffset {
+                                    val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+                                    val left = if (layoutDirection == LayoutDirection.Ltr) {
+                                        anchorBounds.left
+                                    } else {
+                                        anchorBounds.right - popupContentSize.width
+                                    }
+                                    return IntOffset(
+                                        left.coerceIn(0, maxX),
+                                        anchorBounds.bottom + gapPx,
                                     )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (suggestion.fromHistory) Icons.Default.History else Icons.Default.Search,
-                                        contentDescription = if (suggestion.fromHistory) "Recent search" else "Search suggestion",
-                                    )
-                                },
-                                trailingIcon = if (suggestion.fromHistory) {
-                                    {
-                                        IconButton(
-                                            onClick = { onRemoveRecentSearch(suggestion.query) },
-                                            modifier = Modifier.size(40.dp),
+                                }
+                            }
+                        }
+                        Popup(
+                            popupPositionProvider = popupPositionProvider,
+                            onDismissRequest = {},
+                            properties = PopupProperties(
+                                focusable = false,
+                                dismissOnClickOutside = false,
+                                dismissOnBackPress = false,
+                            ),
+                        ) {
+                            Column(
+                                Modifier
+                                    .width(maxWidth)
+                                    .heightIn(max = 280.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF101116))
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                searchSuggestions.forEach { suggestion ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 48.dp)
+                                            .padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Row(
+                                            Modifier
+                                                .weight(1f)
+                                                .clickable { onSuggestionSelected(suggestion.query) }
+                                                .padding(horizontal = 8.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Remove search history")
+                                            Icon(
+                                                if (suggestion.fromHistory) Icons.Default.History else Icons.Default.Search,
+                                                contentDescription = if (suggestion.fromHistory) "Recent search" else "Search suggestion",
+                                                tint = Color(0xFFB8A4FF),
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(
+                                                suggestion.query.replace('_', ' '),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        if (suggestion.fromHistory) {
+                                            IconButton(onClick = { onRemoveRecentSearch(suggestion.query) }) {
+                                                Icon(Icons.Default.Close, contentDescription = "Remove search history")
+                                            }
                                         }
                                     }
-                                } else null,
-                                onClick = { onSuggestionSelected(suggestion.query) },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                            )
+                                }
+                            }
                         }
                     }
                 }
@@ -1194,7 +1276,7 @@ private fun FavoritesScreen(
     onRequestRemoval: (ImagePost) -> Unit,
     onClose: () -> Unit,
 ) {
-    var favoritesFilterMenuExpanded by remember { mutableStateOf(false) }
+    var favoritesFilterDialogVisible by remember { mutableStateOf(false) }
     val mediaFilteredFavorites = state.favorites.filter { post ->
         model.parentalAllows(post) && when (state.favoritesMediaFilter) {
             "image" -> post.mediaType != "video"
@@ -1263,36 +1345,8 @@ private fun FavoritesScreen(
                         Icon(Icons.Default.Download, contentDescription = "Download selected images")
                     }
                 } else {
-                    Box {
-                        IconButton(onClick = { favoritesFilterMenuExpanded = true }) {
-                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Filter and sort favorites")
-                        }
-                        DropdownMenu(
-                            expanded = favoritesFilterMenuExpanded,
-                            onDismissRequest = { favoritesFilterMenuExpanded = false },
-                        ) {
-                            Text("Media type", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            listOf("all" to "Show All", "image" to "Image Only", "video" to "Video Only", "png" to "PNG Only").forEach { (value, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(if (state.favoritesMediaFilter == value) "✓  $label" else label) },
-                                    onClick = {
-                                        model.setFavoritesMediaFilter(value)
-                                        favoritesFilterMenuExpanded = false
-                                    },
-                                )
-                            }
-                            HorizontalDivider()
-                            Text("Time", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            listOf("newest" to "Newest first", "oldest" to "Oldest first").forEach { (value, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(if (state.favoritesSortOrder == value) "✓  $label" else label) },
-                                    onClick = {
-                                        model.setFavoritesSortOrder(value)
-                                        favoritesFilterMenuExpanded = false
-                                    },
-                                )
-                            }
-                        }
+                    IconButton(onClick = { favoritesFilterDialogVisible = true }) {
+                        Icon(Icons.Default.FilterList, contentDescription = "Filter and sort favorites")
                     }
                 }
             }
@@ -1397,6 +1451,65 @@ private fun FavoritesScreen(
             }
         }
     }
+    if (favoritesFilterDialogVisible) {
+        Dialog(
+            onDismissRequest = { favoritesFilterDialogVisible = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .widthIn(max = 360.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = Panel,
+                tonalElevation = 0.dp,
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("Favorites filters", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Media type",
+                        Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    listOf("all" to "Show All", "image" to "Image Only", "video" to "Video Only", "png" to "PNG Only")
+                        .forEach { (value, label) ->
+                            FavoritesFilterOption(
+                                label = label,
+                                selected = state.favoritesMediaFilter == value,
+                                onClick = {
+                                    model.setFavoritesMediaFilter(value)
+                                    favoritesFilterDialogVisible = false
+                                },
+                            )
+                        }
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    Text(
+                        "Time",
+                        Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    listOf("newest" to "Newest first", "oldest" to "Oldest first")
+                        .forEach { (value, label) ->
+                            FavoritesFilterOption(
+                                label = label,
+                                selected = state.favoritesSortOrder == value,
+                                onClick = {
+                                    model.setFavoritesSortOrder(value)
+                                    favoritesFilterDialogVisible = false
+                                },
+                            )
+                        }
+                }
+            }
+        }
+    }
     if (confirmSelectedRemoval) {
         AlertDialog(
             onDismissRequest = { confirmSelectedRemoval = false },
@@ -1429,6 +1542,31 @@ private fun FavoritesScreen(
                 TextButton(onClick = { confirmSelectedDownload = false }) { Text("No") }
             },
         )
+    }
+}
+
+@Composable
+private fun FavoritesFilterOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selected) {
+            Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+        } else {
+            Spacer(Modifier.size(24.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -3688,16 +3826,20 @@ private fun UserDataBackupSection(model: MainViewModel) {
     var exportPassphrase by remember { mutableStateOf("") }
     var confirmExportPassphrase by remember { mutableStateOf("") }
     var pendingExportPassphrase by remember { mutableStateOf("") }
+    var pendingExportSections by remember { mutableStateOf(setOf("favorites", "providers", "settings")) }
+    var selectedExportSections by remember { mutableStateOf(setOf("favorites", "providers", "settings")) }
     var importPassphrase by remember { mutableStateOf("") }
     var pendingImport by remember { mutableStateOf<UserDataBackup?>(null) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var showFavoriteImportDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
+    var showExportSectionsDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var isBusy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
         if (uri != null && pendingExportPassphrase.isNotEmpty()) {
             val passphrase = pendingExportPassphrase
@@ -3706,7 +3848,10 @@ private fun UserDataBackupSection(model: MainViewModel) {
                 isBusy = true
                 try {
                     val content = withContext(Dispatchers.IO) {
-                        UserDataBackupCodec.encrypt(model.createUserDataBackup(), passphrase)
+                        UserDataBackupCodec.encrypt(
+                            model.createUserDataBackup(pendingExportSections),
+                            passphrase,
+                        )
                     }
                     withContext(Dispatchers.IO) {
                         val output = context.contentResolver.openOutputStream(uri, "wt")
@@ -3750,9 +3895,10 @@ private fun UserDataBackupSection(model: MainViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
+                    selectedExportSections = setOf("favorites", "providers", "settings")
                     exportPassphrase = ""
                     confirmExportPassphrase = ""
-                    showExportDialog = true
+                    showExportSectionsDialog = true
                 },
                 enabled = !isBusy,
             ) { Text("Export data") }
@@ -3799,6 +3945,7 @@ private fun UserDataBackupSection(model: MainViewModel) {
                             status = "The passphrases do not match."
                         } else {
                             pendingExportPassphrase = exportPassphrase
+                            pendingExportSections = selectedExportSections
                             showExportDialog = false
                             exportLauncher.launch("waifu-gallery-backup.wgbak")
                         }
@@ -3806,6 +3953,67 @@ private fun UserDataBackupSection(model: MainViewModel) {
                 ) { Text("Choose file") }
             },
             dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showExportSectionsDialog) {
+        val exportSections = listOf(
+            "favorites" to "Favorites",
+            "providers" to "Provider logins",
+            "settings" to "Settings",
+        )
+        AlertDialog(
+            onDismissRequest = { showExportSectionsDialog = false },
+            title = { Text("Choose backup contents") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Select the data to include in the encrypted backup.")
+                    exportSections.forEach { (key, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedExportSections = if (key in selectedExportSections) {
+                                        selectedExportSections - key
+                                    } else {
+                                        selectedExportSections + key
+                                    }
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = key in selectedExportSections,
+                                onCheckedChange = { checked ->
+                                    selectedExportSections = if (checked) {
+                                        selectedExportSections + key
+                                    } else {
+                                        selectedExportSections - key
+                                    }
+                                },
+                            )
+                            Text(label)
+                        }
+                    }
+                    Text(
+                        "Theme is not available on Android.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingExportSections = selectedExportSections
+                        showExportSectionsDialog = false
+                        showExportDialog = true
+                    },
+                    enabled = selectedExportSections.isNotEmpty(),
+                ) { Text("Next") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportSectionsDialog = false }) { Text("Cancel") }
+            },
         )
     }
 
@@ -3882,7 +4090,30 @@ private fun UserDataBackupSection(model: MainViewModel) {
         )
     }
 
-    pendingImport?.let { data ->
+    fun importBackup(data: UserDataBackup, mergeFavorites: Boolean) {
+        isBusy = true
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    model.applyUserDataBackup(data, mergeFavorites = mergeFavorites)
+                }
+                status = "User data imported from backup."
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (error is IllegalStateException || error is IllegalArgumentException) {
+                    status = "Could not import backup: ${error.message ?: "Unknown error"}"
+                } else {
+                    throw error
+                }
+            } finally {
+                isBusy = false
+                showFavoriteImportDialog = false
+                pendingImport = null
+            }
+        }
+    }
+
+    pendingImport?.takeIf { !showFavoriteImportDialog }?.let { data ->
         val includedSummary = buildList {
             if ("favorites" in data.includedSections) {
                 add("${data.favorites.size} favorites")
@@ -3900,60 +4131,59 @@ private fun UserDataBackupSection(model: MainViewModel) {
             title = { Text("Import user data") },
             text = {
                 Text(
-                    "Import $includedSummary. Merge keeps existing favorites and provider logins; " +
-                        "Replace replaces included favorites and provider logins. Unselected sections " +
-                        "remain unchanged.",
+                    "Import $includedSummary? If favorites are included, you can choose how " +
+                        "to handle them next. Existing provider logins are kept; backup credentials " +
+                        "fill accounts that are not configured yet.",
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        isBusy = true
-                        scope.launch {
-                            try {
-                                withContext(Dispatchers.IO) { model.applyUserDataBackup(data, merge = false) }
-                                status = "User data replaced from backup."
-                            } catch (error: Exception) {
-                                if (error is CancellationException) throw error
-                                if (error is IllegalStateException || error is IllegalArgumentException) {
-                                    status = "Could not import backup: ${error.message ?: "Unknown error"}"
-                                } else {
-                                    throw error
-                                }
-                            } finally {
-                                isBusy = false
-                                pendingImport = null
-                            }
+                        if ("favorites" in data.includedSections) {
+                            showFavoriteImportDialog = true
+                        } else {
+                            importBackup(data, mergeFavorites = true)
                         }
                     },
                     enabled = !isBusy,
-                ) { Text("Replace") }
+                ) { Text("Import") }
+            },
+            dismissButton = { TextButton(onClick = { pendingImport = null }) { Text("Cancel") } },
+        )
+    }
+
+    if (showFavoriteImportDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showFavoriteImportDialog = false
+                pendingImport = null
+            },
+            title = { Text("Import favorites") },
+            text = {
+                Text(
+                    "How should favorites from this backup be handled? Add new keeps existing " +
+                        "favorites and adds only unique images. Replace all replaces the current list.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { pendingImport?.let { importBackup(it, mergeFavorites = false) } },
+                    enabled = !isBusy,
+                ) { Text("Replace all") }
             },
             dismissButton = {
                 Row {
                     TextButton(
+                        onClick = { pendingImport?.let { importBackup(it, mergeFavorites = true) } },
+                        enabled = !isBusy,
+                    ) { Text("Add new") }
+                    TextButton(
                         onClick = {
-                            isBusy = true
-                            scope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) { model.applyUserDataBackup(data, merge = true) }
-                                    status = "User data merged from backup."
-                                } catch (error: Exception) {
-                                    if (error is CancellationException) throw error
-                                    if (error is IllegalStateException || error is IllegalArgumentException) {
-                                        status = "Could not import backup: ${error.message ?: "Unknown error"}"
-                                    } else {
-                                        throw error
-                                    }
-                                } finally {
-                                    isBusy = false
-                                    pendingImport = null
-                                }
-                            }
+                            showFavoriteImportDialog = false
+                            pendingImport = null
                         },
                         enabled = !isBusy,
-                    ) { Text("Merge") }
-                    TextButton(onClick = { pendingImport = null }, enabled = !isBusy) { Text("Cancel") }
+                    ) { Text("Cancel") }
                 }
             },
         )

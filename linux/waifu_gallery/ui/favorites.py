@@ -310,12 +310,11 @@ class FavoritesDialog(FramelessResizableDialog):
             action.setCheckable(True)
             action.setChecked(self.media_filter == value)
             media_actions[action] = value
-        menu.addSeparator()
-        menu.addSection("Time")
-        newest = menu.addAction("Newest first")
+        time_menu = menu.addMenu("Time")
+        newest = time_menu.addAction("Newest first")
         newest.setCheckable(True)
         newest.setChecked(self.sort_order == "newest")
-        oldest = menu.addAction("Oldest first")
+        oldest = time_menu.addAction("Oldest first")
         oldest.setCheckable(True)
         oldest.setChecked(self.sort_order == "oldest")
         selected = menu.exec(self.sort_button.mapToGlobal(
