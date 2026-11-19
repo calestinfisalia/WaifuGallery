@@ -1,13 +1,13 @@
-# Windows 0.1.26 and Android 0.1.31 Release Notes
+# Windows 0.1.26, Linux 0.1.19, and Android 0.1.31 Release Notes
 
-Windows 0.1.26 and Android 0.1.31 are published. Linux 0.1.19 contains the shared desktop changes but has not been packaged or published yet. Platform versions in `updates.json` point to the latest published releases.
+Windows 0.1.26, Linux 0.1.19, and Android 0.1.31 are published. Platform versions in `updates.json` point to the latest published releases.
 
 ## Version comparison
 
 | Platform | Previous published version | Current source version | Status |
 | --- | --- | --- | --- |
 | Windows | [0.1.25](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.25) | [0.1.26](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.26) | Published. |
-| Linux | [0.1.18](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.18) | 0.1.19 | Source 0.1.19 and the current working-tree changes are not published. |
+| Linux | [0.1.18](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.18) | [0.1.19](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.19) | Published as x86_64 AppImage and Flatpak. |
 | Android | [0.1.30](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.30) | [0.1.31](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.31) (`versionCode` 29) | Published. |
 
 Windows 0.1.25 restored the opaque fullscreen photo controls while ambient backgrounds update. Linux 0.1.18 added the AI-generated content filter and Settings polish. The current desktop source adds the following changes on top of those published builds; Linux also carries the shared desktop source updates made for 0.1.19.

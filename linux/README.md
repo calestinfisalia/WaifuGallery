@@ -4,7 +4,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 
 ## Status
 
-Linux source version 0.1.19 carries the AI-generated media badges, fullscreen image background, and two-column Media Info tags already available on Windows, with lighter typography for Linux font fallbacks. It also includes the desktop Downloads retry menu, per-file retry, and the Media Info resize fix. Linux 0.1.19 has not been published; the update feed remains at `linux-v0.1.18` until a separate Linux build and its assets are verified. The current Windows release does not publish or validate Linux. Linux-specific runtime behavior still needs validation on a Linux desktop; check frameless-window resizing under Wayland and X11 and multimedia codec availability in the target runtime before packaging a release. The compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped.
+Linux version 0.1.19 is published as x86_64 AppImage and Flatpak packages in [`linux-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.19). It carries the AI-generated media badges, fullscreen image background, two-column Media Info tags, desktop Downloads retry improvements, and shared search, Favorites filter, resize, and fullscreen video refinements. The update feed points to this release. The compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped. Validate window-manager behavior under Wayland/X11 and multimedia codec availability on target desktop distributions.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
@@ -94,13 +94,13 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **About and updates:** center the About app logo and reduce the update-dialog mascot size.
 - Linux update tag: `linux-v0.1.18`; Windows and Android versions are unchanged.
 
-## Linux 0.1.19 (prepared, not published)
+## Linux 0.1.19
 
 - **AI labels:** show an AI badge on tagged image and video media in Random, Search, and detail views.
 - **Fullscreen:** image fullscreen hides the ambient background, matching video fullscreen.
 - **Media Info:** arrange tags in two columns.
 - **Typography:** set a consistent regular body weight and soften headings for Linux font fallbacks.
-- Linux source version: 0.1.19. The update feed remains on `linux-v0.1.18` until release assets are built and verified.
+- Published as `linux-v0.1.19` with x86_64 AppImage and Flatpak assets; the update feed now points to this release.
 
 ## Linux 0.1.16
 
