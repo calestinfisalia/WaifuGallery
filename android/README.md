@@ -2,7 +2,7 @@
 
 Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
 
-The latest published Android version is `0.1.31` (`versionCode` `29`), under the Android-specific `android-v0.1.31` release tag. Android's version can advance independently from Windows and Linux.
+The latest published Android version is `0.1.32` (`versionCode` `30`), under the Android-specific `android-v0.1.32` release tag. Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -40,7 +40,8 @@ The version 2 format is interoperable with Windows and Linux, records included s
 - **Backup and restore:** choose Favorites, Provider logins, and Settings before exporting; use a separate confirmation to Add new unique favorites or Replace all favorites during import.
 - **Backup file:** retain the `.wgbak` extension in Android's document picker instead of labeling the encrypted file as JSON.
 - Android source version: `0.1.32`; `versionCode`: `30`.
-- Release artifact: `app-release.apk`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.32/app-release.apk).
+- Update feed: `android-v0.1.32`.
 
 ## Android 0.1.31
 

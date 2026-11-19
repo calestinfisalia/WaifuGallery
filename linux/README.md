@@ -4,7 +4,7 @@ This directory is a separate Linux port of the Windows Python/PySide6 applicatio
 
 ## Status
 
-Linux version 0.1.19 is published as x86_64 AppImage and Flatpak packages in [`linux-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.19). It carries the AI-generated media badges, fullscreen image background, two-column Media Info tags, desktop Downloads retry improvements, and shared search, Favorites filter, resize, and fullscreen video refinements. The update feed points to this release. The compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped. Validate window-manager behavior under Wayland/X11 and multimedia codec availability on target desktop distributions.
+Linux version 0.1.20 is published as x86_64 AppImage and Flatpak packages in [`linux-v0.1.20`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.20). It carries aligned Favorites filters, deduplicating favorite import choices, and compact keyword/history settings pages. The update feed points to this release. The compatibility release `v0.1.16` remains the global Latest release for older clients. The Linux 0.1.15 package is intentionally skipped. Validate window-manager behavior under Wayland/X11 and multimedia codec availability on target desktop distributions.
 
 The source uses PySide6, Qt Multimedia, requests, Qt SVG assets, and per-user `QSettings`. Network access is needed for image providers, optional DNS over HTTPS, and the background GitHub release check at startup.
 On Linux, the app merges an existing `~/.config/Fisalia Cantarella/Waifu Gallery.conf` into its Flatpak profile on first launch. Existing Flatpak values take priority, favorites are merged by provider/post ID, and the legacy file is left unchanged.
@@ -94,6 +94,7 @@ For a reproducible bug report, include Linux distribution/desktop session (Wayla
 - **Backup and restore:** show a clear import confirmation followed by a separate Add new/Replace all favorites choice; skip duplicate images using post IDs, checksums, and image URLs.
 - **Settings:** keep Keyword cache and Search history cards compact instead of stretching their contents across the whole window.
 - Linux source version: 0.1.20.
+- Published as [`linux-v0.1.20`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.20) with [AppImage](https://github.com/calestinfisalia/WaifuGallery/releases/download/linux-v0.1.20/Waifu-Gallery-0.1.20-x86_64.AppImage) and [Flatpak](https://github.com/calestinfisalia/WaifuGallery/releases/download/linux-v0.1.20/Waifu-Gallery-0.1.20-x86_64.flatpak) assets.
 
 ## Linux 0.1.18
 

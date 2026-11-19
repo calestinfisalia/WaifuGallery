@@ -73,8 +73,7 @@ For a reproducible bug report, include Windows version, image or video, steps, a
 - `waifu_gallery/suggestion_cache.py` persists up to 256 provider/prefix entries in the app's QSettings store with a 24-hour freshness window. Stale values remain visible when the provider request fails or the app is offline. This data is separate from the favorite image cache and is not included in backup/export behavior.
 - Recent queries are stored locally under `search/recent_queries` (maximum 10). Do not include them in backup/export behavior. The dropdown intentionally uses icons, not thumbnails: search icon for tag suggestions, the clock-arrow `waifu_gallery/assets/history.svg` for history, and `waifu_gallery/assets/x.svg` to remove an individual history entry.
 - Typo correction remains a separate, explicit action after a search returns no results; selecting it applies the corrected tag. Suggestions and corrections must not silently rewrite or submit the user's query.
-- Focused UI/provider coverage is in `tests/test_window_focus.py` and `tests/test_provider_media.py`. From `windows/`, run `.\.venv\Scripts\python.exe -m pytest -q`; also run `.\.venv\Scripts\python.exe -m compileall -q waifu_gallery tests` and `git diff --check`. At this handoff, the full suite passed: 104 tests and 14 subtests.
-- These source changes are not committed or pushed. The Setup and Portable files in `dist-release` predate the search-suggestion UI changes, so testing those binaries will not validate the current source. No rebuild or GitHub release has been made.
+- Focused UI/provider coverage is in `tests/test_window_focus.py` and `tests/test_provider_media.py`. From `windows/`, run `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`, `.\.venv\Scripts\python.exe -m compileall -q waifu_gallery`, and `git diff --check`. The 0.1.27 release suite passed 115 tests.
 
 ### Update dialog preview and window diagnostics
 
@@ -133,6 +132,7 @@ On Windows, the app records its own top-level window and small centered Qt widge
 - **Backup and restore:** show a clear import confirmation followed by a separate Add new/Replace all favorites choice; skip duplicate images using post IDs, checksums, and image URLs.
 - **Settings:** keep Keyword cache and Search history cards compact instead of stretching their contents across the whole window.
 - Windows source version: 0.1.27.
+- **Release assets:** [Setup installer](https://github.com/calestinfisalia/WaifuGallery/releases/download/windows-v0.1.27/WaifuGallery-Setup-x64.exe) and [portable app](https://github.com/calestinfisalia/WaifuGallery/releases/download/windows-v0.1.27/WaifuGallery-Portable-x64.exe).
 
 ## Windows 0.1.16
 
