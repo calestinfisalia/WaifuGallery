@@ -27,7 +27,7 @@ The public update manifest is [`updates.json`](https://github.com/calestinfisali
 
 ## Windows 0.1.28 release notes
 
-Windows `0.1.28` is the next Windows-only release after `0.1.27`. Linux `0.1.20` and Android `0.1.32` are unchanged.
+Windows [0.1.28](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.28) is the latest Windows-only release after `0.1.27`. Linux `0.1.20` and Android `0.1.32` are unchanged.
 
 ### Fixes and improvements
 
@@ -42,4 +42,4 @@ Windows `0.1.28` is the next Windows-only release after `0.1.27`. Linux `0.1.20`
 - `WaifuGallery-Portable-x64.exe`
 - `LICENSE-GPL-3.0.txt`
 
-The `windows-v0.1.28` release and Windows update-feed entry are published separately after the Windows packages are built and verified.
+The published Windows release uses the `windows-v0.1.28` tag. Its verified assets are listed on the release page; the update feed points Windows clients to that tag. GitHub Latest remains the compatibility release `v0.1.16`.
