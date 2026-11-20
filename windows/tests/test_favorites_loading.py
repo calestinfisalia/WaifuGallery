@@ -27,7 +27,7 @@ class FavoritesLoadingTests(unittest.TestCase):
             QTest.qWait(20)
         return predicate()
 
-    def test_large_favorites_list_builds_after_dialog_is_shown(self):
+    def test_large_favorites_list_uses_model_without_per_item_widgets(self):
         posts = [
             ImagePost(
                 str(index),
@@ -42,14 +42,12 @@ class FavoritesLoadingTests(unittest.TestCase):
         dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
         self.addCleanup(dialog.close)
 
-        self.assertEqual(dialog.tiles, [])
+        self.assertEqual(dialog.model.rowCount(), len(posts))
+        self.assertEqual(dialog.tiles[0][0], "provider:69")
         dialog.show()
-        self.assertTrue(dialog.loading_indicator.isVisible())
-
-        self.assertTrue(self._wait_until(lambda: len(dialog.tiles) == len(posts)))
         self.assertFalse(dialog.loading_indicator.isVisible())
 
-    def test_large_favorites_tiles_are_laid_out_after_build_finishes(self):
+    def test_large_favorites_model_does_not_build_widget_tiles_in_batches(self):
         posts = [
             ImagePost(
                 str(index),
@@ -63,19 +61,7 @@ class FavoritesLoadingTests(unittest.TestCase):
         ]
         dialog = FavoritesDialog(posts, lambda _post: None, lambda _key: None)
         self.addCleanup(dialog.close)
-        dialog.show()
-        dialog._tile_build_timer.stop()
-        dialog._layout_timer.stop()
-
-        with patch.object(dialog, "_layout_tiles", wraps=dialog._layout_tiles) as layout:
-            dialog._build_next_tile_batch()
-            self.assertTrue(dialog._pending_tile_posts)
-            layout.assert_not_called()
-
-            while dialog._pending_tile_posts:
-                dialog._build_next_tile_batch()
-
-        layout.assert_called_once_with()
+        self.assertEqual(dialog.model.rowCount(), len(posts))
         self.assertEqual(len(dialog.tiles), len(posts))
 
     def test_favorite_tiles_adapt_to_resized_dialog_width(self):
@@ -94,16 +80,15 @@ class FavoritesLoadingTests(unittest.TestCase):
         self.addCleanup(dialog.close)
         dialog.show()
         self.assertTrue(self._wait_until(lambda: bool(dialog.tiles)))
-        first_tile = dialog.tiles[0][1]
-        initial_width = first_tile.width()
+        initial_width = dialog.grid_size.width()
 
         dialog.resize(dialog.width() + 100, dialog.height())
 
         self.assertTrue(
-            self._wait_until(lambda: first_tile.width() > initial_width)
+            self._wait_until(lambda: dialog.grid_size.width() > initial_width)
         )
-        self.assertEqual(dialog.grid.count(), len(posts))
-        self.assertIs(dialog.grid.itemAtPosition(0, 0).widget(), first_tile)
+        self.assertEqual(dialog.model.rowCount(), len(posts))
+        self.assertEqual(dialog.content.gridSize().width(), dialog.grid_size.width())
 
     def test_favorite_media_count_is_in_the_footer(self):
         posts = [
@@ -154,11 +139,6 @@ class FavoritesLoadingTests(unittest.TestCase):
 
         self.assertGreater(initial_count, 0)
         self.assertLess(initial_count, len(posts))
-        self.assertEqual(
-            sum(indicator._timer.isActive() for indicator in dialog.thumbnail_indicators.values()),
-            initial_count,
-        )
-
         dialog.scroll.verticalScrollBar().setValue(
             dialog.scroll.verticalScrollBar().maximum()
         )
@@ -208,18 +188,14 @@ class FavoritesLoadingTests(unittest.TestCase):
 
         self.assertIn(key, dialog.thumbnail_errors)
         self.assertEqual(
-            dialog.thumbnail_error_views[key].findChild(
-                QLabel, "favoriteThumbnailErrorIcon"
-            ).text(),
-            "!",
-        )
-        self.assertEqual(dialog.thumbnail_error_labels[key].text(), "Timeout")
-        self.assertEqual(
-            dialog.thumbnail_error_labels[key].toolTip(),
-            "The provider request timed out.",
+            dialog._thumbnail_error_summary(dialog.thumbnail_error_details[key]),
+            "Timeout",
         )
         dialog.set_thumbnail_error(key, "DNS lookup failed for the provider.")
-        self.assertEqual(dialog.thumbnail_error_labels[key].text(), "Network error")
+        self.assertEqual(
+            dialog._thumbnail_error_summary(dialog.thumbnail_error_details[key]),
+            "Network error",
+        )
         dialog.close()
         QTest.qWait(0)
 
@@ -329,7 +305,6 @@ class FavoritesLoadingTests(unittest.TestCase):
             )
             self.assertIn("provider:1", dialog._selected_favorites)
             self.assertFalse(dialog.select_all_button.isHidden())
-            self.assertFalse(dialog.selection_checks["provider:1"].isHidden())
             FakeMenu.selected_index = 0
             dialog._show_favorite_context_menu("provider:1", QPoint())
             self.assertEqual(FakeMenu.last_actions[1].text, "Deselect image")

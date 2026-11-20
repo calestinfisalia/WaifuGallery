@@ -24,3 +24,22 @@ All three platform releases are published. The platform update feed points to ea
 - [Android 0.1.32](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.32)
 
 The public update manifest is [`updates.json`](https://github.com/calestinfisalia/WaifuGallery/blob/main/updates.json). It is updated only after the corresponding release and required assets have been published and verified.
+
+## Windows 0.1.28 release notes
+
+Windows `0.1.28` is the next Windows-only release after `0.1.27`. Linux `0.1.20` and Android `0.1.32` are unchanged.
+
+### Fixes and improvements
+
+- Media Info tag browsing now uses a lightweight list model instead of creating a button widget for every tag, reducing layout work while resizing the dialog. Selecting a tag still searches for similar media.
+- The main search field keeps its smooth resize animation, and the Home button now sits beside Back in the navigation group.
+- Image view and fullscreen image zoom can magnify up to 20×. Load the original-resolution image first to inspect its full detail.
+- Favorites and dialog presentation refinements from the stable desktop UI are retained.
+
+### Release assets
+
+- `WaifuGallery-Setup-x64.exe`
+- `WaifuGallery-Portable-x64.exe`
+- `LICENSE-GPL-3.0.txt`
+
+The `windows-v0.1.28` release and Windows update-feed entry are published separately after the Windows packages are built and verified.

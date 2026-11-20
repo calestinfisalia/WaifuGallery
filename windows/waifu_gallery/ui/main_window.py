@@ -150,6 +150,7 @@ class GalleryTitleBar(QWidget):
         layout.setSpacing(7)
 
         left_container = QWidget(self)
+        self.left_container = left_container
         left_layout = QHBoxLayout(left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(7)
@@ -174,7 +175,7 @@ class GalleryTitleBar(QWidget):
         self.search_input = SearchLineEdit()
         self.search_input.setObjectName("mainSearchInput")
         self.search_input.setPlaceholderText("Search...")
-        self.search_input.setMinimumWidth(280)
+        self.search_input.setMinimumWidth(220)
         self.search_input.setMaximumWidth(560)
         self.search_input.setFixedHeight(34)
         self.search_input.setFrame(False)
@@ -182,16 +183,23 @@ class GalleryTitleBar(QWidget):
         self.search_input.setParent(self)
         self.search_input.returnPressed.connect(window.start_search)
         self.home_button = window._icon_button("home", "Return to random images")
-        self.home_button.setParent(self)
         self.home_button.setFixedSize(36, 34)
         self.home_button.hide()
+        self.home_button.installEventFilter(self)
         self.home_button.clicked.connect(window.go_home)
+        self._search_target_geometry = QRect()
+        self._search_geometry_initialized = False
+        self._search_geometry_timer = QTimer(self)
+        self._search_geometry_timer.setSingleShot(False)
+        self._search_geometry_timer.setInterval(16)
+        self._search_geometry_timer.timeout.connect(self._animate_search_geometry)
         self.search_action = self.search_input.addAction(
             window._icon("search"), QLineEdit.ActionPosition.TrailingPosition
         )
         self.search_action.triggered.connect(window.start_search)
 
         right_container = QWidget(self)
+        self.right_container = right_container
         right_layout = QHBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(2)
@@ -231,24 +239,92 @@ class GalleryTitleBar(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._update_search_target_geometry()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.home_button and event.type() in (
+            QEvent.Type.Show,
+            QEvent.Type.Hide,
+        ):
+            QTimer.singleShot(0, self._update_search_target_geometry)
+        return super().eventFilter(watched, event)
+
+    def _update_search_target_geometry(self) -> None:
+        if self.main_window.centralWidget() is None:
+            return
+        left_edge = self.left_container.geometry().right() + 8
+        right_edge = self.right_container.geometry().left() - 8
         central = self.main_window.centralWidget()
-        search_width = min(560, max(280, round(self.main_window.width() * 0.42)))
-        suggestion_panel = getattr(self.main_window, "search_suggestion_panel", None)
-        if suggestion_panel is not None and suggestion_panel.width() != search_width:
-            suggestion_panel.setFixedWidth(search_width)
-        center_in_window = central.mapTo(self.main_window, QPoint(central.width() // 2, 0)).x()
+        center_in_window = central.mapTo(
+            self.main_window, QPoint(central.width() // 2, 0)
+        ).x()
         title_left_in_window = self.mapTo(self.main_window, QPoint(0, 0)).x()
-        search_x = center_in_window - title_left_in_window - search_width // 2
-        search_geometry = QRect(search_x, 4, search_width, 34)
-        if self.search_input.geometry() != search_geometry:
-            self.search_input.setGeometry(search_geometry)
-        self.main_window._position_search_suggestion_panel()
-        home_position = QPoint(search_x - self.home_button.width() - 8, 4)
-        if self.home_button.pos() != home_position:
-            self.home_button.move(home_position)
+        center_x = center_in_window - title_left_in_window
+        available_width = max(
+            1,
+            2 * min(center_x - left_edge, right_edge - center_x),
+        )
+        preferred_width = min(560, max(220, round(self.main_window.width() * 0.42)))
+        search_width = min(preferred_width, available_width)
+        self._search_target_geometry = QRect(
+            center_x - search_width // 2, 4, search_width, 34
+        )
+        if not self._search_geometry_initialized:
+            self._search_geometry_initialized = True
+            self._apply_search_geometry(self._search_target_geometry)
+        elif getattr(self.main_window, "_resize_in_progress", False):
+            self._search_geometry_timer.stop()
+            self._apply_search_geometry(self._search_target_geometry)
+        elif not self._search_geometry_timer.isActive():
+            self._search_geometry_timer.start()
+
+    def _animate_search_geometry(self) -> None:
+        current = self.search_input.geometry()
+        target = self._search_target_geometry
+        values = []
+        for old, new in (
+            (current.x(), target.x()),
+            (current.y(), target.y()),
+            (current.width(), target.width()),
+            (current.height(), target.height()),
+        ):
+            values.append(
+                new if abs(new - old) <= 1 else round(old + (new - old) * 0.32)
+            )
+        next_geometry = QRect(*values)
+        self._apply_search_geometry(next_geometry)
+        if next_geometry == target:
+            self._search_geometry_timer.stop()
+            self._sync_search_suggestion_sizes()
+
+    def _apply_search_geometry(self, geometry: QRect) -> None:
+        if self.search_input.geometry() != geometry:
+            self.search_input.setGeometry(geometry)
+        suggestion_panel = getattr(self.main_window, "search_suggestion_panel", None)
+        if suggestion_panel is not None and suggestion_panel.isVisible():
+            if suggestion_panel.width() != geometry.width():
+                suggestion_panel.setFixedWidth(geometry.width())
+            self.main_window._position_search_suggestion_panel()
+    def _sync_search_overlay_geometry(self) -> None:
+        panel = getattr(self.main_window, "search_suggestion_panel", None)
+        if panel is not None:
+            if panel.width() != self.search_input.width():
+                panel.setFixedWidth(self.search_input.width())
+            self.main_window._position_search_suggestion_panel()
+
+    def _sync_search_suggestion_sizes(self) -> None:
+        model = getattr(self.main_window, "_search_suggestion_model", None)
+        if model is not None:
+            row_width = max(100, self.search_input.width() - 8)
+            for row in range(model.rowCount()):
+                item = model.item(row)
+                if item is not None and item.sizeHint().width() != row_width:
+                    item.setSizeHint(QSize(row_width, 34))
 
     def add_navigation_action(self, button: QPushButton) -> None:
         self.navigation_layout.addWidget(button)
+        if button is not self.home_button:
+            self.navigation_layout.addWidget(self.home_button)
 
     def refresh_search_icon(self) -> None:
         self.search_action.setIcon(self.main_window._icon("search"))
@@ -3066,7 +3142,8 @@ class MainWindow(QMainWindow):
             return
         row_count = min(8, self._search_suggestion_model.rowCount())
         panel.setFixedHeight(row_count * 34 + 12)
-        self._position_search_suggestion_panel()
+        self.title_bar._sync_search_suggestion_sizes()
+        self.title_bar._sync_search_overlay_geometry()
         panel.raise_()
         panel.show()
 

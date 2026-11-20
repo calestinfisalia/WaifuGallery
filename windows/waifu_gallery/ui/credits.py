@@ -4,14 +4,16 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -152,34 +154,33 @@ class ImageCreditsDialog(FramelessResizableDialog):
         scroll.horizontalScrollBar().setObjectName("mediaInfoHorizontalScrollBar")
         scroll.verticalScrollBar().setStyleSheet(CAPSULE_SCROLLBAR_STYLE)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        tag_container = QWidget()
-        tags_layout = QGridLayout(tag_container)
-        tags_layout.setContentsMargins(0, 0, 4, 2)
-        tags_layout.setHorizontalSpacing(6)
-        tags_layout.setVerticalSpacing(1)
-        tags_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        columns = 2
-        for index, tag in enumerate(sorted(post.tags, key=str.casefold)):
-            button = QToolButton()
-            button.setText(tag.replace("_", " "))
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            button.setAutoRaise(True)
-            button.setToolTip(f"Search tag: {tag}")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setStyleSheet(
-                "QToolButton { border: 0; background: transparent; color: #7aa2f7; "
-                "padding: 2px 2px; text-align: left; }"
-                "QToolButton:hover { color: #bb9af7; text-decoration: underline; }"
-            )
-            button.clicked.connect(lambda _checked=False, value=tag: self._select_tag(value))
-            tags_layout.addWidget(
-                button, index // columns, index % columns, Qt.AlignmentFlag.AlignLeft
-            )
+        tag_list = QListWidget()
+        tag_list.setObjectName("mediaInfoTagList")
+        tag_list.setFrameShape(QFrame.Shape.NoFrame)
+        tag_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        tag_list.setUniformItemSizes(True)
+        tag_list.setSpacing(1)
+        tag_list.setStyleSheet(
+            "QListWidget { background: transparent; border: 0; outline: 0; }"
+            "QListWidget::item { color: #7aa2f7; padding: 4px 6px; border-radius: 5px; }"
+            "QListWidget::item:hover { color: #bb9af7; background: rgba(122, 162, 247, 28); }"
+        )
+        for tag in sorted(post.tags, key=str.casefold):
+            item = QListWidgetItem(tag.replace("_", " "))
+            item.setData(Qt.ItemDataRole.UserRole, tag)
+            item.setToolTip(f"Search tag: {tag}")
+            tag_list.addItem(item)
         if not post.tags:
-            empty = QLabel("No tags were supplied by this provider.")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            tags_layout.addWidget(empty, 0, 0, 1, columns)
-        scroll.setWidget(tag_container)
+            empty = QListWidgetItem("No tags were supplied by this provider.")
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            tag_list.addItem(empty)
+        tag_list.itemClicked.connect(
+            lambda item: self._select_tag(item.data(Qt.ItemDataRole.UserRole))
+            if item.data(Qt.ItemDataRole.UserRole)
+            else None
+        )
+        scroll.setWidget(tag_list)
         layout.addWidget(scroll, 1)
 
         outer.addWidget(surface)

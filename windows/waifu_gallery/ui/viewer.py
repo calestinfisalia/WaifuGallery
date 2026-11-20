@@ -8,6 +8,7 @@ from .indicators import CircularProgressIndicator
 class ZoomImage(QLabel):
     zoomChanged = Signal(bool)
     swipeRequested = Signal(int)
+    MAX_ZOOM_FACTOR = 20.0
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -199,7 +200,7 @@ class ZoomImage(QLabel):
             ratio_y = min(1.0, max(0.0, image_point.y() / old_height))
         multiplier = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         previous = self.factor
-        self.factor = min(6.0, max(1.0, self.factor * multiplier))
+        self.factor = min(self.MAX_ZOOM_FACTOR, max(1.0, self.factor * multiplier))
         self._render()
         self.zoomChanged.emit(self.factor > 1.0)
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.factor > 1.0 else Qt.CursorShape.ArrowCursor)

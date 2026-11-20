@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QSize, Qt
 from PySide6.QtGui import QCursor, QIcon
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QWidget
 
@@ -24,6 +24,7 @@ class FramelessResizableDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._size_restored = False
         self._resize_filter_widgets: set[int] = set()
+        self._show_animation: QPropertyAnimation | None = None
         self.finished.connect(self._save_remembered_size)
 
     def showEvent(self, event) -> None:
@@ -32,6 +33,20 @@ class FramelessResizableDialog(QDialog):
             self._restore_remembered_size()
             self._size_restored = True
         self._install_resize_filters()
+        if self.objectName() in {
+            "favoritesDialog",
+            "settingsDialog",
+            "mediaInfoDialog",
+        }:
+            if self._show_animation is not None:
+                self._show_animation.stop()
+            self.setWindowOpacity(0.0)
+            self._show_animation = QPropertyAnimation(self, b"windowOpacity", self)
+            self._show_animation.setDuration(160)
+            self._show_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._show_animation.setStartValue(0.0)
+            self._show_animation.setEndValue(1.0)
+            self._show_animation.start()
 
     def _remembered_size_key(self) -> str | None:
         if self.objectName() not in self._REMEMBERED_SIZES:
@@ -104,6 +119,10 @@ class FramelessResizableDialog(QDialog):
         ):
             edges = self._resize_edges(event.globalPosition().toPoint())
             handle = self.windowHandle()
+            if edges and self._show_animation is not None:
+                if self._show_animation.state() == QPropertyAnimation.State.Running:
+                    self._show_animation.stop()
+                    self.setWindowOpacity(1.0)
             if edges and handle is not None and handle.startSystemResize(edges):
                 event.accept()
                 return True
