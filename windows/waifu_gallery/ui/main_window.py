@@ -3992,15 +3992,16 @@ class MainWindow(QMainWindow):
                 max(12, page.width() - self.detail_video_next_overlay.width() - 12), center_y
             )),
         )
-        changed = []
         for widget, position in positions:
             if widget.pos() != position:
                 widget.move(position)
-                changed.append(widget)
-        if changed:
-            for widget in changed:
-                if widget.isVisible():
-                    widget.raise_()
+            # QStackedWidget raises its current media page above sibling
+            # overlays when setCurrentWidget() changes. Re-raise visible
+            # navigation controls even when their geometry stayed unchanged;
+            # otherwise they remain visible through the transparent scroll
+            # area but their clicks are intercepted by its viewport.
+            if widget.isVisible():
+                widget.raise_()
 
     def _update_page_navigation_visibility(self, *_args) -> None:
         self.page_navigation.setVisible(

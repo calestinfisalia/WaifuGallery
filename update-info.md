@@ -43,3 +43,11 @@ Windows [0.1.28](https://github.com/calestinfisalia/WaifuGallery/releases/tag/wi
 - `LICENSE-GPL-3.0.txt`
 
 The published Windows release uses the `windows-v0.1.28` tag. Its verified assets are listed on the release page; the update feed points Windows clients to that tag. GitHub Latest remains the compatibility release `v0.1.16`.
+
+## Windows 0.1.29 release notes
+
+Windows [0.1.29](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.29) fixes clicks on the previous/next arrows in image view.
+
+The arrows were visible, but the active transparent image scroll area could cover their hit area after the stacked media page changed. The app now raises visible navigation overlays above the active media page even when the arrows do not need repositioning. This is limited to overlay stacking and does not change image rendering or resize behavior.
+
+Linux `0.1.20` and Android `0.1.32` are unchanged. Windows release assets: Setup x64, Portable x64, and `LICENSE-GPL-3.0.txt`.
