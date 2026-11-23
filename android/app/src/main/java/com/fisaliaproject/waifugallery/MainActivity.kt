@@ -203,6 +203,7 @@ import kotlin.math.abs
 import kotlin.math.min
 import com.fisaliaproject.waifugallery.data.BooruApi
 import com.fisaliaproject.waifugallery.data.AppPreferences
+import com.fisaliaproject.waifugallery.data.LEGACY_APPLICATION_ID
 import com.fisaliaproject.waifugallery.data.SearchSuggestion
 import com.fisaliaproject.waifugallery.data.ImagePost
 import com.fisaliaproject.waifugallery.data.hasAiGeneratedTag
@@ -259,6 +260,22 @@ private fun openUpdateInstaller(context: Context, apk: File): String? {
         "The downloaded APK could not be opened safely."
     } catch (error: SecurityException) {
         "Android blocked access to the downloaded APK."
+    }
+}
+
+private fun openNewPackageRelease(context: Context): String? {
+    return try {
+        context.startActivity(
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.33"),
+            ),
+        )
+        null
+    } catch (error: ActivityNotFoundException) {
+        "No browser is available to open the new app release."
+    } catch (error: SecurityException) {
+        "Android blocked access to the new app release page."
     }
 }
 
@@ -2549,6 +2566,7 @@ private fun SettingsScreen(
     onChooseFolder: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val context = LocalContext.current
     var selectedPage by rememberSaveable { mutableStateOf("") }
     var customTerm by rememberSaveable { mutableStateOf("") }
     var showCustomTermsDialog by rememberSaveable { mutableStateOf(false) }
@@ -3249,6 +3267,21 @@ private fun SettingsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(16.dp),
                                 ) {
+                                    if (context.packageName == LEGACY_APPLICATION_ID) {
+                                        Text(
+                                            "This legacy app cannot update directly to the new package. " +
+                                                "Back up your data, download the new app manually, then import " +
+                                                "your backup before uninstalling this app.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                openNewPackageRelease(context)?.let(model::reportReleaseInstallError)
+                                            },
+                                        ) {
+                                            Text("Download new app manually")
+                                        }
+                                    }
                                     Image(
                                         painter = painterResource(R.mipmap.ic_launcher),
                                         contentDescription = "Waifu Gallery",

@@ -8,7 +8,7 @@ Waifu Gallery is an independent media browsing application with separate Windows
 
 - [Windows](windows/README.md) — Python and PySide6 desktop application (latest published version 0.1.26).
 - [Linux](linux/README.md) — Python and PySide6 desktop port (latest published version 0.1.19).
-- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (latest published version 0.1.32, `versionCode` 30); new builds use package ID `com.fisaliaproject.waifugallery`.
+- [Android](android/README.md) — Kotlin and Jetpack Compose mobile application (new package version 0.1.33, `versionCode` 31); legacy users can move through the migration bridge documented in the Android guide.
 
 ## Project documentation
 
@@ -21,7 +21,7 @@ The desktop and Android applications provide random browsing, tag search, provid
 
 ## Platform-specific updates
 
-Windows, Linux, and Android versions can advance independently. The latest published Android version is `0.1.32` (`versionCode` 30), as recorded in [`updates.json`](updates.json). Source commits alone do not publish an app update or change the feed; new releases require separate versioning, builds, assets, and feed updates. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
+Windows, Linux, and Android versions can advance independently. Android has separate legacy and new-package update channels in [`updates.json`](updates.json). Source commits alone do not publish an app update or change the feed; new releases require separate versioning, builds, assets, and feed updates. Clients read their own version and release tag from the feed, then fetch assets and GitHub-provided SHA-256 digests from that exact release tag.
 
 Independent platform releases use `windows-vX.Y.Z`, `linux-vX.Y.Z`, and `android-vX.Y.Z`; compatibility releases for legacy clients may use a shared `vX.Y.Z` tag. Android also increments `versionCode` for every APK. Old clients cannot read the platform update manifest.
 
@@ -30,7 +30,7 @@ See [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for the agent-ready build, publish, m
 ## Platform versions
 
 - **Windows:** version 0.1.26 is published in GitHub release [`windows-v0.1.26`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/windows-v0.1.26); it adds search and Favorites filtering improvements, resize refinements, and round fullscreen video seek controls.
-- **Android:** version 0.1.32 (`versionCode` 30) is published in GitHub release [`android-v0.1.32`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.32); this release uses the legacy package ID `com.fisalia.waifugallery`.
+- **Android:** new package version 0.1.33 (`versionCode` 31) is published in GitHub release [`android-v0.1.33`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.33); legacy package version 0.1.32 remains available at [`android-v0.1.32`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/android-v0.1.32).
 - **Linux:** version 0.1.19 is published in GitHub release [`linux-v0.1.19`](https://github.com/calestinfisalia/WaifuGallery/releases/tag/linux-v0.1.19) as x86_64 AppImage and Flatpak packages; it includes search and Favorites filter updates, plus desktop resizing and fullscreen video control refinements.
 - New Android package releases use a dedicated PKCS#12 signing key configured through local environment variables; historical releases remain unchanged.
 - See the platform READMEs and [RELEASE_UPDATE.md](RELEASE_UPDATE.md) for release assets and license transition details.

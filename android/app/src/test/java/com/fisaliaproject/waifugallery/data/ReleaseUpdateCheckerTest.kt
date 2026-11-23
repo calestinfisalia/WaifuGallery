@@ -15,8 +15,8 @@ class ReleaseUpdateCheckerTest {
           "platforms": {
             "windows": {"version": "0.1.13", "release_tag": "windows-v0.1.13"},
             "linux": {"version": "0.1.13", "release_tag": "linux-v0.1.13"},
-            "android": {"version": "0.1.12", "release_tag": "android-v0.1.12"},
-            "android_new": {"version": "0.1.13", "release_tag": "android-new-v0.1.13"}
+            "android": {"version": "0.1.12", "release_tag": "android-legacy-v0.1.12"},
+            "android_new": {"version": "0.1.13", "release_tag": "android-v0.1.13"}
           }
         }
         """.trimIndent(),
@@ -27,7 +27,7 @@ class ReleaseUpdateCheckerTest {
         val target = ReleaseUpdateChecker.parseUpdateTarget(manifest, "android")
 
         assertEquals("0.1.12", target.version)
-        assertEquals("android-v0.1.12", target.releaseTag)
+        assertEquals("android-legacy-v0.1.12", target.releaseTag)
         assertTrue(
             ReleaseUpdateChecker.compareVersions(
                 ReleaseUpdateChecker.parseVersion(target.version)!!,
@@ -55,12 +55,23 @@ class ReleaseUpdateCheckerTest {
     }
 
     @Test
+    fun legacyBridgeUsesLegacyUpdateChannel() {
+        val target = ReleaseUpdateChecker.parseUpdateTarget(
+            manifest,
+            updateChannelForPackageName(LEGACY_APPLICATION_ID),
+        )
+
+        assertEquals("0.1.12", target.version)
+        assertEquals("android-legacy-v0.1.12", target.releaseTag)
+    }
+
+    @Test
     fun updateChannelsResolveToDifferentReleaseTags() {
         val legacyTarget = ReleaseUpdateChecker.parseUpdateTarget(manifest, "android")
         val newTarget = ReleaseUpdateChecker.parseUpdateTarget(manifest, "android_new")
 
-        assertEquals("android-v0.1.12", legacyTarget.releaseTag)
-        assertEquals("android-new-v0.1.13", newTarget.releaseTag)
+        assertEquals("android-legacy-v0.1.12", legacyTarget.releaseTag)
+        assertEquals("android-v0.1.13", newTarget.releaseTag)
     }
 
     @Test

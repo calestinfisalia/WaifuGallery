@@ -1,8 +1,8 @@
 ﻿# Waifu Gallery for Android
 
-Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. New builds use the Android package ID `com.fisaliaproject.waifugallery`. The `android-v0.1.32` release remains the legacy ID `com.fisalia.waifugallery`; `android-new-v0.1.32` is the first release with the new ID.
+Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. New builds use the Android package ID `com.fisaliaproject.waifugallery`. Releases through `android-v0.1.32` use the legacy ID `com.fisalia.waifugallery`; `android-v0.1.33` is the new package release.
 
-The latest published Android version is `0.1.32` (`versionCode` `30`) for both package channels. Android's version can advance independently from Windows and Linux.
+The latest published Android package version is `0.1.33` (`versionCode` `31`). Android's version can advance independently from Windows and Linux.
 
 The custom Waifu Gallery launcher icon is not included yet. Android uses its generic fallback icon until the new artwork is added. Toolbar symbols use AndroidX Compose Material Icons from the declared dependency.
 
@@ -41,20 +41,22 @@ The new package ID is a separate Android application. It cannot update an instal
 
 The backup can include favorites, selected provider credentials, and selected portable preferences. Safety PINs and parental policies are not included and must be configured again.
 
-The legacy package uses the `android` update-feed entry. The new package selects `android_new`; it never falls back to the legacy entry. Keep the legacy entry pointed at APKs with the legacy package ID. A GitHub tag name is independent from the feed key: the new package release can use the standard `android-vX.Y.Z` tag while only `android_new` points to it.
+The legacy package uses the `android` update-feed entry. The new package selects `android_new`; it never falls back to the legacy entry. Keep the legacy entry pointed at APKs with the legacy package ID. The bridge release uses a distinct `android-legacy-vX.Y.Z` tag; new-package releases use the standard `android-vX.Y.Z` tag.
 
-## Android 0.1.33 (new package; release in preparation)
+After updating to legacy bridge `0.1.33`, open **Settings → Updates → Download new app manually** to visit the new package's GitHub Release page. The new APK installs as a separate app. Export a backup from the legacy app first, import it into the new app, and uninstall the legacy app only after confirming the backup has imported correctly.
 
-- New package ID: `com.fisaliaproject.waifugallery`; legacy releases remain `com.fisalia.waifugallery`.
-- Android source version: `0.1.33`; `versionCode`: `31`.
-- Planned release tag: `android-v0.1.33`; update only the `android_new` feed entry after the release APK is published and verified.
-- Users switching from the legacy app should export and secure a backup before uninstalling it. Import the backup into the new app and reconfigure Safety & Privacy PINs.
+## Android 0.1.33 (new package)
 
-## Android 0.1.32 (new package)
+- Package ID: `com.fisaliaproject.waifugallery`.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.33/app-release.apk).
+- Update feed: `android_new` → `android-v0.1.33`.
 
-- First release with package ID `com.fisaliaproject.waifugallery`.
-- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-new-v0.1.32/app-release.apk).
-- Update feed: `android_new` → `android-new-v0.1.32`.
+## Android 0.1.33 (legacy migration bridge; release in preparation)
+
+- Package ID remains `com.fisalia.waifugallery`; this APK updates the old app in place.
+- The Updates settings page links to the new-package release for manual installation.
+- Planned release tag: `android-legacy-v0.1.33`; `android` feed moves to this tag after the APK is published and verified.
+- Export and secure a `.wgbak` before uninstalling the old app. Import it into the new package and reconfigure Safety & Privacy PINs.
 
 ## Android 0.1.32 (legacy package)
 
@@ -275,6 +277,14 @@ To build the release APK used for distribution:
 ```
 
 The release APK is written to `app\build\outputs\apk\release\app-release.apk`.
+
+To build the legacy migration bridge, use the existing Gradle debug signing configuration, which must continue to match the certificate used by the published legacy APKs:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleRelease -PlegacyPackage=true
+```
+
+This sets only the legacy application ID for that build and does not create or replace a keystore. Before publishing, verify that the APK package is `com.fisalia.waifugallery` and its certificate SHA-256 matches the legacy `android-v0.1.32` APK. Do not use the new PKCS#12 release key for the legacy bridge.
 
 ## License and attribution
 

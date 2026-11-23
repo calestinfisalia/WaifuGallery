@@ -9,13 +9,18 @@ val releaseSigningEnvironment = mapOf(
     "WAIFU_RELEASE_KEY_PASSWORD" to providers.environmentVariable("WAIFU_RELEASE_KEY_PASSWORD").orNull.orEmpty(),
 )
 val releaseSigningConfigured = releaseSigningEnvironment.values.all(String::isNotBlank)
+val legacyPackageBuild = providers.gradleProperty("legacyPackage").orNull == "true"
 
 android {
     namespace = "com.fisaliaproject.waifugallery"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.fisaliaproject.waifugallery"
+        applicationId = if (legacyPackageBuild) {
+            "com.fisalia.waifugallery"
+        } else {
+            "com.fisaliaproject.waifugallery"
+        }
         minSdk = 29
         targetSdk = 37
         versionCode = 31
@@ -41,7 +46,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            if (releaseSigningConfigured) {
+            if (legacyPackageBuild) {
+                signingConfig = signingConfigs.getByName("debug")
+            } else if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
@@ -55,6 +62,7 @@ android {
 
 val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
     doLast {
+        if (legacyPackageBuild) return@doLast
         val requiredVariables = listOf(
             "WAIFU_RELEASE_KEYSTORE_PATH",
             "WAIFU_RELEASE_STORE_PASSWORD",
