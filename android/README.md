@@ -51,11 +51,12 @@ After updating to legacy bridge `0.1.33`, open **Settings → Updates → Downlo
 - Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-v0.1.33/app-release.apk).
 - Update feed: `android_new` → `android-v0.1.33`.
 
-## Android 0.1.33 (legacy migration bridge; release in preparation)
+## Android 0.1.33 (legacy migration bridge)
 
 - Package ID remains `com.fisalia.waifugallery`; this APK updates the old app in place.
 - The Updates settings page links to the new-package release for manual installation.
-- Planned release tag: `android-legacy-v0.1.33`; `android` feed moves to this tag after the APK is published and verified.
+- Release artifact: [`app-release.apk`](https://github.com/calestinfisalia/WaifuGallery/releases/download/android-legacy-v0.1.33/app-release.apk).
+- Update feed: `android` → `android-legacy-v0.1.33`.
 - Export and secure a `.wgbak` before uninstalling the old app. Import it into the new package and reconfigure Safety & Privacy PINs.
 
 ## Android 0.1.32 (legacy package)

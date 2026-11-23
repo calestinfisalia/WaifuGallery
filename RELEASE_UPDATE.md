@@ -2,11 +2,11 @@
 
 This guide separates the two update paths: platform releases for current clients, and a compatibility release for older clients that still query GitHub `/releases/latest`. Windows, Linux, and Android have independent app versions; a fix for one platform must not bump the versions or manifest entries for the others.
 
-Current published platform versions are Windows `0.1.29`, Linux `0.1.20`, legacy Android `0.1.32`, and new-package Android `0.1.33`. Current clients use the exact tag in their package-specific `updates.json` entry. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
+Current published platform versions are Windows `0.1.29`, Linux `0.1.20`, legacy Android `0.1.33`, and new-package Android `0.1.33`. Current clients use the exact tag in their package-specific `updates.json` entry. The compatibility release `v0.1.16` is deliberately marked as GitHub Latest so old clients can still find the bridge update; do not make a platform-only release the global Latest release.
 
 ## Release channels
 
-- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform/channel's entry in `updates.json` after its release and assets are verified. Current feed versions: Windows `0.1.29`, Linux `0.1.20`, and both Android package channels `0.1.32`.
+- **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform/channel's entry in `updates.json` after its release and assets are verified. Current feed versions: Windows `0.1.29`, Linux `0.1.20`, and both Android package channels `0.1.33`.
 - **Android package migration:** `platforms.android` is reserved for legacy APKs with application ID `com.fisalia.waifugallery`; bridge builds use `android-legacy-vX.Y.Z` and the existing legacy signing certificate. New-package APKs use `platforms.android_new`, the standard `android-vX.Y.Z` tag, and the dedicated release certificate. The legacy entry must never point to a new-package APK. The legacy bridge provides a manual link to the new-package release after updating legacy clients in place.
 - **Compatibility update (legacy path):** use the conventional `vX.Y.Z` tag only when intentionally serving clients that still read `/releases/latest`. It must contain the assets required by those legacy clients and be explicitly selected as GitHub Latest. Compatibility releases are coordinated exceptions, not the normal way to publish a platform fix.
 - **Bridge behavior:** the existing `v0.1.16` compatibility release lets older clients install a build that reads `updates.json`. Once updated, clients follow their own platform entry and no longer depend on the global Latest endpoint.
@@ -22,7 +22,7 @@ Current published platform versions are Windows `0.1.29`, Linux `0.1.20`, legacy
 - Android requires `app-release.apk` with a SHA-256 digest. Verify its embedded application ID and signing-certificate SHA-256 against the selected channel before publication. `versionCode` must increase for updates to the same application ID, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per channel**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.29` (`windows-v0.1.29`), Linux `0.1.20` (`linux-v0.1.20`), legacy Android `0.1.32` (`android-v0.1.32`), and new-package Android `0.1.33` (`android-v0.1.33`). Advance the legacy entry to the migration bridge only after that legacy-signed APK is published and verified. Linux `0.1.15` was intentionally skipped.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per channel**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.29` (`windows-v0.1.29`), Linux `0.1.20` (`linux-v0.1.20`), legacy Android `0.1.33` (`android-legacy-v0.1.33`), and new-package Android `0.1.33` (`android-v0.1.33`). Linux `0.1.15` was intentionally skipped.
 
 ## Previous compatibility release: `v0.1.15`
 
@@ -46,7 +46,7 @@ The compatibility release is published at `v0.1.16` and is marked GitHub Latest.
 
 Assets in `v0.1.16` include `WaifuGallery-Setup-x64.exe`, `WaifuGallery-Portable-x64.exe`, `Waifu-Gallery-0.1.16-x86_64.AppImage`, `Waifu-Gallery-0.1.16-x86_64.flatpak`, and `app-release.apk`. The Linux packages include the GNU GPL license. Preserve the Android signing setup documented in `android/README.md`; never commit signing keys or credentials.
 
-This compatibility release is the one-time bridge for clients that still query `/releases/latest`. New clients use the platform feed instead. The current public feed points Windows to `windows-v0.1.29`, Linux to `linux-v0.1.20`, legacy Android to `android-v0.1.32`, and new-package Android to `android-v0.1.33`.
+This compatibility release is the one-time bridge for clients that still query `/releases/latest`. New clients use the platform feed instead. The current public feed points Windows to `windows-v0.1.29`, Linux to `linux-v0.1.20`, legacy Android to `android-legacy-v0.1.33`, and new-package Android to `android-v0.1.33`.
 
 ## Version files
 
