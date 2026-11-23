@@ -1,4 +1,4 @@
-package com.fisalia.waifugallery.data
+package com.fisaliaproject.waifugallery.data
 
 data class ImagePost(
     val id: String,

@@ -27,6 +27,8 @@ android/**/*.apk
 android/**/*.aab
 android/**/*.jks
 android/**/*.keystore
+*.p12
+key.properties
 
 # IDE and OS files
 .vscode/

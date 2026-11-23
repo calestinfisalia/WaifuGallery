@@ -1,4 +1,4 @@
-﻿package com.fisalia.waifugallery
+package com.fisaliaproject.waifugallery
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
@@ -201,16 +201,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
-import com.fisalia.waifugallery.data.BooruApi
-import com.fisalia.waifugallery.data.AppPreferences
-import com.fisalia.waifugallery.data.SearchSuggestion
-import com.fisalia.waifugallery.data.ImagePost
-import com.fisalia.waifugallery.data.hasAiGeneratedTag
-import com.fisalia.waifugallery.data.mediumPreviewCandidates
-import com.fisalia.waifugallery.data.orderedFavorites
-import com.fisalia.waifugallery.data.RatingFilter
-import com.fisalia.waifugallery.data.UserDataBackup
-import com.fisalia.waifugallery.data.UserDataBackupCodec
+import com.fisaliaproject.waifugallery.data.BooruApi
+import com.fisaliaproject.waifugallery.data.AppPreferences
+import com.fisaliaproject.waifugallery.data.SearchSuggestion
+import com.fisaliaproject.waifugallery.data.ImagePost
+import com.fisaliaproject.waifugallery.data.hasAiGeneratedTag
+import com.fisaliaproject.waifugallery.data.mediumPreviewCandidates
+import com.fisaliaproject.waifugallery.data.orderedFavorites
+import com.fisaliaproject.waifugallery.data.RatingFilter
+import com.fisaliaproject.waifugallery.data.UserDataBackup
+import com.fisaliaproject.waifugallery.data.UserDataBackupCodec
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException

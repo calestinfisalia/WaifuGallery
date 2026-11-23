@@ -1,4 +1,4 @@
-package com.fisalia.waifugallery.data
+package com.fisaliaproject.waifugallery.data
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

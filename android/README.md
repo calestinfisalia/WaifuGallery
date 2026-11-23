@@ -1,6 +1,6 @@
 ﻿# Waifu Gallery for Android
 
-Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. Its Android package ID is `com.fisalia.waifugallery`, so it installs separately from Waifu Downloader for Android.
+Waifu Gallery for Android is a standalone Kotlin/Jetpack Compose implementation. It was written for this project with its own provider, search, and gallery code; the general idea of browsing random waifu images was inspired by [NyarchLinux/WaifuDownloader](https://github.com/NyarchLinux/WaifuDownloader). It does not include the original GTK source or launcher artwork. New builds use the Android package ID `com.fisaliaproject.waifugallery`. Published releases through `android-v0.1.32` use the legacy ID `com.fisalia.waifugallery`.
 
 The latest published Android version is `0.1.32` (`versionCode` `30`), under the Android-specific `android-v0.1.32` release tag. Android's version can advance independently from Windows and Linux.
 
@@ -34,6 +34,14 @@ The preferred video resolution selects the largest listed provider rendition at 
 Open **Settings → Backup & Restore** to export or import a `.wgbak` file through Android's document picker. Before export, choose whether to include favorites, Gelbooru/Rule34.xxx credentials, and portable preferences (provider, NSFW option, search terms and content filters including the AI-generated filter, DoH settings, media filter, ambient mode, and video resolution). Android does not use desktop themes. Its selected download folder is device-specific and is not included.
 
 The version 2 format is interoperable with Windows and Linux, records included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM; version 1 backups remain importable. Choose a passphrase of at least 8 characters; it cannot be recovered. Android imports only the included sections and leaves unselected data unchanged. If favorites are included, choose **Add new** to keep existing favorites and add unique images, or **Replace all** to replace the favorites list. Existing provider credentials are kept; backup credentials fill accounts that are not configured yet. Included portable preferences are imported, and local credentials remain in app-private SharedPreferences; only the exported backup is encrypted.
+
+## Package migration
+
+The new package ID is a separate Android application. It cannot update an installation with the legacy ID, and Android does not copy app-private data between the two IDs. Both apps may remain installed side by side. Keep the legacy app until the new app has been installed and its data checked.
+
+To move data, export a `.wgbak` file from **Settings → Backup & Restore** in the legacy app, then import it from the same screen in the new app. Favorites, selected provider credentials, and selected portable preferences can be included. Safety PINs and parental policies are not included and must be configured again. Do not uninstall the legacy app until import and verification are complete.
+
+The legacy package uses the `android` update-feed entry. The new package selects `android_new`; it never falls back to the legacy entry. Keep the legacy entry pointed at APKs with the legacy package ID. Add the new entry only after a matching new-package GitHub Release and APK have been published and verified.
 
 ## Android 0.1.32
 
@@ -243,7 +251,9 @@ The APK is written to `app\build\outputs\apk\debug\app-debug.apk`. This project 
 
 ### Current APK signing
 
-For now, the release build intentionally uses Gradle's local debug signing configuration; a dedicated release keystore has not been configured. Keep using the same local debug key for APK updates, because Android will not install an update signed with a different certificate. Do not commit the keystore or its credentials. Migrating to a securely stored release key is deferred.
+The new package's release APK uses a dedicated PKCS#12 keystore outside the repository. The release key alias is `waifugallery-release`; Gradle reads the keystore path from `WAIFU_RELEASE_KEYSTORE_PATH`, and reads the store/key passwords only from `WAIFU_RELEASE_STORE_PASSWORD` and `WAIFU_RELEASE_KEY_PASSWORD`. Set these variables in the local release environment without putting their values in source, command output, or Git. Release builds fail if required signing inputs are missing; they never fall back to the debug key.
+
+On the configured release machine, `WAIFU_RELEASE_KEYSTORE_PATH` should point to `D:\AndroidSigning\waifugallery-release.p12`. The expected certificate SHA-256 to verify against the built APK is `F0:10:22:69:F5:7E:0E:FC:50:5A:20:F5:A6:F9:86:3A:63:D0:CB:F6:0E:6E:17:15:0F:16:FB:4E:51:F5:EF:57`. This is an expected value, not evidence that an APK has been verified. Never copy the keystore into the repository or alter the legacy debug keystore; previously published legacy APKs and their signing identity remain unchanged.
 
 To build the release APK used for distribution:
 

@@ -1,4 +1,4 @@
-package com.fisalia.waifugallery.data
+package com.fisaliaproject.waifugallery.data
 
 import android.util.Base64
 import org.json.JSONArray

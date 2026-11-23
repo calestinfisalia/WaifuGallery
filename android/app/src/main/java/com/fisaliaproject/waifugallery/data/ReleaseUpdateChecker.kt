@@ -1,4 +1,4 @@
-package com.fisalia.waifugallery.data
+package com.fisaliaproject.waifugallery.data
 
 import android.content.Context
 import java.io.File
@@ -34,6 +34,22 @@ internal data class UpdateTarget(
     val releaseTag: String,
 )
 
+internal const val LEGACY_APPLICATION_ID = "com.fisalia.waifugallery"
+internal const val NEW_APPLICATION_ID = "com.fisaliaproject.waifugallery"
+
+internal fun updateChannelForPackageName(packageName: String): String =
+    when (packageName) {
+        LEGACY_APPLICATION_ID -> "android"
+        NEW_APPLICATION_ID -> "android_new"
+        else -> throw IOException("No update channel is configured for this application.")
+    }
+
+internal fun requireMatchingApkPackage(expectedPackageName: String, apkPackageName: String?) {
+    if (apkPackageName != expectedPackageName) {
+        throw IOException("The downloaded APK does not match this application.")
+    }
+}
+
 object ReleaseUpdateChecker {
     private const val UPDATE_MANIFEST_URL =
         "https://raw.githubusercontent.com/calestinfisalia/WaifuGallery/main/updates.json"
@@ -61,6 +77,7 @@ object ReleaseUpdateChecker {
     suspend fun checkForUpdateResult(context: Context): ReleaseUpdateCheckResult =
         withContext(Dispatchers.IO) {
         try {
+            val updateChannel = updateChannelForPackageName(context.packageName)
             @Suppress("DEPRECATION")
             val currentVersionName = context.packageManager
                 .getPackageInfo(context.packageName, 0)
@@ -81,7 +98,7 @@ object ReleaseUpdateChecker {
                 }
                 val manifest = response.body?.string()?.let(::JSONObject)
                     ?: return@withContext ReleaseUpdateCheckResult(null, "GitHub returned an empty update manifest.")
-                val target = parseUpdateTarget(manifest, "android")
+                val target = parseUpdateTarget(manifest, updateChannel)
                 val releaseVersionName = target.version
                 val tag = target.releaseTag
                 val currentVersion = parseVersion(currentVersionName)
@@ -181,7 +198,7 @@ object ReleaseUpdateChecker {
             throw IOException("Could not create the APK download folder.")
         }
         val destination = File(updatesDirectory, "waifu-gallery-$version.apk")
-        val partialFile = File(updatesDirectory, ".${UUID.randomUUID()}.part")
+        val partialFile = File(updatesDirectory, ".${UUID.randomUUID()}.apk")
         try {
             val request = Request.Builder()
                 .url(update.apkUrl)
@@ -233,6 +250,7 @@ object ReleaseUpdateChecker {
                     throw IOException("The downloaded APK failed its SHA-256 integrity check.")
                 }
             }
+            requireDownloadedApkMatchesApplication(context, partialFile)
             Files.move(
                 partialFile.toPath(),
                 destination.toPath(),
@@ -246,6 +264,14 @@ object ReleaseUpdateChecker {
                 throw IOException("Could not remove the incomplete APK download.")
             }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requireDownloadedApkMatchesApplication(context: Context, apk: File) {
+        val apkPackageName = context.packageManager
+            .getPackageArchiveInfo(apk.absolutePath, 0)
+            ?.packageName
+        requireMatchingApkPackage(context.packageName, apkPackageName)
     }
 
     internal fun parseUpdateTarget(manifest: JSONObject, platformName: String): UpdateTarget {

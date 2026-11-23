@@ -1,4 +1,4 @@
-package com.fisalia.waifugallery.data
+package com.fisaliaproject.waifugallery.data
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Call

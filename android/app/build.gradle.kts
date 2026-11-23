@@ -3,12 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseSigningEnvironment = mapOf(
+    "WAIFU_RELEASE_KEYSTORE_PATH" to providers.environmentVariable("WAIFU_RELEASE_KEYSTORE_PATH").orNull.orEmpty(),
+    "WAIFU_RELEASE_STORE_PASSWORD" to providers.environmentVariable("WAIFU_RELEASE_STORE_PASSWORD").orNull.orEmpty(),
+    "WAIFU_RELEASE_KEY_PASSWORD" to providers.environmentVariable("WAIFU_RELEASE_KEY_PASSWORD").orNull.orEmpty(),
+)
+val releaseSigningConfigured = releaseSigningEnvironment.values.all(String::isNotBlank)
+
 android {
-    namespace = "com.fisalia.waifugallery"
+    namespace = "com.fisaliaproject.waifugallery"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.fisalia.waifugallery"
+        applicationId = "com.fisaliaproject.waifugallery"
         minSdk = 29
         targetSdk = 37
         versionCode = 30
@@ -19,16 +26,57 @@ android {
         compose = true
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseSigningEnvironment.getValue("WAIFU_RELEASE_KEYSTORE_PATH"))
+                storeType = "PKCS12"
+                storePassword = releaseSigningEnvironment.getValue("WAIFU_RELEASE_STORE_PASSWORD")
+                keyAlias = "waifugallery-release"
+                keyPassword = releaseSigningEnvironment.getValue("WAIFU_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
+    doLast {
+        val requiredVariables = listOf(
+            "WAIFU_RELEASE_KEYSTORE_PATH",
+            "WAIFU_RELEASE_STORE_PASSWORD",
+            "WAIFU_RELEASE_KEY_PASSWORD",
+        )
+        val missingVariables = requiredVariables.filter {
+            releaseSigningEnvironment.getValue(it).isBlank()
+        }
+        if (missingVariables.isNotEmpty()) {
+            throw GradleException(
+                "Release signing requires these environment variables: ${missingVariables.joinToString()}",
+            )
+        }
+        if (!file(releaseSigningEnvironment.getValue("WAIFU_RELEASE_KEYSTORE_PATH")).isFile) {
+            throw GradleException("The configured release keystore file does not exist.")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild" || name == "assembleRelease" || name == "packageRelease") {
+        dependsOn(verifyReleaseSigning)
     }
 }
 

@@ -7,6 +7,7 @@ Current published platform versions are Windows `0.1.29`, Linux `0.1.20`, and An
 ## Release channels
 
 - **Platform update (normal path):** publish only the changed platform under `windows-vX.Y.Z`, `linux-vX.Y.Z`, or `android-vX.Y.Z`. Update only that platform's entry in `updates.json` after its release and assets are verified. Current feed versions: Windows `0.1.29`, Linux `0.1.20`, and Android `0.1.32`.
+- **Android package migration:** `platforms.android` is reserved for legacy APKs with application ID `com.fisalia.waifugallery`. New-package APKs use a separate `platforms.android_new` entry and `android-new-vX.Y.Z` tags. The legacy entry must never point to a new-package APK. Do not add or advance `android_new` until the corresponding new-package release and `app-release.apk` exist and have been verified.
 - **Compatibility update (legacy path):** use the conventional `vX.Y.Z` tag only when intentionally serving clients that still read `/releases/latest`. It must contain the assets required by those legacy clients and be explicitly selected as GitHub Latest. Compatibility releases are coordinated exceptions, not the normal way to publish a platform fix.
 - **Bridge behavior:** the existing `v0.1.16` compatibility release lets older clients install a build that reads `updates.json`. Once updated, clients follow their own platform entry and no longer depend on the global Latest endpoint.
 
@@ -15,13 +16,13 @@ Current published platform versions are Windows `0.1.29`, Linux `0.1.20`, and An
 - [`updates.json`](updates.json) is the published update feed. Its `schema_version` is `1`, and each `platforms` entry contains:
   - `version`: the numeric app version, such as `0.1.13`.
   - `release_tag`: the exact GitHub Release tag whose assets belong to that platform update.
-- Windows, Linux, and Android clients select only their own manifest entry. They fetch release metadata by that exact tag, not by global latest.
+- Windows and Linux select their own manifest entry. Android selects `android` for the legacy package and `android_new` for `com.fisaliaproject.waifugallery`, based on the installed package ID. It must not fall back to another Android channel. Clients fetch release metadata by that exact tag, not by global latest.
 - Windows requires `WaifuGallery-Setup-x64.exe`; its GitHub asset digest must be SHA-256. The portable EXE is also distributed.
 - Linux requires at least one version-matched x86_64 AppImage or Flatpak asset. Linux update notices link to the release page; package installation remains manual.
-- Android requires `app-release.apk` with a SHA-256 digest. `versionCode` must increase for every APK, even when app versions for other platforms do not change.
+- Android requires `app-release.apk` with a SHA-256 digest. Verify its embedded application ID and signing-certificate SHA-256 against the selected channel before publication. `versionCode` must increase for updates to the same application ID, even when app versions for other platforms do not change.
 - GitHub generates the `digest` field for uploaded release assets. Do not substitute a checksum from a different file or release.
 
-The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per platform**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.29` (`windows-v0.1.29`), Linux `0.1.20` (`linux-v0.1.20`), and Android `0.1.32` (`android-v0.1.32`). Linux `0.1.15` was intentionally skipped.
+The manifest must point to releases that already exist and contain the required platform asset. Keep it at the **latest published version per channel**, not at a source version whose package has not been published yet. The current feed is Windows `0.1.29` (`windows-v0.1.29`), Linux `0.1.20` (`linux-v0.1.20`), and legacy Android `0.1.32` (`android-v0.1.32`). Add the `android_new` entry only after the new-package release is published. Linux `0.1.15` was intentionally skipped.
 
 ## Previous compatibility release: `v0.1.15`
 
@@ -64,12 +65,13 @@ Use this procedure for normal updates. Build and publish only the platform that 
 1. Confirm which platform changed and choose its next version only. Check that the release tag is unused:
    - `windows-vX.Y.Z`
    - `linux-vX.Y.Z`
-   - `android-vX.Y.Z`
+   - legacy Android: `android-vX.Y.Z`
+   - new-package Android: `android-new-vX.Y.Z`
 2. Update that platform's version files, code, tests, and release notes. Do not update `updates.json` to a version that has no published release yet.
 3. Run the platform's tests and build:
    - Windows, from PowerShell in `windows`: `.\build_release.ps1`. Outputs: `dist-release\WaifuGallery-Setup-x64.exe` and `dist-release\WaifuGallery-Portable-x64.exe`.
    - Linux, from Linux in `linux`: `bash ./release.sh`. Outputs default to `~/releases/waifu-gallery/`; set `RELEASE_OUTPUT_DIR` to change the destination.
-   - Android, from PowerShell in `android`: `.\gradlew.bat :app:testDebugUnitTest :app:assembleRelease`. Output: `app\build\outputs\apk\release\app-release.apk`.
+   - Android, from PowerShell in `android`: `.\gradlew.bat :app:testDebugUnitTest :app:assembleRelease`. New-package releases require the dedicated signing environment variables documented in `android/README.md`. Output: `app\build\outputs\apk\release\app-release.apk`.
 4. Commit and push the source/version changes. Create a stable GitHub Release for the platform tag, attach only that platform's release assets, and include concise platform-specific notes. Example:
 
    ```powershell
@@ -83,7 +85,8 @@ Use this procedure for normal updates. Build and publish only the platform that 
    ```
 
 5. Verify the release by its exact tag with `gh api repos/calestinfisalia/WaifuGallery/releases/tags/<tag>`. Confirm it is not a draft or prerelease, the expected asset names are present, URLs point to that release, and GitHub reports a valid SHA-256 digest for assets that the updater downloads.
-6. Only after those checks pass, update **that platform's** `version` and `release_tag` in `updates.json`. Leave the other platform entries unchanged. Commit and push the manifest update so clients can read it from the `main` branch.
+   For Android, inspect the APK's application ID and signer certificate; legacy tags must contain `com.fisalia.waifugallery`, while `android-new-vX.Y.Z` tags must contain `com.fisaliaproject.waifugallery` and use the dedicated release certificate.
+6. Only after those checks pass, update **that platform/channel's** `version` and `release_tag` in `updates.json`. Leave other channels unchanged. Commit and push the manifest update so clients can read it from the `main` branch.
 7. Verify the public feed and release asset metadata, then test the updater against a prior app version and a fixture where the other platforms have higher versions. Confirm no release for another platform is offered.
 8. Keep the legacy compatibility release `v0.1.16` selected as GitHub Latest so a platform-only release does not redirect old clients to a release missing their assets. After publishing, verify `/releases/latest`; if GitHub selected the new platform tag, restore the compatibility target with:
 
