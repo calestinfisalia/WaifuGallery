@@ -2,8 +2,8 @@
   "schema_version": 1,
   "platforms": {
     "windows": {
-      "version": "0.1.29",
-      "release_tag": "windows-v0.1.29"
+      "version": "0.1.30",
+      "release_tag": "windows-v0.1.30"
     },
     "linux": {
       "version": "0.1.20",
