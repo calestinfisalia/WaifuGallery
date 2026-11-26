@@ -49,6 +49,50 @@ class ImageResponse:
 
 
 class ProviderMediaTests(unittest.TestCase):
+    def test_nsfw_filter_includes_selected_rating_levels(self):
+        responses = {
+            "rating:q": [
+                {
+                    "id": 910,
+                    "file_url": "https://danbooru.donmai.us/data/questionable.jpg",
+                    "rating": "q",
+                    "tags": "1girl",
+                }
+            ],
+            "rating:e": [
+                {
+                    "id": 911,
+                    "file_url": "https://danbooru.donmai.us/data/explicit.jpg",
+                    "rating": "e",
+                    "tags": "1girl",
+                }
+            ],
+        }
+        cases = (
+            ("q_e", ["rating:q", "rating:e"], ["q", "e"]),
+            ("q", ["rating:q"], ["q"]),
+            ("e", ["rating:e"], ["e"]),
+        )
+        for rating_level, expected_requests, expected_ratings in cases:
+            with self.subTest(rating_level=rating_level):
+                catalog = BooruCatalog(nsfw_rating=rating_level)
+                requested_ratings = []
+
+                def request(_provider, _endpoint, params, _headers):
+                    rating_tag = params["tags"]
+                    requested_ratings.append(rating_tag)
+                    return responses[rating_tag]
+
+                with patch.object(catalog, "_request_provider_json", side_effect=request):
+                    posts, _has_more = catalog._search_provider(
+                        "Danbooru", "", "nsfw", 1, 10
+                    )
+
+                self.assertEqual(requested_ratings, expected_requests)
+                self.assertEqual(
+                    [post.rating for post in posts], expected_ratings
+                )
+
     def test_suggest_tags_uses_provider_prefix_and_popularity(self):
         catalog = BooruCatalog()
         payload = [

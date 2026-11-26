@@ -11,6 +11,7 @@ This folder has its own implementation and UI. It does not import the GTK/Androi
 - Rating choices for SFW, NSFW, or all results. NSFW results require enabling the option in Settings.
     - Optional tag-based gore and AI-generated post filtering, male-only tag exclusion, and custom blocked tags configured in Settings. AI filtering uses provider tags such as `ai-generated` and `ai-assisted`; untagged content may remain visible.
 - Search gallery with 50 results per page and provider filters. Changing content filters reloads the search from page 1.
+- When the default rating is **Only NSFW**, Settings → Filters → Default rating lets you include Questionable and Explicit posts together, or select either rating alone. This level is saved with the other portable preferences.
 - When the search field is not focused, **R** refreshes the active view and **Left/Right** navigate adjacent media in the detail viewer. Search keeps up to 10 recent queries locally (shown with a clock-arrow icon) and suggests only character and series tags from the selected provider (or eligible providers under All), marked with a search icon. Clicking or editing the search field shows recent queries. Suggestions appear from a persistent provider-and-prefix cache immediately while typing, then refresh in the background after a 300 ms debounce when older than 24 hours; cached suggestions remain available offline. A no-results typo suggestion is clickable and never rewrites the query automatically.
 - Clicking a search result opens an in-window detail page; scroll over the image to zoom and drag to pan. Previous/next navigation works through search results and favorites. Credits appear in the app menu while a full image or video is open.
 - Random and searched image/video posts, configurable in Settings and the main window's Media Type menu. Choose PNG Only to request PNG files; transparency depends on the individual file. Video playback uses the built-in player and requires codecs supported by Qt Multimedia.
@@ -44,7 +45,7 @@ PINs and parental policy are device-local and are intentionally excluded from en
 
 ## Encrypted user data backup
 
-Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
+Open Settings → Backup & Restore to export or import a `.wgbak` file. Before export, choose whether to include Favorites, Provider logins, Theme, and/or Settings. Settings include provider/rating and its NSFW rating level, search and content filters including the AI-generated filter, custom search terms, DoH, media filter, ambient mode, and video resolution. Parental control and Favorites lock PINs/policies, download folders, and window state are not included.
 
 The version 2 format is shared with Linux and Android, records the included sections, and uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-GCM. Version 1 backups remain importable. Set a passphrase of at least 8 characters; it cannot be recovered. Unselected sections remain unchanged when importing. Unsupported desktop themes are identified in the import summary and left unchanged. If favorites are included, choose **Add new** to keep existing favorites and add unique images, or **Replace all** to replace the favorites list. Existing provider credentials are kept; backup credentials fill accounts that are not configured yet. Included portable preferences are imported, and the current download folder is retained. The export is encrypted; credentials in Windows QSettings remain subject to the existing local storage behavior.
 Export and import use the native Windows file picker to open or save backup files, with app-styled passphrase and confirmation dialogs.
@@ -125,6 +126,14 @@ raise SystemExit(app.exec())
 The preview displays a mock 57% progress value; its disabled button cannot start a real download or installer.
 
 On Windows, the app records its own top-level window and small centered Qt widget/window show/hide events to help diagnose brief popups. The rotating log is at `%LOCALAPPDATA%\WaifuGallery\logs\window-events.log`; it includes the window class/title/bounds and for centered Qt popups their object name and parent chain. It does not record widget text, tooltips, or accessibility labels.
+
+## Windows 0.1.30 (release build prepared)
+
+- **NSFW filter:** include Questionable (Q) and Explicit (E) posts together by default, or select either rating separately in Settings → Filters → Default rating.
+- **Video player:** fix the volume slider control appearing as a square instead of a round knob.
+- **Backup and restore:** preserve the selected NSFW rating level, while existing backups default to Questionable + Explicit.
+- Windows source version: 0.1.30.
+- Release assets are built locally and have not yet been published.
 
 ## Windows 0.1.27
 

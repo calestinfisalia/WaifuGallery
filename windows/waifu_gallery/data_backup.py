@@ -145,6 +145,9 @@ def normalize_payload(payload: object) -> dict:
         raise ValueError("Backup preferences are invalid.")
     provider = settings.get("provider")
     rating = settings.get("rating")
+    nsfw_rating = _optional_string(
+        settings.get("nsfw_rating", "q_e"), "settings.nsfw_rating"
+    )
     media_filter = settings.get("media_filter")
     doh_provider = settings.get("doh_provider")
     video_height = settings.get("video_max_height")
@@ -164,6 +167,8 @@ def normalize_payload(payload: object) -> dict:
         raise ValueError("The selected provider is missing its backup credentials.")
     if rating not in {"sfw", "nsfw", "all"}:
         raise ValueError("The backup contains an unsupported rating setting.")
+    if nsfw_rating not in {"q_e", "q", "e"}:
+        raise ValueError("The backup contains an unsupported NSFW rating level.")
     if media_filter not in {"image", "video", "png", "all"}:
         raise ValueError("The backup contains an unsupported media filter.")
     if doh_provider not in _DOH_PROVIDERS:
@@ -173,6 +178,7 @@ def normalize_payload(payload: object) -> dict:
     normalized_settings = {
         "provider": provider,
         "rating": rating,
+        "nsfw_rating": nsfw_rating,
         "allow_nsfw": _boolean(settings.get("allow_nsfw"), "settings.allow_nsfw"),
         "custom_terms": _strings(settings.get("custom_terms"), "settings.custom_terms"),
         "exclude_male": _boolean(settings.get("exclude_male"), "settings.exclude_male"),
@@ -231,6 +237,7 @@ def create_payload(settings, sections: tuple[str, ...] | None = None) -> dict:
         "settings": {
             "provider": str(settings.get("search/provider", "All")) if "settings" in included else "All",
             "rating": str(settings.get("search/rating", "sfw")) if "settings" in included else "sfw",
+            "nsfw_rating": str(settings.get("search/nsfw_rating", "q_e")) if "settings" in included else "q_e",
             "allow_nsfw": allow_nsfw if "settings" in included else False,
             "custom_terms": settings.get("search/custom_terms", []) if "settings" in included else [],
             "exclude_male": bool(settings.get("search/exclude_male", True)) if "settings" in included else True,

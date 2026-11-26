@@ -85,6 +85,48 @@ class FilterRefreshTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_nsfw_rating_level_is_conditional_persisted_and_used(self):
+        settings = MemorySettings()
+        settings.values["search/allow_nsfw"] = True
+        with (
+            patch("waifu_gallery.ui.main_window.AppSettings", return_value=settings),
+            patch.object(MainWindow, "show_random"),
+            patch.object(MainWindow, "_check_for_startup_update"),
+        ):
+            window = MainWindow()
+
+        self.addCleanup(window.close)
+        window._submit = Mock()
+        window.current_query = "cat"
+        window.pages.setCurrentWidget(window.gallery_page)
+        window.open_preferences()
+        dialog = window.preferences_dialog
+        self.addCleanup(dialog.close)
+
+        filters_button = next(
+            button for button in dialog.nav_buttons if button.text() == "Filters"
+        )
+        filters_button.click()
+        default_rating = next(
+            button
+            for button in dialog.findChildren(QPushButton, "settingsSubmenuButton")
+            if button.text().strip().startswith("Default rating")
+        )
+        default_rating.click()
+
+        self.assertFalse(dialog.nsfw_rating.isVisible())
+        dialog.default_rating.setCurrentIndex(dialog.default_rating.findData("nsfw"))
+        self.assertTrue(dialog.nsfw_rating.isVisible())
+
+        dialog.nsfw_rating.setCurrentIndex(dialog.nsfw_rating.findData("q"))
+
+        self.assertEqual(settings.get("search/nsfw_rating"), "q")
+        catalog = window._submit.call_args.args[1].__self__
+        self.assertEqual(catalog.nsfw_rating, "q")
+
+        dialog.default_rating.setCurrentIndex(dialog.default_rating.findData("sfw"))
+        self.assertFalse(dialog.nsfw_rating.isVisible())
+
     def test_ai_filter_toggle_reloads_search_from_first_page(self):
         settings = MemorySettings()
         with (

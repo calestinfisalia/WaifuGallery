@@ -2206,6 +2206,7 @@ class MainWindow(QMainWindow):
             str(self.settings.get("parent/max_rating", "s")) if parent_enabled else None,
             tuple(map(str, allowed_tags)) if isinstance(allowed_tags, (list, tuple)) else (),
             self.settings.get_bool("search/filter_ai_generated", False),
+            nsfw_rating=str(self.settings.get("search/nsfw_rating", "q_e")),
         )
 
     def _parent_allows_post(self, post: ImagePost) -> bool:
@@ -2874,7 +2875,13 @@ class MainWindow(QMainWindow):
         if self.settings.get_bool("parent/enabled"):
             maximum = str(self.settings.get("parent/max_rating", "s"))
             maximum_rank = {"s": 0, "q": 1, "e": 2}.get(maximum, 0)
-            requested_rank = {"sfw": 0, "nsfw": 2, "all": 2}.get(self.selected_rating, 2)
+            nsfw_rating = str(self.settings.get("search/nsfw_rating", "q_e"))
+            nsfw_rank = 1 if nsfw_rating == "q" else 2
+            requested_rank = {
+                "sfw": 0,
+                "nsfw": nsfw_rank,
+                "all": 2,
+            }.get(self.selected_rating, 2)
             if requested_rank > maximum_rank:
                 BackupMessageDialog.notify(
                     self, "Parental control",
@@ -4481,6 +4488,7 @@ class MainWindow(QMainWindow):
             self.settings.get_bool("search/allow_nsfw"),
             self.settings.get_bool("search/filter_gore", True),
             self.settings.get_bool("search/filter_ai_generated", False),
+            str(self.settings.get("search/nsfw_rating", "q_e")),
             tuple(self.settings.get("search/custom_block_tags", []) or []),
             self.settings.get_bool("parent/enabled"),
             str(self.settings.get("parent/max_rating", "s")),

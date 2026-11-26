@@ -62,6 +62,27 @@ class VideoControlsTests(unittest.TestCase):
         self.assertEqual(buffered.name(), "#777982")
         self.assertEqual(unbuffered.name(), "#292b32")
 
+    def test_volume_slider_handle_renders_as_a_circle(self):
+        slider = self.player.volume_slider
+        slider.resize(76, 22)
+        slider.show()
+        self.app.processEvents()
+
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        handle = slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            slider,
+        )
+        image = slider.grab().toImage()
+        center = image.pixelColor(handle.center())
+        corner = image.pixelColor(handle.topLeft())
+
+        self.assertEqual(center.name(), "#bb9af7")
+        self.assertNotEqual(corner.name(), "#bb9af7")
+
     def test_fullscreen_control_bar_uses_nearly_full_viewport_width(self):
         self.player.resize(1920, 1080)
         self.player.video_canvas.resize(1920, 1080)

@@ -50,6 +50,11 @@ AI_GENERATED_BLOCK_TAGS = frozenset({
     "ai-generated", "ai_generated", "ai-assisted", "ai_assisted",
 })
 VIDEO_EXTENSIONS = frozenset({".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi"})
+NSFW_RATING_TAGS = {
+    "q_e": ("q", "e"),
+    "q": ("q",),
+    "e": ("e",),
+}
 _RANDOM_HISTORY: dict[tuple[str, str, str, str], deque[str]] = {}
 _RANDOM_HISTORY_LOCK = threading.Lock()
 _PREVIEW_HOST_FAILURES: dict[str, tuple[float, str]] = {}
@@ -227,6 +232,7 @@ class BooruCatalog:
         parent_max_rating: str | None = None,
         parent_allowed_tags: tuple[str, ...] = (),
         filter_ai_generated: bool = False,
+        nsfw_rating: str = "q_e",
     ) -> None:
         self.user_id, self.api_key = credentials
         self.rule34_user_id, self.rule34_api_key = rule34_credentials
@@ -234,6 +240,7 @@ class BooruCatalog:
         self.use_doh = use_doh
         self.filter_gore = filter_gore
         self.filter_ai_generated = filter_ai_generated
+        self.nsfw_rating = nsfw_rating if nsfw_rating in NSFW_RATING_TAGS else "q_e"
         block_tag_values = (custom_block_tags,) if isinstance(custom_block_tags, str) else custom_block_tags
         self.custom_block_tags = frozenset(
             tag.strip().casefold().replace(" ", "_")
@@ -745,9 +752,11 @@ class BooruCatalog:
         return VideoStreamProxy(self, post, source_url)
 
     def _search_provider(self, provider: str, query: str, rating: str, page: int, limit: int, random_order: bool = False):
-        # Keep Only NSFW strict: questionable (Q) posts can appear fully
-        # safe-looking, so this mode requests Explicit (E) only.
-        rating_tags = {"sfw": ("s",), "nsfw": ("e",), "all": (None,)}.get(rating)
+        rating_tags = {
+            "sfw": ("s",),
+            "nsfw": NSFW_RATING_TAGS[self.nsfw_rating],
+            "all": (None,),
+        }.get(rating)
         if rating_tags is None:
             raise ProviderError(f"Unknown rating filter: {rating}")
         if provider not in PROVIDERS:
@@ -846,7 +855,9 @@ class BooruCatalog:
                 has_more = has_more or len(raw_posts) > limit
                 for raw in raw_posts[:limit]:
                     post = self._normalize(raw, provider)
-                    if not post or not self._rating_matches(post.rating, rating):
+                    if not post or not self._rating_matches(
+                        post.rating, rating, self.nsfw_rating
+                    ):
                         continue
                     if not self._parent_policy_matches(post):
                         continue
@@ -1260,8 +1271,15 @@ class BooruCatalog:
         return set()
 
     @staticmethod
-    def _rating_matches(value: str, choice: str) -> bool:
-        return choice == "all" or (choice == "sfw" and value == "s") or (choice == "nsfw" and value == "e")
+    def _rating_matches(value: str, choice: str, nsfw_rating: str = "q_e") -> bool:
+        return (
+            choice == "all"
+            or (choice == "sfw" and value == "s")
+            or (
+                choice == "nsfw"
+                and value in NSFW_RATING_TAGS.get(nsfw_rating, NSFW_RATING_TAGS["q_e"])
+            )
+        )
 
     def _parent_policy_matches(self, post: ImagePost) -> bool:
         rating_rank = {"s": 0, "q": 1, "e": 2}

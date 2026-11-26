@@ -133,6 +133,34 @@ class BufferedVideoSlider(QSlider):
         ))
 
 
+class CircularVolumeSlider(QSlider):
+    def __init__(self, parent=None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._thumb_color = QColor("#BB9AF7")
+
+    def set_thumb_color(self, color: str) -> None:
+        self._thumb_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        if not handle.isValid():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._thumb_color)
+        painter.drawEllipse(handle)
+
+
 class VideoPlayerWidget(QWidget):
     """Video surface with a poster/play affordance and one compact control bar."""
 
@@ -282,7 +310,7 @@ class VideoPlayerWidget(QWidget):
         self.volume_button.setFixedSize(30, 30)
         self.volume_button.setIconSize(QSize(17, 17))
         self.volume_button.clicked.connect(self._toggle_mute)
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider = CircularVolumeSlider()
         self.volume_slider.setObjectName("videoVolumeSlider")
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
@@ -690,8 +718,10 @@ class VideoPlayerWidget(QWidget):
             "QSlider#videoVolumeSlider::add-page:horizontal { "
             "background: #292b32; border-radius: 2px; }"
             "QSlider#videoVolumeSlider::handle:horizontal { "
-            f"width: 14px; margin: -4px 0; border-radius: 7px; background: {self._accent_color}; }}"
+            f"width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; "
+            "background: transparent; border: 0; }"
         )
+        self.volume_slider.set_thumb_color(self._accent_color)
 
     def _update_buffer_progress(self, progress: float) -> None:
         self.position.set_buffer_progress(progress)

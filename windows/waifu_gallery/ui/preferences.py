@@ -226,6 +226,7 @@ def _settings_from_backup(
         values.update({
             "search/provider": "All" if provider == "Auto" else provider,
             "search/rating": imported["rating"],
+            "search/nsfw_rating": imported["nsfw_rating"],
             "search/allow_nsfw": imported["allow_nsfw"],
             "search/custom_terms": imported["custom_terms"],
             "search/exclude_male": imported["exclude_male"],
@@ -833,6 +834,18 @@ class PreferencesDialog(FramelessResizableDialog):
         self.default_rating.setCurrentIndex(max(0, self.default_rating.findData(rating)))
         rating_layout.addWidget(QLabel("Search results"))
         rating_layout.addWidget(self.default_rating)
+        self.nsfw_rating_label = QLabel("NSFW rating level")
+        self.nsfw_rating = QComboBox()
+        self.nsfw_rating.setObjectName("nsfwRatingLevel")
+        self.nsfw_rating.addItem("Questionable + Explicit", "q_e")
+        self.nsfw_rating.addItem("Questionable only", "q")
+        self.nsfw_rating.addItem("Explicit only", "e")
+        nsfw_rating = str(self.settings.get("search/nsfw_rating", "q_e"))
+        nsfw_rating_index = self.nsfw_rating.findData(nsfw_rating)
+        self.nsfw_rating.setCurrentIndex(max(0, nsfw_rating_index))
+        rating_layout.addWidget(self.nsfw_rating_label)
+        rating_layout.addWidget(self.nsfw_rating)
+        self._update_nsfw_rating_visibility()
         rules_section, rules_layout = self._settings_section("Content rules")
         self.exclude_male = QCheckBox("Exclude posts tagged as male-only")
         self.exclude_male.setChecked(self.settings.get_bool("search/exclude_male", True))
@@ -963,8 +976,11 @@ class PreferencesDialog(FramelessResizableDialog):
 
     def _connect_auto_save(self) -> None:
         self.provider.currentTextChanged.connect(self._provider_changed)
-        for control in (self.default_rating, self.video_resolution):
+        for control in (self.default_rating, self.nsfw_rating, self.video_resolution):
             control.currentIndexChanged.connect(self._persist_settings)
+        self.default_rating.currentIndexChanged.connect(
+            self._update_nsfw_rating_visibility
+        )
         for control in (
             self.exclude_male,
             self.allow_nsfw,
@@ -2202,6 +2218,7 @@ class PreferencesDialog(FramelessResizableDialog):
         self.settings.set_many({
             "search/provider": self.provider.currentText(),
             "search/rating": self.default_rating.currentData(),
+            "search/nsfw_rating": self.nsfw_rating.currentData(),
             "downloads/folder": self.save_folder.text(),
             "search/custom_terms": [self.terms.item(i).text() for i in range(self.terms.count())],
             "search/exclude_male": self.exclude_male.isChecked(),
@@ -2220,3 +2237,8 @@ class PreferencesDialog(FramelessResizableDialog):
             "video/max_height": self.video_resolution.currentData(),
         })
         self.settings_changed.emit()
+
+    def _update_nsfw_rating_visibility(self, *_: object) -> None:
+        visible = self.default_rating.currentData() == "nsfw"
+        self.nsfw_rating_label.setVisible(visible)
+        self.nsfw_rating.setVisible(visible)
